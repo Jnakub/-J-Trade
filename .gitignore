@@ -1,0 +1,14 @@
+# Credentials — ห้าม commit เด็ดขาด
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Logs & output
+*.log
+
+# Claude Code session metadata
+.claude/

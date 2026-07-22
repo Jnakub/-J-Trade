@@ -1,0 +1,128 @@
+"""
+backtest_score.py — เช็ค Score ณ เวลาในอดีต
+ใช้: py backtest_score.py BTCUSDm Short 2026-06-27 23:00
+"""
+import sys
+from datetime import datetime
+import MetaTrader5 as mt5
+import pandas as pd
+from dotenv import load_dotenv
+
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+from mt5_connect import connect
+from config import MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT, MIN_RR
+from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction
+from swing import find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, swing_vol_multiplier, swing_wick_ratio_min
+from vsa import check_vsa
+from binance import merge_real_volume
+from config import (
+    WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
+    WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
+    WEIGHT_RR, WEIGHT_CONFIRMATION,
+)
+
+load_dotenv()
+connect()
+
+symbol    = sys.argv[1] if len(sys.argv) > 1 else "BTCUSDm"
+direction = sys.argv[2] if len(sys.argv) > 2 else "Short"
+date_str  = sys.argv[3] if len(sys.argv) > 3 else "2026-06-27"
+time_str  = sys.argv[4] if len(sys.argv) > 4 else "23:00"
+
+snap_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+print(f"\n  Backtest  {symbol} {direction}  ณ  {snap_dt}")
+
+def get_hist(symbol, tf, dt, bars):
+    rates = mt5.copy_rates_from(symbol, tf, dt, bars)
+    if rates is None or len(rates) == 0:
+        raise RuntimeError(f"ดึงข้อมูลไม่ได้ {symbol}")
+    df = pd.DataFrame(rates)
+    df["time"] = pd.to_datetime(df["time"], unit="s")
+    return df
+
+df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 210)
+df_1d = merge_real_volume(df_1d, symbol, "1D")
+df_4h = get_hist(symbol, MT5_TIMEFRAMES["4H"], snap_dt, 100)
+df_1h = get_hist(symbol, MT5_TIMEFRAMES["1H"], snap_dt, 100)
+
+# ราคา ณ เวลานั้น = close ของแท่งล่าสุด
+entry = df_1h["close"].iloc[-1]
+print(f"  ราคา ณ เวลานั้น : {entry:.2f}")
+
+is_long  = direction.capitalize() == "Long"
+vol_mult = swing_vol_multiplier(symbol)
+wick_min = swing_wick_ratio_min(symbol)
+
+# Bias
+ema50_1d  = ema(df_1d["close"], 50).iloc[-1]
+ema200_1d = ema(df_1d["close"], 200).iloc[-1]
+bias      = "Long" if ema50_1d > ema200_1d else "Short"
+print(f"  Bias 1D : {bias}  (EMA50={ema50_1d:.0f}  EMA200={ema200_1d:.0f})")
+
+if bias != direction.capitalize():
+    print(f"  [BLOCKED] Direction ไม่ตรง Bias")
+    mt5.shutdown(); sys.exit()
+
+# Auto SL/TP
+sl_info = find_sl_from_structure(df_1d, direction, vol_multiplier=vol_mult, wick_ratio_min=wick_min)
+if not sl_info.get("passed"):
+    print(f"  [BLOCKED] หา SL ไม่ได้ — {sl_info.get('reason')}")
+    mt5.shutdown(); sys.exit()
+
+sl        = sl_info["sl"]
+swing_idx = sl_info["swing_idx"]
+fib       = find_tp_from_fibonacci(df_1d, direction, swing_idx, vol_multiplier=vol_mult, wick_ratio_min=wick_min)
+tp        = fib["levels"]["0.786"] if fib.get("passed") else entry - abs(entry - sl) * MIN_RR
+
+rr = calc_rr(entry, sl, tp, direction)
+if rr < MIN_RR:
+    print(f"  [BLOCKED] R:R = {rr:.2f} ต่ำกว่า {MIN_RR}")
+    mt5.shutdown(); sys.exit()
+
+# Indicators
+price     = entry
+ema50_4h  = ema(df_4h["close"], 50).iloc[-1]
+ema50_1h  = ema(df_1h["close"], 50).iloc[-1]
+obv_1d    = calc_obv(df_1d)
+obv_4h    = calc_obv(df_4h)
+obv_1h    = calc_obv(df_1h)
+macd_line, signal_line, macd_hist = calc_macd(df_4h)
+
+def obv_ok(obv, lookback=5):
+    return (obv.iloc[-1] > obv.iloc[-1-lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1-lookback])
+
+vsa_result  = check_vsa(df_1d, df_4h, direction)
+conf_result = check_confirmation(price, df_4h, direction, symbol)
+
+criteria = [
+    ("Trend 1D",    (price > ema50_1d) if is_long else (price < ema50_1d), WEIGHT_TREND_1D),
+    ("OBV 1D",      obv_ok(obv_1d),                                        WEIGHT_OBV_1D),
+    ("Trend 4H",    (price > ema50_4h) if is_long else (price < ema50_4h), WEIGHT_TREND_4H),
+    ("OBV 4H",      obv_ok(obv_4h),                                        WEIGHT_OBV_4H),
+    ("Trend 1H",    (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
+    ("OBV 1H",      obv_ok(obv_1h),                                        WEIGHT_OBV_1H),
+    ("MACD 4H",     macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
+    ("R:R",         rr >= MIN_RR,                                           WEIGHT_RR),
+    ("VSA",         vsa_result["vsa_ok"],                                   WEIGHT_VSA),
+    ("Confirmation",conf_result["conf_ok"],                                 WEIGHT_CONFIRMATION),
+]
+
+total  = sum(w for _, p, w in criteria if p)
+passed = total >= MIN_SCORE
+
+print(f"\n{'=' * 48}")
+print(f"  SL={sl:.0f}  TP={tp:.0f}  R:R={rr:.2f}")
+print(f"  VSA: {vsa_result['pattern']} | Conf: {conf_result['reason'][:40]}")
+print(f"{'=' * 48}")
+for name, p, w in criteria:
+    print(f"  {name:<15} {'PASS' if p else 'FAIL'}  {w if p else 0:.1f}/{w:.1f}")
+print(f"{'-' * 48}")
+print(f"  Total : {total:.1f} / {TOTAL_WEIGHT:.0f}  (min {MIN_SCORE:.0f})")
+print(f"{'=' * 48}")
+print(f"  >>> {'ENTER TRADE' if passed else 'NO ENTRY'} <<<")
+print(f"{'=' * 48}")
+
+mt5.shutdown()
