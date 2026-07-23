@@ -227,7 +227,7 @@ def _rejection_ok(df: pd.DataFrame, idx: int, atr: pd.Series) -> tuple[bool, str
 
 def find_sl_from_structure(df: pd.DataFrame,
                            direction: str,
-                           atr_buffer: float = 0.2,
+                           atr_buffer: float = 0.1,   # 2026-07-23: เปลี่ยนจาก 0.2 — ยังไม่มี backtest ยืนยัน (sample เล็กเกินไป)
                            left: int = 4,
                            right: int = 4,
                            tolerance_atr: float = 0.05,
