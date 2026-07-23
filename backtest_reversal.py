@@ -30,7 +30,7 @@ from swing import (
 from exit_monitor import is_climax_bar
 from regime_check import (
     calc_adx, adx_direction, adx_peak_info, check_structure, cluster_price_zones,
-    calc_rsi, ADX_PERIOD, ADX_CHOPPY, ADX_GRAY_HIGH, ADX_PEAK_LOOKBACK,
+    calc_rsi, check_divergence, ADX_PERIOD, ADX_CHOPPY, ADX_GRAY_HIGH, ADX_PEAK_LOOKBACK,
     SWING_LEFT_RIGHT, SWING_TOLERANCE, KEY_LEVEL_PROXIMITY, KEY_LEVEL_MIN_TOUCHES,
     DIV_MAX_AGE_BARS, DIV_ZONE_OVERBOUGHT, DIV_ZONE_OVERSOLD,
 )
@@ -99,41 +99,9 @@ else:
     key_level = {"at_key_level": False, "nearest": None, "distance_pct": None, "touches": 0, "zones": major}
 
 
-# ── ข้อ 6: Divergence (regime_check.check_divergence logic, historical) ──
-def check_divergence_hist(df):
-    rsi_series = calc_rsi(df["close"])
-    hs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
-                          tolerance_atr=SWING_TOLERANCE, vol_multiplier=0.0)
-    ls = find_swing_lows(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
-                         tolerance_atr=SWING_TOLERANCE, vol_multiplier=0.0)
-    last_idx = len(df) - 1
-    result = {"divergence": None, "detail": "", "points": []}
-
-    if len(hs) >= 2:
-        h1, h2 = hs[-2], hs[-1]
-        fresh   = (last_idx - h2) <= DIV_MAX_AGE_BARS
-        zone_ok = rsi_series.iloc[h1] >= DIV_ZONE_OVERBOUGHT
-        if fresh and zone_ok and df["high"].iloc[h2] > df["high"].iloc[h1] and rsi_series.iloc[h2] < rsi_series.iloc[h1]:
-            result["divergence"] = "bearish"
-            result["detail"] = (f"ราคา HH ({df['high'].iloc[h1]:,.2f} -> {df['high'].iloc[h2]:,.2f}) "
-                                f"แต่ RSI LH ({rsi_series.iloc[h1]:.1f} -> {rsi_series.iloc[h2]:.1f})")
-            return result
-
-    if len(ls) >= 2:
-        l1, l2 = ls[-2], ls[-1]
-        fresh   = (last_idx - l2) <= DIV_MAX_AGE_BARS
-        zone_ok = rsi_series.iloc[l1] <= DIV_ZONE_OVERSOLD
-        if fresh and zone_ok and df["low"].iloc[l2] < df["low"].iloc[l1] and rsi_series.iloc[l2] > rsi_series.iloc[l1]:
-            result["divergence"] = "bullish"
-            result["detail"] = (f"ราคา LL ({df['low'].iloc[l1]:,.2f} -> {df['low'].iloc[l2]:,.2f}) "
-                                f"แต่ RSI HL ({rsi_series.iloc[l1]:.1f} -> {rsi_series.iloc[l2]:.1f})")
-            return result
-
-    result["detail"] = f"ไม่พบ divergence (สดภายใน {DIV_MAX_AGE_BARS} แท่ง)"
-    return result
-
-
-divergence = check_divergence_hist(df_4h)
+# ── ข้อ 6: Divergence — เรียก regime_check.check_divergence ตัวจริงตรงๆ (symbol-aware
+#    volume filter: เปิดเฉพาะ BTC, ปิดสำหรับ XAU — ดู comment ใน regime_check.py) ──
+divergence = check_divergence(df_4h, symbol=symbol)
 
 # ── สรุป Regime เหมือน classify_regime ──
 if adx_now < ADX_CHOPPY:

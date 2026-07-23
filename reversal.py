@@ -108,7 +108,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     at_key = bool(key_level.get("at_key_level"))
 
     # ── ข้อ 2: Divergence RSI ──
-    divergence = check_divergence(df_4h)
+    divergence = check_divergence(df_4h, symbol=symbol)
     div_dir    = divergence.get("divergence")
     div_ok     = (div_dir == "bullish") if is_long else (div_dir == "bearish")
 
