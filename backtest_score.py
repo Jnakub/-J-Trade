@@ -75,7 +75,7 @@ if not sl_info.get("passed"):
 sl        = sl_info["sl"]
 swing_idx = sl_info["swing_idx"]
 fib       = find_tp_from_fibonacci(df_1d, direction, swing_idx, vol_multiplier=vol_mult, wick_ratio_min=wick_min)
-tp        = fib["levels"]["0.786"] if fib.get("passed") else entry - abs(entry - sl) * MIN_RR
+tp        = fib["levels"]["0.886"] if fib.get("passed") else entry - abs(entry - sl) * MIN_RR   # ตรงกับ scoring.py ปัจจุบัน (2026-07-23)
 
 rr = calc_rr(entry, sl, tp, direction)
 if rr < MIN_RR:

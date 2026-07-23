@@ -493,7 +493,7 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
         return {"passed": False, "reason": "Move ต้องมากกว่า 0"}
 
     levels = {}
-    for ratio in [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.272, 1.618]:
+    for ratio in [0, 0.236, 0.382, 0.5, 0.618, 0.786, 0.886, 1.0, 1.272, 1.618]:
         levels[str(ratio)] = round(origin + sign * move * ratio, 5)
 
     return {
