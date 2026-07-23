@@ -466,6 +466,8 @@ def get_regime(symbol: str) -> dict:
         "adx_now": adx_now, "adx_direction": direction, "peak": peak, "adx_swings": adx_swings,
         "structure": structure, "key_level": key_level, "divergence": divergence,
         "closed_idx": closed_idx,
+        "df_4h": df_4h,   # real volume, BARS แท่ง, ยังไม่ตัดแท่งฟอร์มมิ่ง — reuse ต่อได้เลย
+                         # (เช่น reversal.compute_reversal_score) กันดึง+merge real volume ซ้ำ
     }
 
 

@@ -112,7 +112,8 @@ def scan_symbol(symbol: str) -> None:
             direction = "Long" if div_polarity == "bullish" else "Short"
             print(f"  [{symbol}] เปิด Reversal — Divergence={div_polarity} -> เข้าเป็น {direction}  Entry={entry:.5f}")
             score, criteria, passed, info = reversal.compute_reversal_score(
-                symbol, direction, entry, key_level=regime_info["key_level"])
+                symbol, direction, entry, key_level=regime_info["key_level"],
+                df_4h=regime_info["df_4h"])
             sl, tp = info["sl"], info["tp"]
             rr = info["rr"]
             score_total = reversal.TOTAL_WEIGHT

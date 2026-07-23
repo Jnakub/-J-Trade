@@ -68,14 +68,18 @@ GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
 
 def compute_reversal_score(symbol: str, direction: str, entry: float,
                            sl: float = None, tp: float = None,
-                           force: bool = False, key_level: dict = None) -> tuple[float, list, bool, dict]:
+                           force: bool = False, key_level: dict = None,
+                           df_4h: pd.DataFrame = None) -> tuple[float, list, bool, dict]:
     """Return (total_score, criteria_list, passed, info).
     ถ้าไม่ส่ง sl/tp จะหาจาก swing structure/Fibonacci อัตโนมัติ (เกณฑ์เดียวกับ scoring.py)
     key_level: ส่งผลลัพธ์ check_key_level ที่ regime_check.get_regime() คำนวณไว้แล้วมาใช้ซ้ำได้
-    (ราคาปิดแท่ง 4H เดียวกับที่ปลดล็อก REVERSAL-READY) — ถ้าไม่ส่งมา จะคำนวณใหม่ด้วย `entry` เอง"""
+    (ราคาปิดแท่ง 4H เดียวกับที่ปลดล็อก REVERSAL-READY) — ถ้าไม่ส่งมา จะคำนวณใหม่ด้วย `entry` เอง
+    df_4h: ส่ง get_regime()["df_4h"] มาใช้ซ้ำได้ (real volume, BARS แท่ง, ยังไม่ตัดแท่งฟอร์มมิ่ง)
+    กันดึง+merge real volume จาก Bitstamp ซ้ำสองรอบต่อรอบสแกน — ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม"""
     is_long = direction.capitalize() == "Long"
 
-    df_4h = get_ohlcv_real(symbol, "4H", bars=210)
+    if df_4h is None:
+        df_4h = get_ohlcv_real(symbol, "4H", bars=210)
     df_4h = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)   # ตัดแท่งยังไม่ปิด
     vol_multiplier = swing_vol_multiplier(symbol)
     wick_ratio_min = swing_wick_ratio_min(symbol)
