@@ -103,7 +103,8 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
         fib_info  = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.25,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
-            tp = fib_info["levels"]["0.886"]   # 2026-07-23: เปลี่ยนจาก 0.786 — ยังไม่มี backtest ยืนยัน
+            tp = fib_info["levels"]["0.786"]   # 2026-07-23: กลับมาใช้ 0.786 (ดู scoring.py — backtest
+                                              # sample เล็กพบว่า 0.886 เสี่ยง near-miss กลับตัวก่อนถึงเป้ามากกว่า)
         else:
             tp = (entry + abs(entry - sl) * MIN_RR_REVERSAL) if is_long else (entry - abs(entry - sl) * MIN_RR_REVERSAL)
 

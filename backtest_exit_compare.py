@@ -78,7 +78,7 @@ def score_entry(symbol, snap_dt):
     sl        = sl_info["sl"]
     swing_idx = sl_info["swing_idx"]
     fib       = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.25)
-    tp        = fib["levels"]["0.886"] if fib.get("passed") else (   # ตรงกับ scoring.py/reversal.py ปัจจุบัน (2026-07-23)
+    tp        = fib["levels"]["0.786"] if fib.get("passed") else (   # ตรงกับ scoring.py/reversal.py ปัจจุบัน (2026-07-23)
         entry + abs(entry - sl) * MIN_RR if is_long else entry - abs(entry - sl) * MIN_RR
     )
 

@@ -159,7 +159,9 @@ def compute_score(symbol: str, direction: str, entry: float,
         fib_info  = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.25,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
-            tp = fib_info["levels"]["0.886"]   # 2026-07-23: เปลี่ยนจาก 0.786 — ยังไม่มี backtest ยืนยัน
+            tp = fib_info["levels"]["0.786"]   # 2026-07-23: กลับมาใช้ 0.786 — backtest เทียบ (แม้ sample เล็ก n=1) พบ
+                                              # เคสจริงที่ 0.886 ทำให้ไม้ near-miss (ห่าง TP แค่ 0.47%) กลับตัวจนโดน SL
+                                              # ขณะที่ 0.786 ทันได้ TP ก่อน — TP ไกลขึ้นเสี่ยง reversal ก่อนถึงเป้ามากขึ้น
         else:
             tp = (entry + abs(entry - sl) * MIN_RR) if is_long else (entry - abs(entry - sl) * MIN_RR)
 
@@ -285,7 +287,7 @@ def main() -> None:
             print(f"\n  TP (Fibonacci)  จุด 0 = {fib['origin']}  Move = {fib['move']}")
             print(f"  TP1 (0.382)  : {fib['tp1']}")
             print(f"  TP2 (0.618)  : {fib['tp2']}")
-            print(f"  TP (0.886)   : {fib['levels']['0.886']}  ← ใช้เป็น TP หลัก")
+            print(f"  TP (0.786)   : {fib['levels']['0.786']}  ← ใช้เป็น TP หลัก")
             print(f"  TP3 (1.000)  : {fib['tp3']}")
             print(f"  TP4 (1.618)  : {fib['tp4']}")
         else:
