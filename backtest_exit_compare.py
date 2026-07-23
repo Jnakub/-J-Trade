@@ -72,12 +72,12 @@ def score_entry(symbol, snap_dt):
     direction = "Long" if ema50_1d > ema200_1d else "Short"
     is_long   = direction == "Long"
 
-    sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.05)
+    sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.25)
     if not sl_info.get("passed"):
         return None
     sl        = sl_info["sl"]
     swing_idx = sl_info["swing_idx"]
-    fib       = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.05)
+    fib       = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.25)
     tp        = fib["levels"]["0.886"] if fib.get("passed") else (   # ตรงกับ scoring.py/reversal.py ปัจจุบัน (2026-07-23)
         entry + abs(entry - sl) * MIN_RR if is_long else entry - abs(entry - sl) * MIN_RR
     )
@@ -323,8 +323,8 @@ def main():
 
     atr_series  = calc_atr(big_1h, ATR_PERIOD)
     adx_series  = calc_adx(big_1h, ADX_PERIOD)
-    swing_lows  = find_swing_lows(big_1h,  left=STRUCT_LR, right=STRUCT_LR, tolerance_atr=0.05)
-    swing_highs = find_swing_highs(big_1h, left=STRUCT_LR, right=STRUCT_LR, tolerance_atr=0.05)
+    swing_lows  = find_swing_lows(big_1h,  left=STRUCT_LR, right=STRUCT_LR, tolerance_atr=0.25)
+    swing_highs = find_swing_highs(big_1h, left=STRUCT_LR, right=STRUCT_LR, tolerance_atr=0.25)
 
     trades = []
     last_entry_bar_idx = -10_000

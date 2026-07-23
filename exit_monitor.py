@@ -34,7 +34,7 @@ import journal
 AUTO_EXECUTE = True   # False = แค่แนะนำเหมือนเดิม, True = สั่งจริงตามผลลัพธ์ (เฉพาะบัญชี DEMO)
 
 STRUCTURE_LEFT_RIGHT  = 4
-STRUCTURE_TOLERANCE   = 0.05
+STRUCTURE_TOLERANCE   = 0.25   # 2026-07-23: เปลี่ยนจาก 0.05 — ยังไม่มี backtest ยืนยัน
 SLOW_TRADE_DAYS       = 3
 SLOW_TRADE_R          = 0.5
 

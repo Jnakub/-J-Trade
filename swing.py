@@ -230,7 +230,7 @@ def find_sl_from_structure(df: pd.DataFrame,
                            atr_buffer: float = 0.1,   # 2026-07-23: เปลี่ยนจาก 0.2 — ยังไม่มี backtest ยืนยัน (sample เล็กเกินไป)
                            left: int = 4,
                            right: int = 4,
-                           tolerance_atr: float = 0.05,
+                           tolerance_atr: float = 0.25,   # 2026-07-23: เปลี่ยนจาก 0.05 — ยังไม่มี backtest ยืนยัน
                            vol_multiplier: float = 1.9,
                            wick_ratio_min: float | None = None) -> dict:
     """
@@ -294,7 +294,7 @@ def find_sl_from_structure(df: pd.DataFrame,
 def check_confirmation(current_price: float, df: pd.DataFrame,
                        direction: str, symbol: str,
                        left: int = 4, right: int = 4,
-                       tolerance_atr: float = 0.05) -> dict:
+                       tolerance_atr: float = 0.25) -> dict:
     """
     Short: ราคาปัจจุบัน < Swing Low ล่าสุด (4H) = support แตก
     Long:  ราคาปัจจุบัน > Swing High ล่าสุด (4H) = resistance แตก
@@ -435,7 +435,7 @@ def calc_fibonacci_levels(swing_high: float, swing_low: float,
 def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
                            sl_swing_idx: int = None,
                            left: int = 4, right: int = 4,
-                           tolerance_atr: float = 0.05,
+                           tolerance_atr: float = 0.25,
                            vol_multiplier: float = 1.9,
                            wick_ratio_min: float | None = None) -> dict:
     """

@@ -70,7 +70,7 @@ ADX_SWING_LEFT_RIGHT  = 14
 ADX_SWING_PROMINENCE  = 3.0
 
 SWING_LEFT_RIGHT = 4
-SWING_TOLERANCE  = 0.05
+SWING_TOLERANCE  = 0.25   # 2026-07-23: เปลี่ยนจาก 0.05 — ยังไม่มี backtest ยืนยัน
 
 # Key Level — โซนแนวรับ/แนวต้านใหญ่ (รวม Swing High+Low เป็นโซนเดียวกัน — support เก่ากลายเป็น resistance ใหม่ได้)
 # ค่าจาก backtest จริง (BTC/XAU, วัดว่าราคาที่แตะโซน 'เด้งจริง' กี่ % ใน 6 แท่งถัดไป):
