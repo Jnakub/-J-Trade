@@ -48,7 +48,11 @@ ADX_PERIOD       = 20     # ทดสอบลดเป็น 14 แล้ว (2
                           # เพิ่มมาก (BTC +32%, XAU +75% transitions) ขณะที่กลไก peak-decline ของ
                           # Reversal แทบไม่เร็วขึ้นเลย (~0 แท่งเฉลี่ย) เลย revert กลับเป็น 20 ตามเดิม
 ADX_CHOPPY       = 20     # ต่ำกว่านี้ = CHOPPY ห้ามเทรด
-ADX_GRAY_HIGH    = 25     # 20-25 = เขตเทา รอ ADX เลือกทาง
+ADX_GRAY_HIGH    = 22     # 20-22 = เขตเทา รอ ADX เลือกทาง (ปรับจาก 25 — 2026-07-22 หลัง backtest
+                          # เทียบ 20/22/25/28/30 บน BTCUSDm 96 วัน: 22 เปิด scorecard ได้ 31.2%
+                          # ของเวลา vs 25 เดิมที่ 23.4% โดย REVERSAL-READY แทบไม่เปลี่ยน (คอขวดจริง
+                          # คือ Key Level+Divergence ไม่ใช่ ADX) — ยังไม่มี full win-rate backtest
+                          # ยืนยัน แค่ยืนยันว่าเปิดโอกาสได้บ่อยขึ้น
 ADX_REVERSAL     = 40     # peak ต้อง >= 40 ถึงเข้าเกณฑ์ Reversal
 
 # ค่าจาก backtest 400 แท่ง 1D (BTC/XAU):
