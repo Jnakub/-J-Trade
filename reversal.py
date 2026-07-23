@@ -53,7 +53,10 @@ TOTAL_WEIGHT       = (WEIGHT_KEY_LEVEL + WEIGHT_DIVERGENCE + WEIGHT_RSI_EXTREME 
                       WEIGHT_VSA_CLIMAX + WEIGHT_ADX_DECLINE + WEIGHT_RR)   # = 10
 
 MIN_SCORE_REVERSAL = 7
-MIN_RR_REVERSAL    = 2.0
+MIN_RR_REVERSAL    = 2.0   # เกณฑ์ "R:R ดีจริง" ในสกอร์การ์ด + สูตร fallback TP (ยังใช้ 2.0 เหมือนเดิม)
+MIN_RR_HARD_BLOCK  = 1.0   # 2026-07-23: เกณฑ์ขั้นต่ำสุดที่บล็อกได้ไม่ว่าคะแนนรวมเท่าไหร่
+                          # (แยกจาก MIN_RR_REVERSAL แล้ว — เดิมใช้ค่าเดียวกันทำให้ hard block
+                          # กับคะแนนสกอร์การ์ดซ้ำซ้อนกัน ผ่าน hard block ก็ได้คะแนนข้อนี้เสมอ)
 RSI_OVERBOUGHT     = 70
 RSI_OVERSOLD       = 30
 
@@ -150,9 +153,10 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
         "adx_peak": peak,
     }
 
-    # Hard block: R:R ต้องผ่านก่อนเสมอ — ไม่สนคะแนนรวม (Reversal เสี่ยงกว่า ไม่ยอมผ่อน)
-    if rr < MIN_RR_REVERSAL - 1e-9 and not force:
-        raise ValueError(f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_REVERSAL} — ห้ามเข้า trade")
+    # Hard block: กันแค่ไม่ให้เสี่ยงมากกว่าได้ (R:R < 1) — ไม่สนคะแนนรวม
+    # ส่วน "R:R ดีจริง" (>= MIN_RR_REVERSAL) ยังต้องผ่านสกอร์การ์ดแยกต่างหากด้านล่าง
+    if rr < MIN_RR_HARD_BLOCK - 1e-9 and not force:
+        raise ValueError(f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_HARD_BLOCK} — ห้ามเข้า trade")
 
     total  = sum(w for _, passed, w in criteria if passed)
     passed = total >= MIN_SCORE_REVERSAL
