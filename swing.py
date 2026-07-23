@@ -234,25 +234,45 @@ def find_sl_from_structure(df: pd.DataFrame,
                            vol_multiplier: float = 1.9,
                            wick_ratio_min: float | None = None) -> dict:
     """
-    หา SL อัตโนมัติจาก Swing High/Low **ล่าสุดสุด** ตรงๆ (ตัด rejection/structure filter
-    ออกแล้ว 2026-07-21 — เดิมเช็ค wick/volume rejection + Lower High/Higher Low ก่อนเลือก
-    ทำให้บางครั้ง SL อ้างอิงคนละ swing point กับ TP/Structure/Confirmation ที่ใช้จุดล่าสุด
-    ตรงๆ อยู่แล้วเสมอ — ตอนนี้ใช้กฎเดียวกันหมดทั้ง 6 จุดที่แตะ swing: เอาจุดล่าสุดสุด)
+    หา SL อัตโนมัติจาก Swing High/Low **ล่าสุดสุดที่ยังอยู่ถูกฝั่งราคาปัจจุบัน** (ตัด
+    rejection/structure filter ออกแล้ว 2026-07-21 — เดิมเช็ค wick/volume rejection +
+    Lower High/Higher Low ก่อนเลือก ทำให้บางครั้ง SL อ้างอิงคนละ swing point กับ
+    TP/Structure/Confirmation ที่ใช้จุดล่าสุดตรงๆ อยู่แล้วเสมอ — ตอนนี้ใช้กฎเดียวกันหมด
+    ทั้ง 6 จุดที่แตะ swing: เอาจุดล่าสุดสุด)
     Volume (หรือ wick_ratio_min OR-logic สำหรับ XAU) ยังกรองอยู่ใน find_swing_highs/lows เอง
+
+    เช็คฝั่งราคา (เพิ่ม 2026-07-23): swing point ที่ "ยืนยันแล้ว" ล่าสุดอาจเป็นจุดเก่าที่ราคา
+    วิ่งทะลุไปแล้วก่อนจะยืนยันจุดใหม่ทัน (ต้องรอ right แท่งขวาก่อนยืนยัน) ถ้าเอามาทำ SL ตรงๆ
+    จะได้ SL ที่อยู่ผิดฝั่ง (Short: ต่ำกว่าราคา, Long: สูงกว่าราคา) หรือใกล้ราคาเกินจริงจน R:R
+    เพี้ยน (พบจริงจาก backtest — R:R พุ่งถึง 66 เท่าเพราะ risk แคบผิดธรรมชาติ) ตอนนี้ค้นย้อน
+    หลังหาจุดล่าสุดที่ยังอยู่ถูกฝั่งราคาจริง แทนที่จะหยิบจุดล่าสุดสุดมาตรงๆ โดยไม่เช็ค
     """
-    is_short    = direction.capitalize() == "Short"
-    atr         = calc_atr(df)
-    swing_highs = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,
-                                   vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
-    swing_lows  = find_swing_lows(df,  left=left, right=right, tolerance_atr=tolerance_atr,
-                                  vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
+    is_short      = direction.capitalize() == "Short"
+    atr           = calc_atr(df)
+    current_price = df["close"].iloc[-1]
+    swing_highs   = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,
+                                     vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
+    swing_lows    = find_swing_lows(df,  left=left, right=right, tolerance_atr=tolerance_atr,
+                                    vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
     swing_highs, swing_lows = collapse_swing_runs(swing_highs, swing_lows, df)
 
     swings = swing_highs if is_short else swing_lows
     if not swings:
         return {"passed": False, "reason": "ไม่พบ Swing ในข้อมูล"}
 
-    idx         = swings[-1]
+    idx = None
+    for candidate in reversed(swings):
+        price = df["high"].iloc[candidate] if is_short else df["low"].iloc[candidate]
+        if (is_short and price > current_price) or (not is_short and price < current_price):
+            idx = candidate
+            break
+
+    if idx is None:
+        side = "เหนือ" if is_short else "ใต้"
+        return {"passed": False,
+                "reason": f"ราคาทะลุ Swing {'High' if is_short else 'Low'} ที่ยืนยันแล้วทั้งหมดไปแล้ว "
+                         f"(ไม่มีจุดไหนอยู่{side}ราคาปัจจุบัน) — รอจุดใหม่ยืนยันก่อน"}
+
     atr_val     = atr.iloc[idx]
     swing_price = df["high"].iloc[idx] if is_short else df["low"].iloc[idx]
     sl          = swing_price + atr_val * atr_buffer if is_short else swing_price - atr_val * atr_buffer
