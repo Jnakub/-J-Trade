@@ -93,6 +93,14 @@ DIV_MAX_AGE_BARS = 10
 DIV_ZONE_OVERBOUGHT = 55
 DIV_ZONE_OVERSOLD   = 45
 
+# Soft divergence (OR-logic) — เพิ่มเข้ามา 2026-07-23: นอกจาก RSI Lower High/Higher Low
+# เป๊ะ (strict) ยังนับเป็น divergence ได้ถ้า RSI "แทบไม่ขยับตามราคา" (stall) คือขึ้น/ลง
+# ไม่เกิน DIV_STALL_THRESHOLD แต้มในทิศตรงข้ามกับที่ควรจะเป็น — backtest เบื้องต้นบน BTC
+# 4H (จำลองเทรดจริง TP/SL แบบ Reversal, sample เล็กมากแค่ 3-6 เคส) พบว่า stall=5 ให้
+# win rate รวม 50% (3/6) ดีกว่า strict อย่างเดียว (33%, 1/3) — ยังไม่มี full backtest
+# ยืนยันหนักแน่น (sample เล็กเกินจะฟันธง) ปรับได้ถ้ามีข้อมูลเพิ่มแล้วผลต่าง
+DIV_STALL_THRESHOLD = 5
+
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
 )
@@ -307,17 +315,27 @@ def calc_rsi(series: pd.Series, period: int = DIV_RSI_PERIOD) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
-def check_divergence(df: pd.DataFrame) -> dict:
+def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     """ข้อ 6 — Divergence (RSI(14), 4H): ราคาทำ new extreme แต่ RSI ไม่ทำตาม
     Bearish: ราคา Higher High แต่ RSI Lower High  (ระวังฝั่งขึ้นอ่อนแรง)
     Bullish: ราคา Lower Low  แต่ RSI Higher Low   (ระวังฝั่งลงอ่อนแรง)
-    เทียบ swing ราคา 2 จุดล่าสุด (ไม่กรอง volume) + จุดใหม่ต้องยืนยันภายใน DIV_MAX_AGE_BARS แท่ง
-    + จุดแรกต้องเคยอยู่โซน overbought/oversold จริง (นิยาม divergence คลาสสิก, ยืนยันด้วย backtest)"""
+    เทียบ swing ราคา 2 จุดล่าสุด + จุดใหม่ต้องยืนยันภายใน DIV_MAX_AGE_BARS แท่ง
+    + จุดแรกต้องเคยอยู่โซน overbought/oversold จริง (นิยาม divergence คลาสสิก, ยืนยันด้วย backtest)
+
+    Volume filter: เปิดเฉพาะ BTC (มี real volume จาก Bitstamp เชื่อถือได้ — 2026-07-23)
+    XAU ยังปิดไว้เหมือนเดิม (ทดสอบแล้วกรอง volume ตรวจ divergence ไม่เจอเลย 0% — ดู
+    swing_wick_ratio_min) — ไม่ส่ง symbol มา (None) จะ fallback ปิด volume filter เหมือนเดิมทุกกรณี
+
+    Soft divergence (OR-logic): เปิดเฉพาะ BTC เช่นกัน (backtest ทดสอบแค่ BTC เท่านั้น —
+    ดู DIV_STALL_THRESHOLD) — นอกจาก RSI Lower High/Higher Low เป๊ะ (strict) ยังนับเป็น
+    divergence ได้ถ้า RSI แทบไม่ขยับตามราคา (ไม่เกิน DIV_STALL_THRESHOLD แต้มในทิศตรงข้าม)"""
+    is_btc = bool(symbol) and "XAU" not in symbol.upper() and "GOLD" not in symbol.upper()
+    vol_multiplier = swing_vol_multiplier(symbol) if is_btc else 0.0
     rsi = calc_rsi(df["close"])
     highs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
-                             tolerance_atr=SWING_TOLERANCE, vol_multiplier=0.0)
+                             tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier)
     lows  = find_swing_lows(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
-                            tolerance_atr=SWING_TOLERANCE, vol_multiplier=0.0)
+                            tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier)
     last_idx = len(df) - 1
 
     result = {"divergence": None, "detail": "", "points": []}
@@ -326,10 +344,15 @@ def check_divergence(df: pd.DataFrame) -> dict:
         h1, h2 = highs[-2], highs[-1]
         fresh   = (last_idx - h2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[h1] >= DIV_ZONE_OVERBOUGHT
-        if fresh and zone_ok and df["high"].iloc[h2] > df["high"].iloc[h1] and rsi.iloc[h2] < rsi.iloc[h1]:
+        price_hh = df["high"].iloc[h2] > df["high"].iloc[h1]
+        rsi_diff = rsi.iloc[h2] - rsi.iloc[h1]
+        strict_lh = rsi_diff < 0
+        soft_stall = is_btc and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
+        if fresh and zone_ok and price_hh and (strict_lh or soft_stall):
             result["divergence"] = "bearish"
+            kind = "LH" if strict_lh else "แทบไม่ขึ้น (stall)"
             result["detail"] = (f"ราคา HH ({df['high'].iloc[h1]:,.2f} -> {df['high'].iloc[h2]:,.2f}) "
-                                f"แต่ RSI LH ({rsi.iloc[h1]:.1f} -> {rsi.iloc[h2]:.1f})")
+                                f"แต่ RSI {kind} ({rsi.iloc[h1]:.1f} -> {rsi.iloc[h2]:.1f})")
             result["points"] = [(df["time"].iloc[h1], df["high"].iloc[h1], rsi.iloc[h1]),
                                 (df["time"].iloc[h2], df["high"].iloc[h2], rsi.iloc[h2])]
             return result
@@ -338,10 +361,15 @@ def check_divergence(df: pd.DataFrame) -> dict:
         l1, l2 = lows[-2], lows[-1]
         fresh   = (last_idx - l2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[l1] <= DIV_ZONE_OVERSOLD
-        if fresh and zone_ok and df["low"].iloc[l2] < df["low"].iloc[l1] and rsi.iloc[l2] > rsi.iloc[l1]:
+        price_ll = df["low"].iloc[l2] < df["low"].iloc[l1]
+        rsi_diff = rsi.iloc[l1] - rsi.iloc[l2]
+        strict_hl = rsi_diff < 0
+        soft_stall = is_btc and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
+        if fresh and zone_ok and price_ll and (strict_hl or soft_stall):
             result["divergence"] = "bullish"
+            kind = "HL" if strict_hl else "แทบไม่ลง (stall)"
             result["detail"] = (f"ราคา LL ({df['low'].iloc[l1]:,.2f} -> {df['low'].iloc[l2]:,.2f}) "
-                                f"แต่ RSI HL ({rsi.iloc[l1]:.1f} -> {rsi.iloc[l2]:.1f})")
+                                f"แต่ RSI {kind} ({rsi.iloc[l1]:.1f} -> {rsi.iloc[l2]:.1f})")
             result["points"] = [(df["time"].iloc[l1], df["low"].iloc[l1], rsi.iloc[l1]),
                                 (df["time"].iloc[l2], df["low"].iloc[l2], rsi.iloc[l2])]
             return result
@@ -425,7 +453,10 @@ def get_regime(symbol: str) -> dict:
                                 wick_ratio_min=swing_wick_ratio_min(symbol))
     current_price = df_4h["close"].iloc[len(df_4h) - 2]   # ราคาปิดแท่ง 4H ล่าสุด
     key_level  = check_key_level(symbol, current_price, df=df_4h_full)
-    divergence = check_divergence(df.iloc[:len(df) - 1].reset_index(drop=True))   # ตัดแท่งยังไม่ปิด
+    # ใช้ df_4h (real volume) ไม่ใช่ df เดิม (tick_volume) — จำเป็นตั้งแต่เปิด volume filter
+    # สำหรับ BTC divergence (2026-07-23) ไม่งั้น tick_volume ไม่ผ่านเกณฑ์ 1.9x เกือบตลอด
+    # ทำให้หา swing high/low ไม่เจอเลย divergence เลยไม่มีทางเกิดขึ้นได้จริง
+    divergence = check_divergence(df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True), symbol=symbol)   # ตัดแท่งยังไม่ปิด
 
     regime, action, color = classify_regime(adx_now, direction, peak, structure,
                                             key_level=key_level, divergence=divergence)
