@@ -120,16 +120,28 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     div_dir    = divergence.get("divergence")
     div_ok     = (div_dir == "bullish") if is_long else (div_dir == "bearish")
 
-    # ── ข้อ 3: RSI extreme ──
-    rsi_now  = calc_rsi(df_4h["close"]).iloc[-1]
-    rsi_ok   = (rsi_now <= RSI_OVERSOLD) if is_long else (rsi_now >= RSI_OVERBOUGHT)
+    # ── ข้อ 3: RSI extreme — เช็คที่จุด swing ของ divergence (h2/l2) แทนตอนนี้ (2026-07-23)
+    #    เหตุผล: กว่า ADX จะโค้งลงยืนยันครบ + เงื่อนไขอื่นจะครบพร้อมกัน RSI มักอ่อนตัวจากจุด
+    #    สุดขั้วไปแล้วหลายแท่ง (พบจริงจาก backtest — เคสหนึ่งห่างกันถึง 8 แท่ง) เช็คตอนนี้เลย
+    #    มักพลาดสัญญาณที่จริงๆ สุดขั้วมาก่อนหน้านี้แล้ว ไม่ใช่แค่ "หน้าต่างเวลาแคบไป" (ลอง
+    #    ขยายหน้าต่างเช็คย้อนหลัง 3-5 แท่งแล้วไม่ช่วยเลยใน backtest — ต้องเช็คที่จุดจริง)
+    rsi_series    = calc_rsi(df_4h["close"])
+    div_swing_idx = divergence.get("swing_idx")
+    rsi_ref_idx   = div_swing_idx if div_swing_idx is not None else len(df_4h) - 1
+    rsi_now       = rsi_series.iloc[rsi_ref_idx]
+    rsi_ok        = (rsi_now <= RSI_OVERSOLD) if is_long else (rsi_now >= RSI_OVERBOUGHT)
 
-    # ── ข้อ 4: VSA Climax (Selling Climax=Long, Buying Climax=Short) ──
-    climax, climax_pattern = is_climax_bar(df_4h, len(df_4h) - 1)
-    climax_ok = climax and (
-        (is_long and climax_pattern == "Selling Climax") or
-        (not is_long and climax_pattern == "Buying Climax")
-    )
+    # ── ข้อ 4: VSA Climax (Selling Climax=Long, Buying Climax=Short) — เช็คตั้งแต่จุด
+    #    swing ของ divergence จนถึงตอนนี้ (ไม่ใช่แค่แท่งปัจจุบันเป๊ะ) เหตุผลเดียวกับข้อ 3
+    climax_start_idx = div_swing_idx if div_swing_idx is not None else len(df_4h) - 1
+    climax_ok = False
+    climax_pattern = None
+    for k in range(climax_start_idx, len(df_4h)):
+        c, pat = is_climax_bar(df_4h, k)
+        if c and ((is_long and pat == "Selling Climax") or (not is_long and pat == "Buying Climax")):
+            climax_ok, climax_pattern = True, pat
+            break
+    climax = climax_ok
 
     # ── ข้อ 6: ADX peak แล้วเริ่มลงจริง (relative — ไม่ใช้ threshold 40 ตายตัว) ──
     df_adx     = get_ohlcv(symbol, REGIME_TIMEFRAME, bars=210)

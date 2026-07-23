@@ -338,7 +338,7 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
                             tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier)
     last_idx = len(df) - 1
 
-    result = {"divergence": None, "detail": "", "points": []}
+    result = {"divergence": None, "detail": "", "points": [], "swing_idx": None}
 
     if len(highs) >= 2:
         h1, h2 = highs[-2], highs[-1]
@@ -355,6 +355,7 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
                                 f"แต่ RSI {kind} ({rsi.iloc[h1]:.1f} -> {rsi.iloc[h2]:.1f})")
             result["points"] = [(df["time"].iloc[h1], df["high"].iloc[h1], rsi.iloc[h1]),
                                 (df["time"].iloc[h2], df["high"].iloc[h2], rsi.iloc[h2])]
+            result["swing_idx"] = h2
             return result
 
     if len(lows) >= 2:
@@ -372,6 +373,7 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
                                 f"แต่ RSI {kind} ({rsi.iloc[l1]:.1f} -> {rsi.iloc[l2]:.1f})")
             result["points"] = [(df["time"].iloc[l1], df["low"].iloc[l1], rsi.iloc[l1]),
                                 (df["time"].iloc[l2], df["low"].iloc[l2], rsi.iloc[l2])]
+            result["swing_idx"] = l2
             return result
 
     result["detail"] = "ไม่พบ divergence (สดภายใน {} แท่ง)".format(DIV_MAX_AGE_BARS)
