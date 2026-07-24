@@ -81,8 +81,9 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     เลยใช้ tick_volume ของโบรกเกอร์เป็น proxy ซึ่งเชื่อถือได้น้อยกว่า BTC ที่มี real volume
     จาก Bitstamp — wick ratio (สัดส่วนไส้เทียนต่อ range ทั้งแท่ง) เป็นสัญญาณอิสระจาก volume
     ที่ช่วยกู้ swing point จริงที่ tick_volume มองไม่เห็น (ยืนยันด้วย backtest 400 แท่ง:
-    vol=1.6x เท่านั้น เจอ lows แค่ 9 จุด, เพิ่ม wick>=0.4 OR เข้าไปเจอเพิ่มเป็น 19 จุด)"""
-    return 0.4 if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else None
+    vol=1.6x เท่านั้น เจอ lows แค่ 9 จุด, เพิ่ม wick>=0.4 OR เข้าไปเจอเพิ่มเป็น 19 จุด)
+    2026-07-24: ปรับเป็น 0.5 — เข้มขึ้นจาก 0.4 เดิม ยังไม่มี backtest ยืนยันค่าใหม่นี้โดยตรง"""
+    return 0.5 if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else None
 
 
 def has_high_volume(df: pd.DataFrame, idx: int,
