@@ -13,7 +13,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from mt5_connect import connect
-from config import MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT, MIN_RR
+from config import MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT, MIN_RR, MIN_RR_HARD_BLOCK
 from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction
 from swing import find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, swing_vol_multiplier, swing_wick_ratio_min
 from vsa import check_vsa
@@ -78,8 +78,8 @@ fib       = find_tp_from_fibonacci(df_1d, direction, swing_idx, vol_multiplier=v
 tp        = fib["levels"]["0.786"] if fib.get("passed") else entry - abs(entry - sl) * MIN_RR   # ตรงกับ scoring.py ปัจจุบัน (2026-07-23)
 
 rr = calc_rr(entry, sl, tp, direction)
-if rr < MIN_RR:
-    print(f"  [BLOCKED] R:R = {rr:.2f} ต่ำกว่า {MIN_RR}")
+if rr < MIN_RR_HARD_BLOCK:
+    print(f"  [BLOCKED] R:R = {rr:.2f} ต่ำกว่า {MIN_RR_HARD_BLOCK}")
     mt5.shutdown(); sys.exit()
 
 # Indicators

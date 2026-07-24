@@ -13,7 +13,7 @@ from config import (
     WEIGHT_TREND_4H, WEIGHT_OBV_4H,
     WEIGHT_TREND_1H, WEIGHT_OBV_1H,
     WEIGHT_VSA, WEIGHT_MACD, WEIGHT_RR, WEIGHT_CONFIRMATION,
-    TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_SCORE,
+    TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MIN_SCORE,
 )
 from mt5_connect import connect
 from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirmation,
@@ -202,10 +202,11 @@ def compute_score(symbol: str, direction: str, entry: float,
     sl_info["vsa_result"]   = vsa_result
     sl_info["conf_result"]  = conf_result
 
-    # Hard block: R:R ต้องผ่านก่อนเสมอ — ไม่สนคะแนนรวม
-    if rr < MIN_RR - 1e-9 and not force:
+    # Hard block: กันแค่ไม่ให้เสี่ยงมากกว่าได้ (R:R < 1) — ไม่สนคะแนนรวม
+    # ส่วน "R:R ดีจริง" (>= MIN_RR) ยังต้องผ่านสกอร์การ์ดแยกต่างหากด้านบน (WEIGHT_RR)
+    if rr < MIN_RR_HARD_BLOCK - 1e-9 and not force:
         raise ValueError(
-            f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR}  — ห้ามเข้า trade"
+            f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_HARD_BLOCK}  — ห้ามเข้า trade"
         )
 
     total  = sum(w for _, passed, w in criteria if passed)

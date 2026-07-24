@@ -17,7 +17,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from mt5_connect import connect
 from config import (
-    MT5_TIMEFRAMES, MIN_SCORE, MIN_RR,
+    MT5_TIMEFRAMES, MIN_SCORE, MIN_RR, MIN_RR_HARD_BLOCK,
     WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
     WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
     WEIGHT_RR, WEIGHT_CONFIRMATION,
@@ -83,7 +83,7 @@ def score_entry(symbol, snap_dt):
     )
 
     rr = calc_rr(entry, sl, tp, direction)
-    if rr < MIN_RR - 1e-9:
+    if rr < MIN_RR_HARD_BLOCK - 1e-9:
         return None
 
     ema50_4h = ema(df_4h["close"], 50).iloc[-1]
