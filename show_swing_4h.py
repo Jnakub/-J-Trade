@@ -29,8 +29,8 @@ connect()
 df = get_ohlcv(SYMBOL, MT5_TIMEFRAMES["4H"], bars=200)
 df = merge_real_volume(df, SYMBOL, "4H")
 
-swing_highs = find_swing_highs(df, left=4, right=4, tolerance_atr=0.25)
-swing_lows  = find_swing_lows(df, left=4, right=4, tolerance_atr=0.25)
+swing_highs = find_swing_highs(df, left=4, right=4, tolerance_atr=0.22)
+swing_lows  = find_swing_lows(df, left=4, right=4, tolerance_atr=0.22)
 
 
 def fmt_time(t) -> str:

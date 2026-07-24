@@ -173,7 +173,7 @@ else:
 # ── รัน Reversal scorecard ด้วยข้อมูล historical เดียวกัน (mirror ของ reversal.compute_reversal_score) ──
 is_long = direction == "Long"
 
-sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.25,
+sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
                                  vol_multiplier=vol_mult, wick_ratio_min=wick_min)
 if not sl_info.get("passed"):
     print(f"\n  {RED}[BLOCKED]{RESET} หา SL ไม่ได้ — {sl_info.get('reason')}")
@@ -182,7 +182,7 @@ if not sl_info.get("passed"):
 sl = sl_info["sl"]
 
 fib_info = find_tp_from_fibonacci(df_4h, direction, sl_info.get("swing_idx"), left=4, right=4,
-                                  tolerance_atr=0.25, vol_multiplier=vol_mult, wick_ratio_min=wick_min)
+                                  tolerance_atr=0.22, vol_multiplier=vol_mult, wick_ratio_min=wick_min)
 if fib_info.get("passed"):
     tp = fib_info["levels"]["0.786"]   # ตรงกับ reversal.py ปัจจุบัน (2026-07-23 กลับมาใช้ 0.786)
 else:

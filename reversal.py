@@ -90,7 +90,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     # หา SL อัตโนมัติจาก swing structure (4H) ถ้าไม่ได้กรอกมา — เกณฑ์เดียวกับ scoring.py
     sl_info = {}
     if sl is None:
-        sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.25,
+        sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
                                          vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if not sl_info.get("passed"):
             raise ValueError(f"หา SL ไม่ได้ — {sl_info.get('reason', 'unknown')}")
@@ -100,7 +100,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     fib_info = {}
     if tp is None:
         swing_idx = sl_info.get("swing_idx")
-        fib_info  = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.25,
+        fib_info  = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
             tp = fib_info["levels"]["0.786"]   # 2026-07-23: กลับมาใช้ 0.786 (ดู scoring.py — backtest
