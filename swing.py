@@ -69,8 +69,9 @@ def has_rejection(df: pd.DataFrame, idx: int, atr: pd.Series,
 
 def swing_vol_multiplier(symbol: str) -> float:
     """เกณฑ์ volume ของ swing ตาม symbol — จุดเดียวทั้งระบบ ห้าม hardcode ซ้ำที่อื่น
-    XAU/Gold 1.6x (volume ทองแรงน้อยกว่า), อื่นๆ 1.9x"""
-    return 1.6 if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else 1.9
+    XAU/Gold 1.5x (volume ทองแรงน้อยกว่า — ปรับจาก 1.6 เมื่อ 2026-07-24 ยังไม่มี backtest
+    ยืนยันค่าใหม่นี้โดยตรง), อื่นๆ 1.9x"""
+    return 1.5 if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else 1.9
 
 
 def swing_wick_ratio_min(symbol: str) -> float | None:
