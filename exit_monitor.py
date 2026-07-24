@@ -76,6 +76,14 @@ TRAIL_TIMEFRAME  = MT5_TIMEFRAMES["1H"]
 TRAIL_ATR_PERIOD = 14
 TRAIL_BARS       = 500   # ~20 วันบน 1H — ต้องครอบคลุมเวลาที่ถือ position
 
+# TP Trailing (2026-07-23) — เริ่มขยับ TP เข้ามาเมื่อราคาใกล้ TP เดิมมากพอ กันเคส "เกือบถึง
+# TP แล้วราคากลับตัวจนโดน SL" (ไม้เต็มกำไรกลายเป็นขาดทุน) — ใช้ pinned anchor = TP ตอนเปิดไม้
+# จริง (ไม่ใช่ pos.tp ปัจจุบันที่อาจถูกขยับไปแล้ว) + ATR(1H) ล่าสุด แบบเดียวกับ SL Trailing
+# กันบั๊ก "TP หดตามราคาที่ถอยกลับ" เพราะสูตรนี้ไม่ได้อ้างอิงราคาปัจจุบัน/peak เลย มีแค่
+# TP เดิม (คงที่) กับ ATR สด — ratchet ทางเดียวเทียบกับ TP ปัจจุบันที่ broker เท่านั้น
+TRAIL_TP_TRIGGER_PCT = 1.0   # เริ่ม trail เมื่อห่างจาก TP เดิมไม่เกิน 1%
+TRAIL_TP_ATR_BUFFER  = 0.5   # ATR(1H) × 0.5
+
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
 )
@@ -505,12 +513,28 @@ def analyze_position(pos) -> dict:
     else:
         desired_sl = entry if ge1r else None   # คำนวณสูตรไม่ได้ -> ใช้กติกาเดิม (breakeven เมื่อ >=1R)
 
+    # ── TP ที่ควรตั้งรอบนี้ — เริ่ม trail เมื่อใกล้ TP เดิม <= TRAIL_TP_TRIGGER_PCT ──
+    desired_tp = None
+    if (not invalidated and dist_tp_pct is not None and dist_tp_pct <= TRAIL_TP_TRIGGER_PCT
+            and trail is not None and tp):
+        original_tp = journal.get_original_tp(pos.ticket)
+        if original_tp is None:
+            original_tp = tp   # ไม้เก่าก่อนมีฟีเจอร์นี้ — fallback ใช้ TP ปัจจุบันแทน
+        atr_latest_1h = trail["atr_latest"]
+        if direction == "Long":
+            candidate_tp = original_tp - atr_latest_1h * TRAIL_TP_ATR_BUFFER
+            desired_tp = min(candidate_tp, tp)   # ratchet ทางเดียว — แคบลงเรื่อยๆ เท่านั้น
+        else:
+            candidate_tp = original_tp + atr_latest_1h * TRAIL_TP_ATR_BUFFER
+            desired_tp = max(candidate_tp, tp)
+
     return {
         "now": now, "time_held_days": time_held_days,
         "symbol": symbol, "ticket": pos.ticket, "direction": direction,
         "entry": entry, "sl": sl, "tp": tp, "lot": lot,
         "trail": trail, "initial_sl": initial_sl,
         "trailing_sl": trailing_sl, "desired_sl": desired_sl,
+        "desired_tp": desired_tp,
         "entry_time": entry_time, "current_price": current_price,
         "extreme": extreme, "atr": atr_now, "rsi": rsi_now,
         "bb_upper": bb_up_now, "bb_lower": bb_lo_now,
@@ -557,6 +581,9 @@ def print_report(m: dict):
     if m["desired_sl"] is not None:
         desired_str = f"{m['desired_sl']:,.3f}"
         print(f"  SL ที่จะตั้ง     : {_c(desired_str)}")
+    if m["desired_tp"] is not None:
+        desired_tp_str = f"{m['desired_tp']:,.3f}"
+        print(f"  TP ที่จะตั้ง (Trailing, ห่างเดิม <={TRAIL_TP_TRIGGER_PCT}%) : {_c(desired_tp_str)}")
     cp_str = f"{m['current_price']:,.3f}"
     print(f"  Current Price   : {_b(cp_str)}")
     print(f"  Extreme Price   : {m['extreme']:,.3f}  (สุดตั้งแต่เข้า)")
@@ -660,6 +687,7 @@ def execute_decision(m: dict) -> None:
     lot     = m["lot"]
     entry   = m["entry"]
     sl      = m["sl"]
+    tp      = m["tp"]
     keep_pct = m["recommended_keep_pct"]
 
     try:
@@ -682,6 +710,12 @@ def execute_decision(m: dict) -> None:
         if desired_sl is not None and (not sl or abs(desired_sl - sl) >= 1e-3):
             modify_sltp(ticket, new_sl=desired_sl)
             print(f"  {CYAN}[AUTO] ขยับ SL #{ticket} -> {desired_sl:,.3f} (ATR Trailing){RESET}")
+
+        # 4) ขยับ TP ตาม TP Trailing (เริ่มเมื่อใกล้ TP เดิม <= TRAIL_TP_TRIGGER_PCT)
+        desired_tp = m["desired_tp"]
+        if desired_tp is not None and (not tp or abs(desired_tp - tp) >= 1e-3):
+            modify_sltp(ticket, new_tp=desired_tp)
+            print(f"  {CYAN}[AUTO] ขยับ TP #{ticket} -> {desired_tp:,.3f} (TP Trailing){RESET}")
 
     except Exception as exc:
         print(f"  {RED}[AUTO] ERROR ticket #{ticket} — {exc}{RESET}")

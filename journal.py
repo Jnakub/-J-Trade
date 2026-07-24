@@ -86,6 +86,21 @@ def get_pinned_anchor(ticket: int) -> tuple:
     return float(swing), float(atr_entry)
 
 
+def get_original_tp(ticket: int) -> float | None:
+    """คืน TP ตอนเปิดไม้จริง (คอลัมน์ 'tp' ที่ log ไว้ตอน log_trade_open) — ใช้เป็น pinned
+    anchor ของ TP Trailing ใน exit_monitor.py (ต้องเป็นค่าดั้งเดิม ไม่ใช่ pos.tp ปัจจุบันที่
+    อาจถูกขยับไปแล้วจากรอบก่อนหน้า) คืน None ถ้าไม่พบ"""
+    df = _load()
+    mask = df["ticket"] == str(ticket)
+    if not mask.any():
+        return None
+    row = df.loc[mask].iloc[-1]
+    tp = row.get("tp", "")
+    if tp == "" or pd.isna(tp):
+        return None
+    return float(tp)
+
+
 # ---------------------------------------------------------------------------
 # Close
 # ---------------------------------------------------------------------------
