@@ -106,6 +106,18 @@ DIV_ZONE_OVERSOLD   = 45
 # ยืนยันหนักแน่น (sample เล็กเกินจะฟันธง) ปรับได้ถ้ามีข้อมูลเพิ่มแล้วผลต่าง
 DIV_STALL_THRESHOLD = 5
 
+# Min spacing / max lookback (2026-07-25) — swing point ที่ผ่านเกณฑ์อาจอยู่ติดกันเกินไป
+# (window หา swing overlap กัน) โดยเฉพาะ XAU ที่เพิ่งเปิด volume OR wick ratio: backtest
+# สำรวจ (ไม่ใช่ optimize) เจอคู่ห่าง <=2-3 แท่ง ~8-13% ของ XAU, BTC แทบไม่เจอ (0-4.8%)
+# DIV_MIN_SPACING_BARS: จุดที่เอามาเทียบ divergence ต้องห่างกันอย่างน้อยเท่านี้ ถ้าไม่พอ
+# ให้ถอยหาจุดก่อนหน้าแทน (ไม่ข้ามไปเลย กันเสียโอกาสตรวจ divergence)
+# DIV_MAX_LOOKBACK_BARS: เพดานถอยหาย้อนหลัง (~1 เดือนบน 4H = 30 วัน x 6 แท่ง/วัน) กันถอยไกล
+# จนจุดเทียบไม่มีความหมาย (คนละ "รอบ" ตลาดไปแล้ว)
+# ทั้งสองค่านี้เป็นค่าเริ่มต้นจากการคุยกัน ยังไม่ได้ backtest หา win rate จริง — TODO: optimize
+# ทีหลังเมื่อมีข้อมูลเทรดจริงมากพอ
+DIV_MIN_SPACING_BARS  = 5
+DIV_MAX_LOOKBACK_BARS = 180
+
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
 )
@@ -320,6 +332,21 @@ def calc_rsi(series: pd.Series, period: int = DIV_RSI_PERIOD) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
+def _find_spacing_partner(points: list[int]) -> int | None:
+    """หาจุดก่อนหน้า (h1) ที่ห่างจากจุดล่าสุด (points[-1]) อย่างน้อย DIV_MIN_SPACING_BARS แท่ง
+    ถอยย้อนจาก points[-2] ไปเรื่อยๆ จนเจอ หรือเกิน DIV_MAX_LOOKBACK_BARS ก็เลิกหา (คืน None)"""
+    if len(points) < 2:
+        return None
+    last = points[-1]
+    for cand in reversed(points[:-1]):
+        gap = last - cand
+        if gap > DIV_MAX_LOOKBACK_BARS:
+            break
+        if gap >= DIV_MIN_SPACING_BARS:
+            return cand
+    return None
+
+
 def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     """ข้อ 6 — Divergence (RSI(14), 4H): ราคาทำ new extreme แต่ RSI ไม่ทำตาม
     Bearish: ราคา Higher High แต่ RSI Lower High  (ระวังฝั่งขึ้นอ่อนแรง)
@@ -327,32 +354,45 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     เทียบ swing ราคา 2 จุดล่าสุด + จุดใหม่ต้องยืนยันภายใน DIV_MAX_AGE_BARS แท่ง
     + จุดแรกต้องเคยอยู่โซน overbought/oversold จริง (นิยาม divergence คลาสสิก, ยืนยันด้วย backtest)
 
-    Volume filter: เปิดเฉพาะ BTC (มี real volume จาก Bitstamp เชื่อถือได้ — 2026-07-23)
-    XAU ยังปิดไว้เหมือนเดิม (ทดสอบแล้วกรอง volume ตรวจ divergence ไม่เจอเลย 0% — ดู
-    swing_wick_ratio_min) — ไม่ส่ง symbol มา (None) จะ fallback ปิด volume filter เหมือนเดิมทุกกรณี
+    Volume filter: BTC ใช้ volume อย่างเดียว (มี real volume จาก Bitstamp เชื่อถือได้ — 2026-07-23)
+    XAU ใช้ volume OR wick ratio (2026-07-25) — เดิมเคยปิด volume filter ไปเลยเพราะทดสอบแล้ว
+    กรอง volume แบบ AND เดี่ยวๆ ตรวจ divergence ไม่เจอเลย 0% แต่นั่นคือก่อนมี wick_ratio_min
+    OR-logic (ดู check_structure) พอเปลี่ยนมาเป็น volume OR wick ratio เหมือน check_structure/
+    check_key_level แล้วปัญหาเดิมไม่เกิดซ้ำ (wick ช่วยกู้จุดที่ volume คนเดียวมองไม่เห็น)
+    ไม่ส่ง symbol มา (None) จะ fallback ปิด volume filter เหมือนเดิมทุกกรณี
 
-    Soft divergence (OR-logic): เปิดเฉพาะ BTC เช่นกัน (backtest ทดสอบแค่ BTC เท่านั้น —
-    ดู DIV_STALL_THRESHOLD) — นอกจาก RSI Lower High/Higher Low เป๊ะ (strict) ยังนับเป็น
-    divergence ได้ถ้า RSI แทบไม่ขยับตามราคา (ไม่เกิน DIV_STALL_THRESHOLD แต้มในทิศตรงข้าม)"""
+    Soft divergence (OR-logic): เปิดทั้ง BTC และ XAU (2026-07-25) — เดิมเปิดเฉพาะ BTC เพราะ
+    backtest แรกสุดทดสอบแค่ BTC (sample เล็กมาก 3-6 เคส) ตอนนี้ backtest แยกของ XAU เองแล้ว
+    (scratch_stall_backtest_xau.py, ~500 วัน 4H, threshold=5 win rate 80% จาก 20 เคส — สูงสุด
+    ในบรรดา threshold ที่ลอง 3/5/7/10 และตรงกับค่า DIV_STALL_THRESHOLD ของ BTC พอดี) — sample
+    ยังเล็ก ไม่ได้ผ่าน reversal scorecard filter เต็มรูปแบบ ควร optimize/ยืนยันซ้ำทีหลัง
+    นอกจาก RSI Lower High/Higher Low เป๊ะ (strict) ยังนับเป็น divergence ได้ถ้า RSI แทบไม่ขยับ
+    ตามราคา (ไม่เกิน DIV_STALL_THRESHOLD แต้มในทิศตรงข้าม)"""
     is_btc = bool(symbol) and "XAU" not in symbol.upper() and "GOLD" not in symbol.upper()
-    vol_multiplier = swing_vol_multiplier(symbol) if is_btc else 0.0
+    # XAU ใช้ volume OR wick ratio เหมือน check_structure/check_key_level (2026-07-25) —
+    # BTC ยังคงได้ vol_multiplier=1.9x, wick_ratio_min=None เหมือนเดิมทุกกรณี (ไม่แตะ path เดิม)
+    vol_multiplier = swing_vol_multiplier(symbol) if symbol else 0.0
+    wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and not is_btc) else None
     rsi = calc_rsi(df["close"])
     highs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
-                             tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier)
+                             tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,
+                             wick_ratio_min=wick_ratio_min)
     lows  = find_swing_lows(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
-                            tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier)
+                            tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,
+                            wick_ratio_min=wick_ratio_min)
     last_idx = len(df) - 1
 
     result = {"divergence": None, "detail": "", "points": [], "swing_idx": None}
 
-    if len(highs) >= 2:
-        h1, h2 = highs[-2], highs[-1]
+    h1 = _find_spacing_partner(highs)
+    if h1 is not None:
+        h2 = highs[-1]
         fresh   = (last_idx - h2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[h1] >= DIV_ZONE_OVERBOUGHT
         price_hh = df["high"].iloc[h2] > df["high"].iloc[h1]
         rsi_diff = rsi.iloc[h2] - rsi.iloc[h1]
         strict_lh = rsi_diff < 0
-        soft_stall = is_btc and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
+        soft_stall = bool(symbol) and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
         if fresh and zone_ok and price_hh and (strict_lh or soft_stall):
             result["divergence"] = "bearish"
             kind = "LH" if strict_lh else "แทบไม่ขึ้น (stall)"
@@ -363,14 +403,15 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
             result["swing_idx"] = h2
             return result
 
-    if len(lows) >= 2:
-        l1, l2 = lows[-2], lows[-1]
+    l1 = _find_spacing_partner(lows)
+    if l1 is not None:
+        l2 = lows[-1]
         fresh   = (last_idx - l2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[l1] <= DIV_ZONE_OVERSOLD
         price_ll = df["low"].iloc[l2] < df["low"].iloc[l1]
         rsi_diff = rsi.iloc[l1] - rsi.iloc[l2]
         strict_hl = rsi_diff < 0
-        soft_stall = is_btc and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
+        soft_stall = bool(symbol) and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
         if fresh and zone_ok and price_ll and (strict_hl or soft_stall):
             result["divergence"] = "bullish"
             kind = "HL" if strict_hl else "แทบไม่ลง (stall)"
