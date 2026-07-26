@@ -426,6 +426,74 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     return result
 
 
+def check_hidden_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
+    """Hidden Divergence (2026-07-25) — คนละแบบกับ check_divergence (Regular): สัญญาณ "ไปต่อ"
+    (continuation) ไม่ใช่ "กลับตัว" — ฟังก์ชันนี้แยกเดี่ยวๆ ไม่ถูกเรียกจากที่ไหนใน production
+    เลย (classify_regime/get_regime ไม่แตะ) มีไว้เทส/backtest ก่อนตัดสินใจเอาไปใช้จริง
+
+    Hidden Bearish: ราคา Lower High แต่ RSI Higher High (ขาลงแค่เด้งพัก มีโอกาสไปต่อลง)
+    Hidden Bullish: ราคา Higher Low แต่ RSI Lower Low   (ขาขึ้นแค่ย่อพัก มีโอกาสไปต่อขึ้น)
+
+    ใช้ swing detection ชุดเดียวกับ check_divergence (volume/wick ratio ตาม symbol,
+    min spacing + max lookback ผ่าน _find_spacing_partner) แต่ไม่บังคับ zone_ok (เคย
+    overbought/oversold) เพราะนิยาม Hidden ไม่ได้อิงกับจุดสุดขั้วของ RSI แบบ Regular —
+    เป็นการตัดสินใจออกแบบเบื้องต้น (ตรงข้ามกับ Regular ที่มี backtest รองรับ zone requirement)
+
+    ผล backtest (2026-07-25, ~500 วัน 4H, จำลอง SL/TP แบบ Reversal เดินหน้า 180 แท่ง):
+        BTC  11 เคส -> win rate 30.0% (3/10 resolved)   <- แย่มาก ไม่ควรใช้
+        XAU  43 เคส -> win rate 55.8% (24/43)
+    แม่นน้อยกว่า Regular divergence ชัดเจนทั้งคู่ (เทียบ XAU soft_stall ที่ได้ 80%) จึง
+    **ยังไม่เอาไปต่อกับ scorecard ไหน** ถ้าจะใช้ควรจำกัดเฉพาะ XAU และปรับปรุงก่อน (เช่น
+    ลองใส่ zone_ok กลับเข้าไป หรือใช้ SL/TP แบบ trend-following แทน reversal เพราะ Hidden
+    เป็นสัญญาณไปต่อ ไม่ใช่กลับตัว — backtest นี้ใช้ SL/TP แบบ Reversal ซึ่งอาจไม่เหมาะ)"""
+    is_btc = bool(symbol) and "XAU" not in symbol.upper() and "GOLD" not in symbol.upper()
+    vol_multiplier = swing_vol_multiplier(symbol) if symbol else 0.0
+    wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and not is_btc) else None
+    rsi = calc_rsi(df["close"])
+    highs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
+                             tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,
+                             wick_ratio_min=wick_ratio_min)
+    lows  = find_swing_lows(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
+                            tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,
+                            wick_ratio_min=wick_ratio_min)
+    last_idx = len(df) - 1
+
+    result = {"divergence": None, "detail": "", "points": [], "swing_idx": None}
+
+    h1 = _find_spacing_partner(highs)
+    if h1 is not None:
+        h2 = highs[-1]
+        fresh    = (last_idx - h2) <= DIV_MAX_AGE_BARS
+        price_lh = df["high"].iloc[h2] < df["high"].iloc[h1]
+        rsi_hh   = rsi.iloc[h2] > rsi.iloc[h1]
+        if fresh and price_lh and rsi_hh:
+            result["divergence"] = "hidden_bearish"
+            result["detail"] = (f"ราคา LH ({df['high'].iloc[h1]:,.2f} -> {df['high'].iloc[h2]:,.2f}) "
+                                f"แต่ RSI HH ({rsi.iloc[h1]:.1f} -> {rsi.iloc[h2]:.1f})")
+            result["points"] = [(df["time"].iloc[h1], df["high"].iloc[h1], rsi.iloc[h1]),
+                                (df["time"].iloc[h2], df["high"].iloc[h2], rsi.iloc[h2])]
+            result["swing_idx"] = h2
+            return result
+
+    l1 = _find_spacing_partner(lows)
+    if l1 is not None:
+        l2 = lows[-1]
+        fresh    = (last_idx - l2) <= DIV_MAX_AGE_BARS
+        price_hl = df["low"].iloc[l2] > df["low"].iloc[l1]
+        rsi_ll   = rsi.iloc[l2] < rsi.iloc[l1]
+        if fresh and price_hl and rsi_ll:
+            result["divergence"] = "hidden_bullish"
+            result["detail"] = (f"ราคา HL ({df['low'].iloc[l1]:,.2f} -> {df['low'].iloc[l2]:,.2f}) "
+                                f"แต่ RSI LL ({rsi.iloc[l1]:.1f} -> {rsi.iloc[l2]:.1f})")
+            result["points"] = [(df["time"].iloc[l1], df["low"].iloc[l1], rsi.iloc[l1]),
+                                (df["time"].iloc[l2], df["low"].iloc[l2], rsi.iloc[l2])]
+            result["swing_idx"] = l2
+            return result
+
+    result["detail"] = "ไม่พบ hidden divergence (สดภายใน {} แท่ง)".format(DIV_MAX_AGE_BARS)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # สรุป Regime
 # ---------------------------------------------------------------------------

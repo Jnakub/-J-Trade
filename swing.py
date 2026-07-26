@@ -441,19 +441,31 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
                            vol_multiplier: float = 1.9,
                            wick_ratio_min: float | None = None) -> dict:
     """
-    หา TP อัตโนมัติจาก Fibonacci Extension
+    หา TP อัตโนมัติจาก Fibonacci Extension — ใช้ swing 3 จุดสลับกัน (X -> A -> B)
+    วัด "ขนาด impulse เดิม" จากช่วง X->A แล้วฉายต่อจาก B ไปในทิศที่เทรด
 
-    Short:
-        A    = Swing High (SL swing)
-        B    = Swing Low ล่าสุดหลัง A
-        Move = A - B
-        TP   = B - Move × ratio  (ฉายต่ำกว่า B)
+    Short:  (ทั้ง 3 จุดหาเองจาก swing ที่ผ่าน volume/wick filter — ดูหมายเหตุ sl_swing_idx)
+        B    = Swing High ล่าสุดสุด           <- จุดฉาย (origin)
+        A    = Swing Low  ล่าสุดก่อน B
+        X    = Swing High ล่าสุดก่อน A        <- ต้นทาง impulse ลง
+        Move = X - A                          (ขนาด impulse ลงรอบก่อน)
+        TP   = B - Move × ratio               (ฉายต่ำกว่า B)
 
     Long:
-        A    = Swing Low (SL swing)
-        B    = Swing High ล่าสุดหลัง A
-        Move = B - A
-        TP   = B + Move × ratio  (ฉายสูงกว่า B)
+        B    = Swing Low  ล่าสุดสุด           <- จุดฉาย (origin)
+        A    = Swing High ล่าสุดก่อน B
+        X    = Swing Low  ล่าสุดก่อน A        <- ต้นทาง impulse ขึ้น
+        Move = A - X                          (ขนาด impulse ขึ้นรอบก่อน)
+        TP   = B + Move × ratio               (ฉายสูงกว่า B)
+
+    ไม่ผ่าน (passed=False) เมื่อหา 3 จุดนี้ไม่ครบ หรือ Move <= 0
+
+    หมายเหตุ sl_swing_idx: **รับมาแต่ยังไม่ได้ใช้** (2026-07-25) — ผู้เรียกส่ง swing_idx ที่ SL ใช้
+    มาโดยตั้งใจให้ TP ยึดจุดเดียวกับ SL แต่โค้ดหา B เองจาก swing ล่าสุดสุดเสมอ ผลคือบางครั้ง
+    SL/TP อ้างอิงคนละจุด: find_sl_from_structure จงใจข้ามจุดที่ราคาทะลุไปแล้ว (เช็คฝั่งราคา
+    ตั้งแต่ 2026-07-23) ส่วนที่นี่ไม่เช็ค — วัดจริงบนหน้าต่าง 200 แท่ง: BTC ยึดคนละจุด 24.3%
+    (ห่างเฉลี่ย 92 แท่ง), XAU 11.9% (ห่างเฉลี่ย 51 แท่ง) ยังไม่แก้เพราะต้อง backtest ก่อนว่า
+    การบังคับให้ยึดจุดเดียวกันให้ผลดีกว่าจริงไหม
     """
     is_short    = direction.capitalize() == "Short"
     swing_highs = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,

@@ -20,7 +20,7 @@ from config import (
     MT5_TIMEFRAMES, MIN_SCORE, MIN_RR, MIN_RR_HARD_BLOCK,
     WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
     WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
-    WEIGHT_RR, WEIGHT_CONFIRMATION,
+    WEIGHT_RR,
 )
 from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction
 from swing import (
@@ -97,7 +97,6 @@ def score_entry(symbol, snap_dt):
         return (obv.iloc[-1] > obv.iloc[-1 - lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1 - lookback])
 
     vsa_result  = check_vsa(df_1d, df_4h, direction)
-    conf_result = check_confirmation(entry, df_4h, direction, symbol)
 
     criteria = [
         (WEIGHT_TREND_1D,     (entry > ema50_1d) if is_long else (entry < ema50_1d)),
@@ -109,7 +108,7 @@ def score_entry(symbol, snap_dt):
         (WEIGHT_MACD,         macd_ok_for_direction(macd_line, signal_line, macd_hist, direction)),
         (WEIGHT_RR,           rr >= MIN_RR - 1e-9),
         (WEIGHT_VSA,          vsa_result["vsa_ok"]),
-        (WEIGHT_CONFIRMATION, conf_result["conf_ok"]),
+        # Confirmation ถูกตัดออกจาก scorecard 2026-07-26 (ดู config.py)
     ]
     total = sum(w for w, p in criteria if p)
     if total < MIN_SCORE:

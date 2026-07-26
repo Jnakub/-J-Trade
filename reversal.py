@@ -98,6 +98,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
 
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
+    used_fallback_tp = False   # TP มาจากสูตร fallback (ไม่ใช่ Fibonacci) — ดูเกณฑ์ R:R ด้านล่าง
     if tp is None:
         swing_idx = sl_info.get("swing_idx")
         fib_info  = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.22,
@@ -106,6 +107,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
             tp = fib_info["levels"]["0.786"]   # 2026-07-23: กลับมาใช้ 0.786 (ดู scoring.py — backtest
                                               # sample เล็กพบว่า 0.886 เสี่ยง near-miss กลับตัวก่อนถึงเป้ามากกว่า)
         else:
+            used_fallback_tp = True
             tp = (entry + abs(entry - sl) * MIN_RR_REVERSAL) if is_long else (entry - abs(entry - sl) * MIN_RR_REVERSAL)
 
     rr = calc_rr(entry, sl, tp, direction)
@@ -155,7 +157,10 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
         ("RSI extreme", rsi_ok,    WEIGHT_RSI_EXTREME),
         ("VSA Climax",  climax_ok, WEIGHT_VSA_CLIMAX),
         ("ADX peak+decline", adx_ok, WEIGHT_ADX_DECLINE),
-        ("R:R",         rr >= MIN_RR_REVERSAL - 1e-9, WEIGHT_RR),
+        # 2026-07-26: ไม่ให้แต้มถ้า TP มาจากสูตร fallback — เหตุผลเดียวกับ scoring.py เป๊ะ
+        # (สูตร fallback อิง MIN_RR_REVERSAL เอง ทำให้ rr == MIN_RR_REVERSAL เสมอ = แต้มฟรี)
+        # TP ที่กรอกเองมายังได้แต้มตามปกติ
+        ("R:R",         (not used_fallback_tp) and rr >= MIN_RR_REVERSAL - 1e-9, WEIGHT_RR),
     ]
 
     info = {

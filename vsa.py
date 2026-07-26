@@ -123,12 +123,31 @@ def detect_vsa_pattern(color: str, vol: str, spread: str,
 
 def check_vsa(df_1d: pd.DataFrame, df_4h: pd.DataFrame, direction: str) -> dict:
     """
-    Step 1 (Context)  — ดูจาก 1D: Trend + Price Position (10 แท่งหลัง)
-    Step 2 (Pattern)  — ดูจาก 4H: แท่งปิดล่าสุด
+    VSA สำหรับ **เส้นทาง Scoring (trend-following) เท่านั้น** — เส้นทาง Reversal ใช้
+    is_climax_bar (exit_monitor.py) คนละตัวกัน ฟังก์ชันนี้ไม่ถูกเรียกจาก reversal.py เลย
+
+    Step 1 (Context) — ดูจาก 1D: Price Position (10 แท่งหลัง)  [คำนวณไว้อ้างอิง ไม่ใช้ gate แล้ว]
+    Step 2 (Pattern) — ดูจาก 4H: แท่งปิดล่าสุด                  [ตัวตัดสิน vsa_ok]
+
+    2026-07-25 — แก้ 2 จุด (ยังไม่มี backtest ยืนยันผลลัพธ์ ควรวัดซ้ำเมื่อมีข้อมูลพอ):
+
+    (1) ตัด Step 1 ออกจากการตัดสิน (เดิม vsa_ok = step1_ok and step2_ok)
+        เดิม Step 1 บังคับ Short->price_pos="Top" / Long->"Bottom" ซึ่งเป็นตรรกะ reversal
+        (ขายที่ยอด ซื้อที่ก้น) แต่ถูกใช้ใน Scoring ที่เป็น trend-following — ขัดกันโดยตรง
+        เพราะเข้า Short ตอนขาลง ราคาย่อมอยู่ "ก้น" ไม่ใช่ "ยอด" ผลคือ backtest BTC 403 วัน
+        Step 1 ผ่าน 0/35 (0%) ทำให้ VSA เป็นน้ำหนักตายที่ไม่มีวันได้แต้ม (คะแนนเต็มจริงเหลือ 9/10)
+        ส่วน context ของ trend มี Trend 1D/4H/1H + regime ทำหน้าที่อยู่แล้ว ไม่ต้องซ้ำที่นี่
+
+    (2) No Supply / No Demand นับเป็น directional signal ตามตำรา VSA คลาสสิก
+        (Tom Williams / Wyckoff): No Supply = แท่งลงแคบ volume ต่ำ = ไม่มีแรงขายเหลือ -> bullish,
+        No Demand = แท่งขึ้นแคบ volume ต่ำ = ไม่มีแรงซื้อหนุน -> bearish โดยเฉพาะเมื่ออยู่ในเทรนด์
+        (continuation signal) — dict PATTERNS ยังมาร์กไว้เป็น warn/neutral เหมือนเดิม **จงใจไม่แตะ**
+        เพราะ detect_vsa_pattern/PATTERNS ใช้ร่วมกับ is_climax_bar ของเส้นทาง Reversal
+        การตีความนี้จึงทำเฉพาะที่นี่ (Scoring) เท่านั้น
 
     คืน:
-        vsa_ok      : bool — ผ่านทั้ง Step 1 และ Step 2
-        step1_ok    : bool
+        vsa_ok      : bool — ตอนนี้ = step2_ok (Step 1 ไม่ใช่ gate แล้ว)
+        step1_ok    : bool — เก็บไว้อ้างอิง/debug เท่านั้น
         step2_ok    : bool
         price_pos   : Top/Middle/Bottom (1D)
         pattern     : ชื่อ pattern (4H)
@@ -136,15 +155,10 @@ def check_vsa(df_1d: pd.DataFrame, df_4h: pd.DataFrame, direction: str) -> dict:
     """
     is_short = direction.capitalize() == "Short"
 
-    # ── Step 1: Context จาก 1D ──────────────────────────────────────────
+    # ── Step 1: Context จาก 1D (อ้างอิงเท่านั้น ไม่ใช้ตัดสินแล้ว — ดู docstring) ──
     idx_1d    = len(df_1d) - 2
     price_pos = _price_position(df_1d, idx_1d)
-
-    # Short ต้องการ Top / Long ต้องการ Bottom
-    if is_short:
-        step1_ok = price_pos == "Top"
-    else:
-        step1_ok = price_pos == "Bottom"
+    step1_ok  = (price_pos == "Top") if is_short else (price_pos == "Bottom")
 
     # ── Step 2: Pattern จาก 4H ──────────────────────────────────────────
     idx_4h    = len(df_4h) - 2   # แท่งปิดล่าสุด
@@ -161,8 +175,14 @@ def check_vsa(df_1d: pd.DataFrame, df_4h: pd.DataFrame, direction: str) -> dict:
         color, vol, spread, close_pos, wick, price_pos_4h
     )
 
+    # continuation signal (ดู docstring ข้อ 2) — ตีความเฉพาะ Scoring ไม่แตะ PATTERNS กลาง
+    if pattern == "No Supply":
+        is_long_ok = True
+    elif pattern == "No Demand":
+        is_short_ok = True
+
     step2_ok = is_short_ok if is_short else is_long_ok
-    vsa_ok   = step1_ok and step2_ok
+    vsa_ok   = step2_ok
 
     return {
         "vsa_ok":      vsa_ok,

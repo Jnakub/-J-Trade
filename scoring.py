@@ -12,7 +12,7 @@ from config import (
     WEIGHT_TREND_1D, WEIGHT_OBV_1D,
     WEIGHT_TREND_4H, WEIGHT_OBV_4H,
     WEIGHT_TREND_1H, WEIGHT_OBV_1H,
-    WEIGHT_VSA, WEIGHT_MACD, WEIGHT_RR, WEIGHT_CONFIRMATION,
+    WEIGHT_VSA, WEIGHT_MACD, WEIGHT_RR,
     TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MIN_SCORE,
 )
 from mt5_connect import connect
@@ -154,6 +154,7 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
+    used_fallback_tp = False   # TP มาจากสูตร fallback (ไม่ใช่ Fibonacci) — ดูเกณฑ์ R:R ด้านล่าง
     if tp is None:
         swing_idx = sl_info.get("swing_idx")
         fib_info  = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.22,
@@ -163,15 +164,17 @@ def compute_score(symbol: str, direction: str, entry: float,
                                               # เคสจริงที่ 0.886 ทำให้ไม้ near-miss (ห่าง TP แค่ 0.47%) กลับตัวจนโดน SL
                                               # ขณะที่ 0.786 ทันได้ TP ก่อน — TP ไกลขึ้นเสี่ยง reversal ก่อนถึงเป้ามากขึ้น
         else:
+            used_fallback_tp = True
             tp = (entry + abs(entry - sl) * MIN_RR) if is_long else (entry - abs(entry - sl) * MIN_RR)
 
     # VSA อัตโนมัติ — Step1=1D, Step2=4H
     vsa_result  = check_vsa(df_1d, df_4h, direction)
     vsa_ok      = vsa_result["vsa_ok"]
 
-    # Confirmation อัตโนมัติ — ราคาทะลุ Swing Low/High บน 4H
+    # Confirmation — ราคาทะลุ Swing Low/High บน 4H
+    # 2026-07-26: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
+    # ยังคำนวณไว้แสดงผลอ้างอิงในรายงานเท่านั้น ไม่มีผลต่อการตัดสินใจเข้าไม้
     conf_result = check_confirmation(price, df_4h, direction, symbol)
-    conf_ok     = conf_result["conf_ok"]
 
     obv_1d                          = calc_obv(df_1d)
     obv_4h                          = calc_obv(df_4h)
@@ -191,9 +194,15 @@ def compute_score(symbol: str, direction: str, entry: float,
         ("Trend 1H",     (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
         ("OBV 1H",       obv_rising(obv_1h, lookback=50),                       WEIGHT_OBV_1H),
         ("MACD 4H",      macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
-        ("R:R",          rr >= MIN_RR - 1e-9,                                    WEIGHT_RR),
+        # 2026-07-26: ถ้า TP มาจากสูตร fallback (Fibonacci หาไม่ได้) จะไม่ให้แต้มนี้ —
+        # สูตร fallback คำนวณ TP จาก MIN_RR เอง ทำให้ R:R ออกมาเท่ากับ MIN_RR พอดีเสมอ
+        # เกณฑ์ rr >= MIN_RR จึงผ่าน 100% โดยอัตโนมัติ = แต้มฟรีที่ไม่ได้กรองอะไรจริง
+        # (เช็คตัวเองกับตัวเอง) ต้องมี TP เชิงโครงสร้างจาก Fibonacci ถึงจะนับว่า "R:R ดีจริง"
+        # ผลกระทบ ณ วันที่แก้ = ศูนย์: backtest 403 วัน Fibonacci สำเร็จ 100% ทั้ง BTC (148/148,
+        # real volume) และ XAU (386/386) — fallback ไม่เคยถูกใช้เลย เป็นเกราะกันไว้ล่วงหน้า
+        # TP ที่ผู้ใช้กรอกเองมา (tp is not None) ไม่ถือเป็น fallback — ยังได้แต้มตามปกติ
+        ("R:R",          (not used_fallback_tp) and rr >= MIN_RR - 1e-9,          WEIGHT_RR),
         ("VSA",          vsa_ok,                                                 WEIGHT_VSA),
-        ("Confirmation", conf_ok,                                                WEIGHT_CONFIRMATION),
     ]
 
     sl_info["sl"]           = sl
@@ -270,7 +279,7 @@ def main() -> None:
 
         conf = sl_info.get("conf_result", {})
         if conf:
-            print(f"\n  Confirmation (auto)")
+            print(f"\n  Confirmation (อ้างอิงเท่านั้น — ไม่คิดคะแนน)")
             print(f"  ราคาปัจจุบัน : {conf['current_price']}")
             print(f"  Key Level    : {conf['key_level']}")
             print(f"  Result       : {conf['reason']}")

@@ -21,7 +21,7 @@ from binance import merge_real_volume
 from config import (
     WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
     WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
-    WEIGHT_RR, WEIGHT_CONFIRMATION,
+    WEIGHT_RR,
 )
 
 load_dotenv()
@@ -107,7 +107,8 @@ criteria = [
     ("MACD 4H",     macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
     ("R:R",         rr >= MIN_RR,                                           WEIGHT_RR),
     ("VSA",         vsa_result["vsa_ok"],                                   WEIGHT_VSA),
-    ("Confirmation",conf_result["conf_ok"],                                 WEIGHT_CONFIRMATION),
+    # Confirmation ถูกตัดออกจาก scorecard 2026-07-26 (ดู config.py) — conf_result ยัง
+    # คำนวณไว้แสดงผลอ้างอิงด้านล่างเท่านั้น ให้ตรงกับ scoring.py
 ]
 
 total  = sum(w for _, p, w in criteria if p)
