@@ -14,10 +14,11 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from mt5_connect import connect
 from config import MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT, MIN_RR, MIN_RR_HARD_BLOCK
-from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction
+from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction, TREND_FLIP_K
 from swing import find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, swing_vol_multiplier, swing_wick_ratio_min
 from vsa import check_vsa
 from binance import merge_real_volume
+from trend_flip import compute_trend_regime
 from config import (
     WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
     WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
@@ -43,10 +44,13 @@ def get_hist(symbol, tf, dt, bars):
     df["time"] = pd.to_datetime(df["time"], unit="s")
     return df
 
-df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 210)
+df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)   # 2026-07-27: 210->800 ให้ตรงกับ
+                                                                # scoring.py (trend_flip ต้องการ
+                                                                # ประวัติยาวพอให้ ratchet มั่นคง)
 df_1d = merge_real_volume(df_1d, symbol, "1D")
 df_4h = get_hist(symbol, MT5_TIMEFRAMES["4H"], snap_dt, 100)
 df_1h = get_hist(symbol, MT5_TIMEFRAMES["1H"], snap_dt, 100)
+df_1h = merge_real_volume(df_1h, symbol, "1H")   # 2026-07-27: ให้ตรงกับ scoring.py (เดิมไม่เคย merge)
 
 # ราคา ณ เวลานั้น = close ของแท่งล่าสุด
 entry = df_1h["close"].iloc[-1]
@@ -56,14 +60,27 @@ is_long  = direction.capitalize() == "Long"
 vol_mult = swing_vol_multiplier(symbol)
 wick_min = swing_wick_ratio_min(symbol)
 
-# Bias
+# Bias — 2026-07-27: ให้ตรงกับ scoring.py.compute_score เป๊ะ (เดิมไฟล์นี้ใช้แค่ EMA เสมอ
+# ทำให้ผลไม่ตรงกับที่ scheduler.py ตัดสินใจจริงสำหรับ symbol ที่มี k ยืนยันแล้ว)
 ema50_1d  = ema(df_1d["close"], 50).iloc[-1]
 ema200_1d = ema(df_1d["close"], 200).iloc[-1]
-bias      = "Long" if ema50_1d > ema200_1d else "Short"
-print(f"  Bias 1D : {bias}  (EMA50={ema50_1d:.0f}  EMA200={ema200_1d:.0f})")
+trend_flip_k = TREND_FLIP_K.get(symbol)
+bias_source = "EMA50/200"
+if trend_flip_k is not None:
+    closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
+    flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
+    flip_regime = flip_df["regime"].iloc[-1]
+    if flip_regime in ("Bull", "Bear"):
+        bias = "Long" if flip_regime == "Bull" else "Short"
+        bias_source = "trend_flip"
+    else:
+        bias = "Long" if ema50_1d > ema200_1d else "Short"   # bootstrap ไม่พร้อม -> fallback
+else:
+    bias = "Long" if ema50_1d > ema200_1d else "Short"
+print(f"  Bias 1D : {bias}  ({bias_source})  (EMA50={ema50_1d:.0f}  EMA200={ema200_1d:.0f})")
 
 if bias != direction.capitalize():
-    print(f"  [BLOCKED] Direction ไม่ตรง Bias")
+    print(f"  [BLOCKED] Direction ไม่ตรง Bias ({bias_source})")
     mt5.shutdown(); sys.exit()
 
 # Auto SL/TP

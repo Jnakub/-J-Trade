@@ -22,13 +22,14 @@ from config import (
     WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
     WEIGHT_RR,
 )
-from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction
+from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction, TREND_FLIP_K
 from swing import (
     find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, calc_atr,
     find_swing_lows, find_swing_highs,
 )
 from vsa import check_vsa
 from binance import merge_real_volume
+from trend_flip import compute_trend_regime
 
 SYMBOL          = "BTCUSDm"
 LOOKBACK_DAYS   = 30
@@ -55,7 +56,8 @@ def get_hist(symbol, tf, dt, bars):
 
 def score_entry(symbol, snap_dt):
     """ทำซ้ำ logic เดียวกับ scoring.compute_score() แต่ใช้ข้อมูลย้อนหลัง ณ snap_dt"""
-    df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 210)
+    df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)   # 2026-07-27: 210->800 ให้
+                                                                    # trend_flip มีประวัติพอ
     df_4h = get_hist(symbol, MT5_TIMEFRAMES["4H"], snap_dt, 210)
     df_1h = get_hist(symbol, MT5_TIMEFRAMES["1H"], snap_dt, 110)
     if df_1d is None or df_4h is None or df_1h is None:
@@ -65,11 +67,23 @@ def score_entry(symbol, snap_dt):
 
     df_1d = merge_real_volume(df_1d, symbol, "1D")
     df_4h = merge_real_volume(df_4h, symbol, "4H")
+    df_1h = merge_real_volume(df_1h, symbol, "1H")   # 2026-07-27: ให้ตรงกับ scoring.py (เดิมไม่เคย merge)
 
     entry = df_1h["close"].iloc[-1]
 
+    # Bias — 2026-07-27: ให้ตรงกับ scoring.py.compute_score (เดิมใช้ EMA เสมอ)
     ema50_1d, ema200_1d = ema(df_1d["close"], 50).iloc[-1], ema(df_1d["close"], 200).iloc[-1]
-    direction = "Long" if ema50_1d > ema200_1d else "Short"
+    trend_flip_k = TREND_FLIP_K.get(symbol)
+    if trend_flip_k is not None:
+        closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
+        flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
+        flip_regime = flip_df["regime"].iloc[-1]
+        if flip_regime in ("Bull", "Bear"):
+            direction = "Long" if flip_regime == "Bull" else "Short"
+        else:
+            direction = "Long" if ema50_1d > ema200_1d else "Short"   # bootstrap ไม่พร้อม -> fallback
+    else:
+        direction = "Long" if ema50_1d > ema200_1d else "Short"
     is_long   = direction == "Long"
 
     sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.22)

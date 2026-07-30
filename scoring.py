@@ -20,6 +20,19 @@ from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirm
                    find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min)
 from binance import merge_real_volume
 from vsa import check_vsa
+from trend_flip import compute_trend_regime
+
+# k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
+# <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
+#   BTCUSDm: k=0.20  FalseFlip=0/58 (0%)   เร็วกว่า EMA cross เฉลี่ย 9.5 แท่ง  (matched 14 คู่)
+#   XAUUSDm: k=0.40  FalseFlip=0/37 (0%)   เร็วกว่า EMA cross เฉลี่ย 12.4 แท่ง (matched 12 คู่)
+# (ครั้งแรกที่ทำ XAU ใช้ sample เล็กแค่ 2 คู่เทียบได้ k ไม่น่าเชื่อถือ — รันซ้ำด้วยข้อมูลยาวขึ้น
+# แล้วได้ผลที่มั่นใจได้มากกว่านี้ 2026-07-27) symbol ที่ไม่มีในนี้ (เช่น ETH ถ้าเพิ่มมาในอนาคต)
+# จะ fallback ไปใช้ EMA50/200 เดิมโดยอัตโนมัติ จนกว่าจะมีคน sweep หา k ให้
+TREND_FLIP_K = {
+    "BTCUSDm": 0.20,
+    "XAUUSDm": 0.40,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +131,8 @@ def compute_score(symbol: str, direction: str, entry: float,
     df_4h = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=200)
     df_4h = merge_real_volume(df_4h, symbol, "4H")
     df_1h = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"])
+    df_1h = merge_real_volume(df_1h, symbol, "1H")   # 2026-07-27: เดิมไม่เคย merge เลย (ต่างจาก
+                                                     # 1D/4H) ทำให้ OBV 1H เป็น tick_volume แม้แต่ BTC
 
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
@@ -130,12 +145,37 @@ def compute_score(symbol: str, direction: str, entry: float,
     ema50_4h  = ema(df_4h["close"], 50).iloc[-1]
     ema50_1h  = ema(df_1h["close"], 50).iloc[-1]
 
-    # Bias check: EMA50 vs EMA200 บน 1D
-    trend_bias = "Long" if ema50_1d > ema200_1d else "Short"
+    # Bias check — 2026-07-27: symbol ที่มี k ยืนยันแล้วใน TREND_FLIP_K ใช้ trend_flip
+    # (fractal+ratchet+ATR) แทน EMA50/200 เพราะ backtest 403 วันพบว่า EMA bias บล็อกโอกาส
+    # ไปถึง 65.4% ของเวลา (BTC) / 24.9% (XAU) ส่วน trend_flip บล็อกแค่ 12.6% / 8.2% ใน
+    # ข้อมูลเดียวกัน — symbol ที่ไม่มีในตาราง fallback ไป EMA เดิมอัตโนมัติ
+    #
+    # ใช้ df_1d.iloc[:-1] (ตัดแท่งวันนี้ที่ยังไม่ปิด) ไม่ใช่ df_1d เต็ม — เพราะ trend_flip
+    # ไวกว่า EMA มาก การเทียบ close สดของแท่งที่ยังไม่ปิดกับรัศมี k*ATR ที่แคบ เสี่ยง bias
+    # "กระพริบ" ไปมาถ้าเรียก compute_score หลายครั้งในวันเดียวกันตอนราคาแกว่งใกล้เส้นพอดี
+    # (EMA ไม่ค่อยมีปัญหานี้เพราะ period 50/200 ทำให้แท่งเดียวมีน้ำหนักเล็กมาก) ผลคือ bias
+    # จาก trend_flip จะ "ล็อก" ตามแท่งปิดล่าสุดทั้งวัน อัปเดตวันละครั้งตอนแท่งใหม่ปิด — ช้าลง
+    # นิดหน่อยจากในอุดมคติ (เร็วสุด) แต่ยังเร็วกว่า EMA มาก และไม่กระพริบ
+    trend_flip_k = TREND_FLIP_K.get(symbol)
+    if trend_flip_k is not None:
+        closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
+        flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
+        flip_regime = flip_df["regime"].iloc[-1]
+        if flip_regime == "Bull":
+            trend_bias = "Long"
+        elif flip_regime == "Bear":
+            trend_bias = "Short"
+        else:
+            # bootstrap ยังไม่พร้อม (ไม่ควรเกิดกับ ~800 แท่ง 1D — เผื่อไว้กันพังเฉยๆ) fallback ไป EMA
+            trend_bias = "Long" if ema50_1d > ema200_1d else "Short"
+    else:
+        trend_bias = "Long" if ema50_1d > ema200_1d else "Short"
+
     if trend_bias != direction.capitalize():
-        bias_label = "Downtrend (EMA50 < EMA200)" if trend_bias == "Short" else "Uptrend (EMA50 > EMA200)"
+        bias_source = "trend_flip" if trend_flip_k is not None else "EMA50/200"
+        bias_label = "Downtrend" if trend_bias == "Short" else "Uptrend"
         raise ValueError(
-            f"Direction ไม่ตรง Bias — กราฟ 1D เป็น {bias_label} "
+            f"Direction ไม่ตรง Bias — กราฟ 1D เป็น {bias_label} ({bias_source}) "
             f"รับแค่ {trend_bias} เท่านั้น"
         )
 
@@ -186,6 +226,7 @@ def compute_score(symbol: str, direction: str, entry: float,
         # เทียบ OBV ล่าสุดกับ 5 แท่งก่อน — จับ trend ไม่ใช่ noise
         return (obv.iloc[-1] > obv.iloc[-1 - lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1 - lookback])
 
+    # 2026-07-27: เอา OBV 4H/1H กลับมา (เคยลองตัดออกแล้ว backtest ไม่ดีขึ้น — ดู config.py)
     criteria = [
         ("Trend 1D",     (price > ema50_1d) if is_long else (price < ema50_1d), WEIGHT_TREND_1D),
         ("OBV 1D",       obv_rising(obv_1d),                                    WEIGHT_OBV_1D),
