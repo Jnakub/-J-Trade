@@ -19,15 +19,14 @@ from mt5_connect import connect
 from config import (
     MT5_TIMEFRAMES, MIN_SCORE, MIN_RR, MIN_RR_HARD_BLOCK,
     WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
-    WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
+    WEIGHT_TREND_1H, WEIGHT_DI_1H, WEIGHT_MACD,
     WEIGHT_RR,
 )
 from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction, TREND_FLIP_K
 from swing import (
-    find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, calc_atr,
+    find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, calc_atr, calc_di,
     find_swing_lows, find_swing_highs,
 )
-from vsa import check_vsa
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
 
@@ -102,7 +101,8 @@ def score_entry(symbol, snap_dt):
 
     ema50_4h = ema(df_4h["close"], 50).iloc[-1]
     ema50_1h = ema(df_1h["close"], 50).iloc[-1]
-    obv_1d, obv_4h, obv_1h = calc_obv(df_1d), calc_obv(df_4h), calc_obv(df_1h)
+    obv_1d, obv_4h = calc_obv(df_1d), calc_obv(df_4h)
+    plus_di_1h, minus_di_1h = calc_di(df_1h)
     macd_line, signal_line, macd_hist = calc_macd(df_4h)
 
     def obv_rising(obv, lookback):
@@ -110,18 +110,17 @@ def score_entry(symbol, snap_dt):
             return False
         return (obv.iloc[-1] > obv.iloc[-1 - lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1 - lookback])
 
-    vsa_result  = check_vsa(df_1d, df_4h, direction)
-
     criteria = [
         (WEIGHT_TREND_1D,     (entry > ema50_1d) if is_long else (entry < ema50_1d)),
         (WEIGHT_OBV_1D,       obv_rising(obv_1d, 10)),
         (WEIGHT_TREND_4H,     (entry > ema50_4h) if is_long else (entry < ema50_4h)),
         (WEIGHT_OBV_4H,       obv_rising(obv_4h, 10)),
         (WEIGHT_TREND_1H,     (entry > ema50_1h) if is_long else (entry < ema50_1h)),
-        (WEIGHT_OBV_1H,       obv_rising(obv_1h, 50)),
+        (WEIGHT_DI_1H,        (plus_di_1h.iloc[-1] > minus_di_1h.iloc[-1]) if is_long
+                              else (minus_di_1h.iloc[-1] > plus_di_1h.iloc[-1])),
         (WEIGHT_MACD,         macd_ok_for_direction(macd_line, signal_line, macd_hist, direction)),
         (WEIGHT_RR,           rr >= MIN_RR - 1e-9),
-        (WEIGHT_VSA,          vsa_result["vsa_ok"]),
+        # VSA ถูกตัดออกจาก scorecard 2026-07-27 (ดู config.py)
         # Confirmation ถูกตัดออกจาก scorecard 2026-07-26 (ดู config.py)
     ]
     total = sum(w for w, p in criteria if p)

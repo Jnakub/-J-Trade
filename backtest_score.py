@@ -15,13 +15,13 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from mt5_connect import connect
 from config import MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT, MIN_RR, MIN_RR_HARD_BLOCK
 from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction, TREND_FLIP_K
-from swing import find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, swing_vol_multiplier, swing_wick_ratio_min
+from swing import find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, swing_vol_multiplier, swing_wick_ratio_min, calc_di
 from vsa import check_vsa
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
 from config import (
     WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
-    WEIGHT_TREND_1H, WEIGHT_OBV_1H, WEIGHT_VSA, WEIGHT_MACD,
+    WEIGHT_TREND_1H, WEIGHT_DI_1H, WEIGHT_MACD,
     WEIGHT_RR,
 )
 
@@ -105,7 +105,7 @@ ema50_4h  = ema(df_4h["close"], 50).iloc[-1]
 ema50_1h  = ema(df_1h["close"], 50).iloc[-1]
 obv_1d    = calc_obv(df_1d)
 obv_4h    = calc_obv(df_4h)
-obv_1h    = calc_obv(df_1h)
+plus_di_1h, minus_di_1h = calc_di(df_1h)
 macd_line, signal_line, macd_hist = calc_macd(df_4h)
 
 def obv_ok(obv, lookback=5):
@@ -120,10 +120,12 @@ criteria = [
     ("Trend 4H",    (price > ema50_4h) if is_long else (price < ema50_4h), WEIGHT_TREND_4H),
     ("OBV 4H",      obv_ok(obv_4h),                                        WEIGHT_OBV_4H),
     ("Trend 1H",    (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
-    ("OBV 1H",      obv_ok(obv_1h),                                        WEIGHT_OBV_1H),
+    ("DI 1H",       (plus_di_1h.iloc[-1] > minus_di_1h.iloc[-1]) if is_long
+                    else (minus_di_1h.iloc[-1] > plus_di_1h.iloc[-1]),  WEIGHT_DI_1H),
     ("MACD 4H",     macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
     ("R:R",         rr >= MIN_RR,                                           WEIGHT_RR),
-    ("VSA",         vsa_result["vsa_ok"],                                   WEIGHT_VSA),
+    # VSA ถูกตัดออกจาก scorecard 2026-07-27 (ดู config.py) — vsa_result ยังคำนวณไว้
+    # แสดงผลอ้างอิงด้านล่างเท่านั้น
     # Confirmation ถูกตัดออกจาก scorecard 2026-07-26 (ดู config.py) — conf_result ยัง
     # คำนวณไว้แสดงผลอ้างอิงด้านล่างเท่านั้น ให้ตรงกับ scoring.py
 ]

@@ -11,13 +11,14 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from config import (
     WEIGHT_TREND_1D, WEIGHT_OBV_1D,
     WEIGHT_TREND_4H, WEIGHT_OBV_4H,
-    WEIGHT_TREND_1H, WEIGHT_OBV_1H,
-    WEIGHT_VSA, WEIGHT_MACD, WEIGHT_RR,
+    WEIGHT_TREND_1H, WEIGHT_DI_1H,
+    WEIGHT_MACD, WEIGHT_RR,
     TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MIN_SCORE,
 )
 from mt5_connect import connect
 from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirmation,
-                   find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min)
+                   find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min,
+                   calc_di)
 from binance import merge_real_volume
 from vsa import check_vsa
 from trend_flip import compute_trend_regime
@@ -207,9 +208,9 @@ def compute_score(symbol: str, direction: str, entry: float,
             used_fallback_tp = True
             tp = (entry + abs(entry - sl) * MIN_RR) if is_long else (entry - abs(entry - sl) * MIN_RR)
 
-    # VSA อัตโนมัติ — Step1=1D, Step2=4H
+    # VSA — 2026-07-27: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
+    # ยังคำนวณไว้แสดงผลอ้างอิงในรายงานเท่านั้น ไม่มีผลต่อการตัดสินใจเข้าไม้
     vsa_result  = check_vsa(df_1d, df_4h, direction)
-    vsa_ok      = vsa_result["vsa_ok"]
 
     # Confirmation — ราคาทะลุ Swing Low/High บน 4H
     # 2026-07-26: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
@@ -218,7 +219,7 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     obv_1d                          = calc_obv(df_1d)
     obv_4h                          = calc_obv(df_4h)
-    obv_1h                          = calc_obv(df_1h)
+    plus_di_1h, minus_di_1h         = calc_di(df_1h)
     macd_line, signal_line, macd_hist = calc_macd(df_4h)
     rr                              = calc_rr(entry, sl, tp, direction)
 
@@ -226,14 +227,18 @@ def compute_score(symbol: str, direction: str, entry: float,
         # เทียบ OBV ล่าสุดกับ 5 แท่งก่อน — จับ trend ไม่ใช่ noise
         return (obv.iloc[-1] > obv.iloc[-1 - lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1 - lookback])
 
-    # 2026-07-27: เอา OBV 4H/1H กลับมา (เคยลองตัดออกแล้ว backtest ไม่ดีขึ้น — ดู config.py)
+    # DI 1H: Long ผ่านเมื่อ DI+ > DI− (แรงซื้อเหนือกว่า), Short กลับด้าน
+    di_1h_ok = (plus_di_1h.iloc[-1] > minus_di_1h.iloc[-1]) if is_long else \
+               (minus_di_1h.iloc[-1] > plus_di_1h.iloc[-1])
+
+    # 2026-07-27: ช่อง 1H เปลี่ยนจาก OBV เป็น DI (ดูเหตุผล+ตัวเลข redundancy ใน config.py)
     criteria = [
         ("Trend 1D",     (price > ema50_1d) if is_long else (price < ema50_1d), WEIGHT_TREND_1D),
         ("OBV 1D",       obv_rising(obv_1d),                                    WEIGHT_OBV_1D),
         ("Trend 4H",     (price > ema50_4h) if is_long else (price < ema50_4h), WEIGHT_TREND_4H),
         ("OBV 4H",       obv_rising(obv_4h),                                    WEIGHT_OBV_4H),
         ("Trend 1H",     (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
-        ("OBV 1H",       obv_rising(obv_1h, lookback=50),                       WEIGHT_OBV_1H),
+        ("DI 1H",        di_1h_ok,                                              WEIGHT_DI_1H),
         ("MACD 4H",      macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
         # 2026-07-26: ถ้า TP มาจากสูตร fallback (Fibonacci หาไม่ได้) จะไม่ให้แต้มนี้ —
         # สูตร fallback คำนวณ TP จาก MIN_RR เอง ทำให้ R:R ออกมาเท่ากับ MIN_RR พอดีเสมอ
@@ -243,7 +248,6 @@ def compute_score(symbol: str, direction: str, entry: float,
         # real volume) และ XAU (386/386) — fallback ไม่เคยถูกใช้เลย เป็นเกราะกันไว้ล่วงหน้า
         # TP ที่ผู้ใช้กรอกเองมา (tp is not None) ไม่ถือเป็น fallback — ยังได้แต้มตามปกติ
         ("R:R",          (not used_fallback_tp) and rr >= MIN_RR - 1e-9,          WEIGHT_RR),
-        ("VSA",          vsa_ok,                                                 WEIGHT_VSA),
     ]
 
     sl_info["sl"]           = sl
@@ -327,7 +331,7 @@ def main() -> None:
 
         vsa = sl_info.get("vsa_result", {})
         if vsa:
-            print(f"\n  VSA (auto)")
+            print(f"\n  VSA (อ้างอิงเท่านั้น — ไม่คิดคะแนน)")
             print(f"  [Step 1 — 1D] Price Pos : {vsa['price_pos']}  →  {'✅' if vsa['step1_ok'] else '❌'}")
             print(f"  [Step 2 — 4H] Pattern   : {vsa['pattern']}  →  {'✅' if vsa['step2_ok'] else '❌'}")
             print(f"  Color {vsa['color']} | Vol {vsa['vol']} | Spread {vsa['spread']} | Close {vsa['close_pos']} | Wick {vsa['wick']}")

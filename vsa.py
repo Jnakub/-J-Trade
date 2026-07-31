@@ -118,7 +118,76 @@ def detect_vsa_pattern(color: str, vol: str, spread: str,
 
 
 # ---------------------------------------------------------------------------
-# Main Function
+# แยก VSA เป็น 2 ตัวตามเส้นทางที่ใช้ (2026-07-27)
+# ---------------------------------------------------------------------------
+# เส้นทาง Scoring (trend-following) -> check_vsa_trend()   [ด้านล่างนี้]
+# เส้นทาง Reversal (สวนเทรนด์)      -> exit_monitor.is_climax_bar()  (คนละไฟล์ ไม่แตะกัน)
+#
+# ทำไมต้องแยก: คลัง PATTERNS ส่วนใหญ่เป็นสัญญาณ "แรงหมด/กลับตัว" (Pin Bar, Shooting Star,
+# Hammer, Climax) ซึ่งเหมาะกับ Reversal ที่ต้องการจับจุดจบของการเคลื่อนไหว — แต่ Scoring
+# ต้องการ "เข้าร่วม" การเคลื่อนไหว การใช้ pattern ชุดเดียวกันทั้งสองเส้นทางจึงขัดกันเอง
+#
+# วัดจริงบน 138 (BTC) / 131 (XAU) จุด — VSA เวอร์ชันเดิมทำนายกลับทางทั้งคู่:
+#   BTC: ผ่าน -> +0.80R  ตก -> +1.04R   |   XAU: ผ่าน -> +0.32R  ตก -> +0.57R
+#   ตัวการ: Hammer (-1.00R) / Shooting Star (-1.00R) นับเป็นผ่าน ขณะที่ "No Pattern"
+#   ซึ่งเป็นกลุ่มใหญ่สุด (49-54%) และกำไรดีสุด (+1.63 / +0.63) กลับตกเสมอ
+#
+# CONTINUATION_PATTERNS = pattern เดียวในคลังที่เป็นสัญญาณ "ไปต่อ" จริงๆ
+CONTINUATION_PATTERNS = {"Long": "Healthy Up Move", "Short": "Healthy Down Move"}
+
+
+def check_vsa_trend(df_1d: pd.DataFrame, df_4h: pd.DataFrame, direction: str,
+                    allow_neutral: bool = False) -> dict:
+    """VSA สำหรับ **เส้นทาง Scoring (trend-following) เท่านั้น** — ไม่แตะ PATTERNS/
+    detect_vsa_pattern ที่ใช้ร่วมกับ is_climax_bar ของ Reversal เลย (แค่กรองชื่อ pattern
+    ที่ได้ออกมา) เพราะฉะนั้นการแก้ที่นี่พิสูจน์ได้ว่าไม่กระทบ Reversal
+
+    ผ่านเมื่อ: pattern เป็น continuation ตรงทิศ (Healthy Up Move สำหรับ Long /
+               Healthy Down Move สำหรับ Short)
+    ตกเมื่อ:   pattern เป็น reversal/exhaustion (Pin Bar, Shooting Star, Hammer, Climax)
+               หรือไม่มี pattern
+
+    allow_neutral=True: นับ "No Pattern" (แท่งธรรมดา ไม่มีสัญญาณเตือน) เป็นผ่านด้วย —
+        ตีความว่าเกณฑ์นี้คือ "ไม่มีสัญญาณแรงหมด" แทนที่จะเป็น "มีสัญญาณไปต่อ"
+        (จากข้อมูล No Pattern กำไรดีกว่าค่าเฉลี่ย แต่จะทำให้ผ่าน ~50% = เกือบเหรียญ)
+
+    ยังไม่มี backtest ยืนยันว่าดีกว่าเวอร์ชันเดิมจริง — sample ของ Healthy Move มีแค่ 5-6 จุด
+    ต่อ symbol เล็กเกินกว่าจะฟันธง ควรวัดซ้ำเมื่อมีข้อมูลเทรดจริงมากพอ
+    """
+    d = direction.capitalize()
+    idx_4h = len(df_4h) - 2                      # แท่งปิดล่าสุด
+    row    = df_4h.iloc[idx_4h]
+
+    color        = "Green" if row["close"] >= row["open"] else "Red"
+    vol          = _volume_class(df_4h, idx_4h)
+    spread       = _spread_class(df_4h, idx_4h)
+    close_pos    = _close_position(row)
+    wick         = _wick_side(row)
+    price_pos_4h = _price_position(df_4h, idx_4h)
+
+    pattern, _, _ = detect_vsa_pattern(color, vol, spread, close_pos, wick, price_pos_4h)
+
+    vsa_ok = pattern == CONTINUATION_PATTERNS.get(d)
+    if allow_neutral and pattern == "No Pattern":
+        vsa_ok = True
+
+    return {
+        "vsa_ok":       vsa_ok,
+        "pattern":      pattern,
+        "color":        color,
+        "vol":          vol,
+        "spread":       spread,
+        "close_pos":    close_pos,
+        "wick":         wick,
+        "price_pos_4h": price_pos_4h,
+        # เก็บ context 1D ไว้แสดงผลอ้างอิง (ไม่ใช้ตัดสิน)
+        "price_pos":    _price_position(df_1d, len(df_1d) - 2),
+    }
+
+
+# ---------------------------------------------------------------------------
+# เวอร์ชันเดิม — เก็บไว้เพื่ออ้างอิง/CLI เท่านั้น ไม่มี production path ไหนเรียกแล้ว
+# (Scoring ย้ายไป check_vsa_trend, Reversal ใช้ exit_monitor.is_climax_bar มาตลอด)
 # ---------------------------------------------------------------------------
 
 def check_vsa(df_1d: pd.DataFrame, df_4h: pd.DataFrame, direction: str) -> dict:
