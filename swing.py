@@ -234,6 +234,12 @@ def find_sl_from_structure(df: pd.DataFrame,
     ล่าสุดสุดถือว่า "ยังใช้ได้" ถ้าราคาปัจจุบันยังไม่ทะลุเกิน ATR(ปัจจุบัน) × tolerance_atr
     — กันไม่ให้ wick เหวี่ยงเกินเล็กน้อยถูกนับเป็น "ทะลุจริง" ทั้งที่จริงๆ เป็นแค่ noise ปกติ
     ถ้าทะลุเกิน tolerance นี้ = SL ไม่ผ่าน (ไม่เข้าเทรดรอบนี้ รอจุด swing ใหม่ยืนยันก่อน)
+
+    SL ยึดจาก max/min(swing_price, current_price) ไม่ใช่ swing_price เฉยๆ (2026-08-01):
+    ถ้าราคาทะลุจุด swing ไปแล้วแต่ยังอยู่ใน tolerance (เพิ่งอนุญาตด้านบน) การเอา swing_price
+    ตรงๆ มาบวก/ลบ buffer จะได้ SL ที่อยู่ใกล้หรือผิดฝั่งราคาปัจจุบันเลย (Short: SL ต่ำกว่า
+    entry ทั้งที่ต้องอยู่เหนือ) กลับไปเจอบั๊กเดิม (R:R แคบผิดธรรมชาติ) แบบเบาลง — ยึดราคา
+    ปัจจุบันแทนเมื่อมันไกลจากจุด swing มากกว่า กัน SL ใกล้ราคาเข้าเกินจริง
     """
     is_short      = direction.capitalize() == "Short"
     atr           = calc_atr(df)
@@ -262,7 +268,8 @@ def find_sl_from_structure(df: pd.DataFrame,
 
     atr_val     = atr.iloc[idx]
     swing_price = df["high"].iloc[idx] if is_short else df["low"].iloc[idx]
-    sl          = swing_price + atr_val * atr_buffer if is_short else swing_price - atr_val * atr_buffer
+    anchor      = max(swing_price, current_price) if is_short else min(swing_price, current_price)
+    sl          = anchor + atr_val * atr_buffer if is_short else anchor - atr_val * atr_buffer
 
     return {
         "sl":          round(sl, 5),
