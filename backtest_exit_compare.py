@@ -27,6 +27,7 @@ from swing import (
     find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, calc_atr, calc_di,
     find_swing_lows, find_swing_highs,
 )
+from indicators import calc_adx
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
 
@@ -194,28 +195,8 @@ def simulate_chandelier(df: pd.DataFrame, atr_series: pd.Series, start_idx: int,
     return {"result": "Open", "r_multiple": r, "bars_held": len(df) - start_idx}
 
 
-# ---------------------------------------------------------------------------
-# ADX(14) — ใช้แค่ในไฟล์ backtest นี้เท่านั้น (ไม่แตะ swing.py/production)
-# ---------------------------------------------------------------------------
-
-def calc_adx(df: pd.DataFrame, period: int = ADX_PERIOD) -> pd.Series:
-    up_move   = df["high"].diff()
-    down_move = -df["low"].diff()
-    plus_dm   = ((up_move > down_move) & (up_move > 0)) * up_move
-    minus_dm  = ((down_move > up_move) & (down_move > 0)) * down_move
-
-    prev_close = df["close"].shift(1)
-    tr = pd.concat([
-        df["high"] - df["low"],
-        (df["high"] - prev_close).abs(),
-        (df["low"]  - prev_close).abs(),
-    ], axis=1).max(axis=1)
-
-    atr      = tr.ewm(alpha=1 / period, adjust=False).mean()
-    plus_di  = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr.replace(0, 1e-12)
-    minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr.replace(0, 1e-12)
-    dx  = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-12)
-    return dx.ewm(alpha=1 / period, adjust=False).mean()
+# calc_adx(period=ADX_PERIOD) มาจาก indicators.py แล้ว (2026-08-01) — เดิมเป็นสำเนาที่ 3
+# ของสูตรเดียวกัน (ซ้ำกับ swing.calc_di/regime_check.calc_adx เดิม)
 
 
 # ---------------------------------------------------------------------------

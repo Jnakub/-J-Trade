@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import datetime
 import pandas as pd
 import MetaTrader5 as mt5
 from dotenv import load_dotenv
@@ -15,7 +16,7 @@ from config import (
     WEIGHT_MACD, WEIGHT_RR,
     TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MIN_SCORE,
 )
-from mt5_connect import connect
+from mt5_connect import connect, get_tick_or_raise
 from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirmation,
                    find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min,
                    calc_di)
@@ -39,8 +40,14 @@ TREND_FLIP_K = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-def get_ohlcv(symbol: str, timeframe, bars: int = 100) -> pd.DataFrame:
-    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
+def get_ohlcv(symbol: str, timeframe, bars: int = 100, as_of: datetime = None) -> pd.DataFrame:
+    """as_of=None (ปกติ) = ดึง bars ล่าสุดจากปัจจุบัน — as_of=datetime = ดึง bars ที่ปิดก่อน
+    เวลานั้น (ใช้ backtest_score.py จำลอง compute_score ณ เวลาในอดีตแบบเป๊ะ ไม่ต้อง copy
+    logic มาเขียนซ้ำ)"""
+    if as_of is None:
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
+    else:
+        rates = mt5.copy_rates_from(symbol, timeframe, as_of, bars)
     if rates is None or len(rates) == 0:
         code, msg = mt5.last_error()
         raise RuntimeError(f"ดึงข้อมูล {symbol} ไม่ได้  [{code}] {msg}")
@@ -49,11 +56,11 @@ def get_ohlcv(symbol: str, timeframe, bars: int = 100) -> pd.DataFrame:
     return df
 
 
-def get_ohlcv_real(symbol: str, tf_name: str, bars: int = 100) -> pd.DataFrame:
+def get_ohlcv_real(symbol: str, tf_name: str, bars: int = 100, as_of: datetime = None) -> pd.DataFrame:
     """get_ohlcv + แทนที่ volume ด้วย real volume (Bitstamp/COMEX ตาม merge_real_volume)
     ใช้ตัวนี้เสมอถ้า logic ปลายทางแตะ volume (swing filter, VSA ฯลฯ) — ไม่งั้น BTC จะได้
     tick_volume ของโบรกเกอร์ซึ่งไม่ตรงกับที่ระบบใช้หา SL จริง"""
-    df = get_ohlcv(symbol, MT5_TIMEFRAMES[tf_name], bars=bars)
+    df = get_ohlcv(symbol, MT5_TIMEFRAMES[tf_name], bars=bars, as_of=as_of)
     return merge_real_volume(df, symbol, tf_name)
 
 
@@ -119,26 +126,27 @@ def calc_rr(entry: float, sl: float, tp: float, direction: str) -> float:
 
 def compute_score(symbol: str, direction: str, entry: float,
                   sl: float = None, tp: float = None,
-                  force: bool = False) -> tuple[float, list, bool, dict]:
+                  force: bool = False, as_of: datetime = None) -> tuple[float, list, bool, dict]:
     """Return (total_score, criteria_list, passed, sl_info).
     ถ้าไม่ส่ง sl จะหาจาก swing structure อัตโนมัติ
     ถ้าไม่ส่ง tp จะคำนวณจาก SL × MIN_RR อัตโนมัติ
+
+    as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ (ราคาจาก live tick, bars ล่าสุด)
+    as_of=datetime    = จำลองเช็ค ณ เวลานั้นในอดีต (ราคา = close 1H ล่าสุดก่อนเวลานั้น,
+        bars ทั้งหมดตัดที่เวลานั้น) — ให้ backtest_score.py เรียกตัวนี้ตรงๆ แทนการ copy
+        logic มาเขียนซ้ำ กันผลลัพธ์ backtest เพี้ยนจากของจริงตอนแก้ scoring.py แล้วลืมแก้ตาม
     """
     is_long = direction.capitalize() == "Long"
 
-    df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
+    df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800, as_of=as_of)
     df_1d = merge_real_volume(df_1d, symbol, "1D")
-    df_4h = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=200)
+    df_4h = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=200, as_of=as_of)
     df_4h = merge_real_volume(df_4h, symbol, "4H")
-    df_1h = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"])
+    df_1h = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], as_of=as_of)
     df_1h = merge_real_volume(df_1h, symbol, "1H")   # 2026-07-27: เดิมไม่เคย merge เลย (ต่างจาก
                                                      # 1D/4H) ทำให้ OBV 1H เป็น tick_volume แม้แต่ BTC
 
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"ดึงราคา {symbol} ไม่ได้  [{code}] {msg}")
-    price = tick.bid
+    price = df_1h["close"].iloc[-1] if as_of is not None else get_tick_or_raise(symbol).bid
 
     ema50_1d  = ema(df_1d["close"], 50).iloc[-1]
     ema200_1d = ema(df_1d["close"], 200).iloc[-1]
@@ -300,7 +308,7 @@ def main() -> None:
         sl    = sl_info["sl"]
         tp    = sl_info["tp"]
         rr    = calc_rr(entry, sl, tp, direction)
-        price = mt5.symbol_info_tick(symbol).bid
+        price = get_tick_or_raise(symbol).bid
         failed = [name for name, p, _ in criteria if not p]
 
         # ---- SL Detail -------------------------------------------------

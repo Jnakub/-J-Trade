@@ -55,6 +55,26 @@ def get_account_balance() -> float:
     return info.balance
 
 
+def get_tick_or_raise(symbol: str):
+    """ดึง tick ราคาปัจจุบันของ symbol — raise RuntimeError ถ้าดึงไม่ได้ (แทนการเช็ค
+    None ซ้ำๆ ทุกจุดที่ต้องใช้ราคา)"""
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"ดึงราคา {symbol} ไม่ได้  [{code}] {msg}")
+    return tick
+
+
+def get_position_or_raise(ticket: int):
+    """ดึง position จาก ticket — raise RuntimeError ถ้าหาไม่เจอ (แทนการเช็ค None
+    ซ้ำๆ ทุกจุดที่ต้องแก้ไข/ปิด position ที่มีอยู่)"""
+    positions = mt5.positions_get(ticket=ticket)
+    if not positions:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"หา position ticket #{ticket} ไม่เจอ  [{code}] {msg}")
+    return positions[0]
+
+
 def print_prices(symbols: list[str]) -> None:
     print()
     for symbol in symbols:

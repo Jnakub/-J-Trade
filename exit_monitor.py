@@ -24,7 +24,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import MT5_TIMEFRAMES
-from mt5_connect import connect
+from mt5_connect import connect, get_tick_or_raise
 from scoring import get_ohlcv, get_ohlcv_real, ema
 from swing import calc_atr, find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
 from vsa import _volume_class, _spread_class, _close_position, _price_position, detect_vsa_pattern
@@ -369,7 +369,7 @@ def analyze_position(pos) -> dict:
     bb_lo_now  = bb_lower.iloc[closed_idx]
     climax, climax_pattern = is_climax_bar(df, closed_idx)
 
-    tick = mt5.symbol_info_tick(symbol)
+    tick = get_tick_or_raise(symbol)
     current_price = tick.bid if direction == "Long" else tick.ask
 
     extreme = extreme_price_since_entry(df, entry_time, direction)

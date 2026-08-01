@@ -1,51 +1,6 @@
 import pandas as pd
 
-
-# ---------------------------------------------------------------------------
-# ATR (Average True Range)
-# ---------------------------------------------------------------------------
-
-def calc_di(df: pd.DataFrame, period: int = 20) -> tuple[pd.Series, pd.Series]:
-    """DI+ / DI− (Wilder) — วัด "แรงกดดันเชิงทิศทาง" แยกขาขึ้น/ขาลง คืน (plus_di, minus_di)
-
-    DI+ > DI−  = แรงซื้อเหนือกว่า (ขาขึ้น)   |   DI− > DI+ = แรงขายเหนือกว่า (ขาลง)
-
-    สูตรเดียวกับที่ regime_check.calc_adx() คำนวณอยู่แล้วภายใน (แต่ตรงนั้นทิ้ง DI ไปคืนแค่
-    ADX) — วางไว้ที่นี่เพราะ regime_check import จาก scoring อยู่ scoring จึง import กลับ
-    ไม่ได้ (circular) ส่วน swing.py ไม่ import ใครเลย
-
-    period=20 ตาม ADX_PERIOD ที่ regime_check ใช้ (ไม่ใช่ default 14 ของ Wilder) — ยังไม่ได้
-    sweep หาค่าที่เหมาะสมแยกต่างหากแบบที่ทำกับ trend_flip k ถ้าจะจูนควรวัดก่อน
-    """
-    high, low, close = df["high"], df["low"], df["close"]
-    up_move   = high.diff()
-    down_move = -low.diff()
-    plus_dm  = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
-    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
-
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-
-    alpha = 1 / period
-    atr = tr.ewm(alpha=alpha, adjust=False).mean()
-    plus_di  = 100 * plus_dm.ewm(alpha=alpha, adjust=False).mean() / atr
-    minus_di = 100 * minus_dm.ewm(alpha=alpha, adjust=False).mean() / atr
-    return plus_di, minus_di
-
-
-def calc_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|)"""
-    prev_close = df["close"].shift(1)
-    tr = pd.concat([
-        df["high"] - df["low"],
-        (df["high"] - prev_close).abs(),
-        (df["low"]  - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    return tr.ewm(span=period, adjust=False).mean()
+from indicators import calc_atr, calc_di   # re-exported เพื่อไม่ให้ต้องแก้ import ที่อื่น
 
 
 # ---------------------------------------------------------------------------

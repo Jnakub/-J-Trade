@@ -8,7 +8,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import RISK_PER_TRADE
-from mt5_connect import connect, get_account_balance
+from mt5_connect import connect, get_account_balance, get_tick_or_raise, get_position_or_raise
+
+MAGIC_NUMBER = 234000
 
 
 # ---------------------------------------------------------------------------
@@ -79,11 +81,7 @@ def place_order(symbol: str, direction: str, entry: float,
     is_long    = direction.lower() == "long"
     order_type = mt5.ORDER_TYPE_BUY if is_long else mt5.ORDER_TYPE_SELL
 
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"ดึงราคา {symbol} ไม่ได้  [{code}] {msg}")
-
+    tick = get_tick_or_raise(symbol)
     price = tick.ask if is_long else tick.bid
 
     request = {
@@ -95,7 +93,7 @@ def place_order(symbol: str, direction: str, entry: float,
         "sl":           sl,
         "tp":           tp,
         "deviation":    20,
-        "magic":        234000,
+        "magic":        MAGIC_NUMBER,
         "comment":      comment,
         "type_time":    mt5.ORDER_TIME_GTC,
         "type_filling": _filling_mode(symbol),
@@ -128,23 +126,14 @@ def place_order(symbol: str, direction: str, entry: float,
 # ---------------------------------------------------------------------------
 
 def close_order(ticket: int) -> None:
-    positions = mt5.positions_get(ticket=ticket)
-    if not positions:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"หา position ticket #{ticket} ไม่เจอ  [{code}] {msg}")
-
-    pos       = positions[0]
+    pos       = get_position_or_raise(ticket)
     symbol    = pos.symbol
     lot       = pos.volume
     is_long   = pos.type == mt5.ORDER_TYPE_BUY
     close_type = mt5.ORDER_TYPE_SELL if is_long else mt5.ORDER_TYPE_BUY
     direction = "Long" if is_long else "Short"
 
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"ดึงราคา {symbol} ไม่ได้  [{code}] {msg}")
-
+    tick = get_tick_or_raise(symbol)
     price = tick.bid if is_long else tick.ask
 
     request = {
@@ -155,7 +144,7 @@ def close_order(ticket: int) -> None:
         "position":     ticket,
         "price":        price,
         "deviation":    20,
-        "magic":        234000,
+        "magic":        MAGIC_NUMBER,
         "comment":      "close auto-trader",
         "type_time":    mt5.ORDER_TIME_GTC,
         "type_filling": _filling_mode(symbol),
@@ -195,12 +184,7 @@ def close_order(ticket: int) -> None:
 # ---------------------------------------------------------------------------
 
 def partial_close_order(ticket: int, close_volume: float, comment: str = "partial exit auto") -> None:
-    positions = mt5.positions_get(ticket=ticket)
-    if not positions:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"หา position ticket #{ticket} ไม่เจอ  [{code}] {msg}")
-
-    pos     = positions[0]
+    pos     = get_position_or_raise(ticket)
     symbol  = pos.symbol
     is_long = pos.type == mt5.ORDER_TYPE_BUY
     close_type = mt5.ORDER_TYPE_SELL if is_long else mt5.ORDER_TYPE_BUY
@@ -210,10 +194,7 @@ def partial_close_order(ticket: int, close_volume: float, comment: str = "partia
             f"close_volume ต้องมากกว่า 0 และน้อยกว่า volume เดิม ({pos.volume})"
         )
 
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"ดึงราคา {symbol} ไม่ได้  [{code}] {msg}")
+    tick = get_tick_or_raise(symbol)
     price = tick.bid if is_long else tick.ask
 
     request = {
@@ -224,7 +205,7 @@ def partial_close_order(ticket: int, close_volume: float, comment: str = "partia
         "position":     ticket,
         "price":        price,
         "deviation":    20,
-        "magic":        234000,
+        "magic":        MAGIC_NUMBER,
         "comment":      comment,
         "type_time":    mt5.ORDER_TIME_GTC,
         "type_filling": _filling_mode(symbol),
@@ -254,12 +235,7 @@ def partial_close_order(ticket: int, close_volume: float, comment: str = "partia
 # ---------------------------------------------------------------------------
 
 def modify_sltp(ticket: int, new_sl: float = None, new_tp: float = None) -> None:
-    positions = mt5.positions_get(ticket=ticket)
-    if not positions:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"หา position ticket #{ticket} ไม่เจอ  [{code}] {msg}")
-
-    pos = positions[0]
+    pos = get_position_or_raise(ticket)
     request = {
         "action":   mt5.TRADE_ACTION_SLTP,
         "position": ticket,
