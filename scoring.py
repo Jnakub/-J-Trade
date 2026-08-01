@@ -124,6 +124,38 @@ def calc_rr(entry: float, sl: float, tp: float, direction: str) -> float:
 # Reusable scoring function (MT5 must already be initialized by caller)
 # ---------------------------------------------------------------------------
 
+def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str, str]:
+    """คืน (bias, bias_source) — Long/Short ตาม trend_flip (ถ้ามี k ยืนยันแล้วใน
+    TREND_FLIP_K) หรือ EMA50/200 fallback — ดึงมาเป็นฟังก์ชันแยกเพื่อให้ backtest ภายนอก
+    (เช่น backtest_exit_compare.py) รู้ bias ก่อนเรียก compute_score ได้โดยไม่ต้อง copy
+    logic ชุดนี้มาเขียนซ้ำ (compute_score เองก็เรียกตัวนี้ภายใน)
+
+    2026-07-27: symbol ที่มี k ยืนยันแล้วใน TREND_FLIP_K ใช้ trend_flip (fractal+ratchet+ATR)
+    แทน EMA50/200 เพราะ backtest 403 วันพบว่า EMA bias บล็อกโอกาสไปถึง 65.4% ของเวลา (BTC) /
+    24.9% (XAU) ส่วน trend_flip บล็อกแค่ 12.6% / 8.2% ในข้อมูลเดียวกัน — symbol ที่ไม่มีใน
+    ตาราง fallback ไป EMA เดิมอัตโนมัติ
+
+    ใช้ df_1d.iloc[:-1] (ตัดแท่งวันนี้ที่ยังไม่ปิด) ไม่ใช่ df_1d เต็ม — เพราะ trend_flip ไวกว่า
+    EMA มาก การเทียบ close สดของแท่งที่ยังไม่ปิดกับรัศมี k*ATR ที่แคบ เสี่ยง bias "กระพริบ"
+    ไปมาถ้าเรียกหลายครั้งในวันเดียวกันตอนราคาแกว่งใกล้เส้นพอดี (EMA ไม่ค่อยมีปัญหานี้เพราะ
+    period 50/200 ทำให้แท่งเดียวมีน้ำหนักเล็กมาก)"""
+    ema50_1d  = ema(df_1d["close"], 50).iloc[-1]
+    ema200_1d = ema(df_1d["close"], 200).iloc[-1]
+    trend_flip_k = TREND_FLIP_K.get(symbol)
+    if trend_flip_k is None:
+        return ("Long" if ema50_1d > ema200_1d else "Short"), "EMA50/200"
+
+    closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
+    flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
+    flip_regime = flip_df["regime"].iloc[-1]
+    if flip_regime == "Bull":
+        return "Long", "trend_flip"
+    if flip_regime == "Bear":
+        return "Short", "trend_flip"
+    # bootstrap ยังไม่พร้อม (ไม่ควรเกิดกับ ~800 แท่ง 1D — เผื่อไว้กันพังเฉยๆ) fallback ไป EMA
+    return ("Long" if ema50_1d > ema200_1d else "Short"), "EMA50/200"
+
+
 def compute_score(symbol: str, direction: str, entry: float,
                   sl: float = None, tp: float = None,
                   force: bool = False, as_of: datetime = None) -> tuple[float, list, bool, dict]:
@@ -149,38 +181,11 @@ def compute_score(symbol: str, direction: str, entry: float,
     price = df_1h["close"].iloc[-1] if as_of is not None else get_tick_or_raise(symbol).bid
 
     ema50_1d  = ema(df_1d["close"], 50).iloc[-1]
-    ema200_1d = ema(df_1d["close"], 200).iloc[-1]
     ema50_4h  = ema(df_4h["close"], 50).iloc[-1]
     ema50_1h  = ema(df_1h["close"], 50).iloc[-1]
 
-    # Bias check — 2026-07-27: symbol ที่มี k ยืนยันแล้วใน TREND_FLIP_K ใช้ trend_flip
-    # (fractal+ratchet+ATR) แทน EMA50/200 เพราะ backtest 403 วันพบว่า EMA bias บล็อกโอกาส
-    # ไปถึง 65.4% ของเวลา (BTC) / 24.9% (XAU) ส่วน trend_flip บล็อกแค่ 12.6% / 8.2% ใน
-    # ข้อมูลเดียวกัน — symbol ที่ไม่มีในตาราง fallback ไป EMA เดิมอัตโนมัติ
-    #
-    # ใช้ df_1d.iloc[:-1] (ตัดแท่งวันนี้ที่ยังไม่ปิด) ไม่ใช่ df_1d เต็ม — เพราะ trend_flip
-    # ไวกว่า EMA มาก การเทียบ close สดของแท่งที่ยังไม่ปิดกับรัศมี k*ATR ที่แคบ เสี่ยง bias
-    # "กระพริบ" ไปมาถ้าเรียก compute_score หลายครั้งในวันเดียวกันตอนราคาแกว่งใกล้เส้นพอดี
-    # (EMA ไม่ค่อยมีปัญหานี้เพราะ period 50/200 ทำให้แท่งเดียวมีน้ำหนักเล็กมาก) ผลคือ bias
-    # จาก trend_flip จะ "ล็อก" ตามแท่งปิดล่าสุดทั้งวัน อัปเดตวันละครั้งตอนแท่งใหม่ปิด — ช้าลง
-    # นิดหน่อยจากในอุดมคติ (เร็วสุด) แต่ยังเร็วกว่า EMA มาก และไม่กระพริบ
-    trend_flip_k = TREND_FLIP_K.get(symbol)
-    if trend_flip_k is not None:
-        closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
-        flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
-        flip_regime = flip_df["regime"].iloc[-1]
-        if flip_regime == "Bull":
-            trend_bias = "Long"
-        elif flip_regime == "Bear":
-            trend_bias = "Short"
-        else:
-            # bootstrap ยังไม่พร้อม (ไม่ควรเกิดกับ ~800 แท่ง 1D — เผื่อไว้กันพังเฉยๆ) fallback ไป EMA
-            trend_bias = "Long" if ema50_1d > ema200_1d else "Short"
-    else:
-        trend_bias = "Long" if ema50_1d > ema200_1d else "Short"
-
+    trend_bias, bias_source = get_trend_bias(symbol, df_1d)
     if trend_bias != direction.capitalize():
-        bias_source = "trend_flip" if trend_flip_k is not None else "EMA50/200"
         bias_label = "Downtrend" if trend_bias == "Short" else "Uptrend"
         raise ValueError(
             f"Direction ไม่ตรง Bias — กราฟ 1D เป็น {bias_label} ({bias_source}) "

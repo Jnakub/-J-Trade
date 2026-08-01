@@ -16,20 +16,11 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from mt5_connect import connect
-from config import (
-    MT5_TIMEFRAMES, MIN_SCORE, MIN_RR, MIN_RR_HARD_BLOCK,
-    WEIGHT_TREND_1D, WEIGHT_OBV_1D, WEIGHT_TREND_4H, WEIGHT_OBV_4H,
-    WEIGHT_TREND_1H, WEIGHT_DI_1H, WEIGHT_MACD,
-    WEIGHT_RR,
-)
-from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction, TREND_FLIP_K
-from swing import (
-    find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, calc_atr, calc_di,
-    find_swing_lows, find_swing_highs,
-)
+from config import MT5_TIMEFRAMES
+from scoring import compute_score, get_trend_bias, calc_rr
+from swing import calc_atr, find_swing_lows, find_swing_highs
 from indicators import calc_adx
 from binance import merge_real_volume
-from trend_flip import compute_trend_regime
 
 SYMBOL          = "BTCUSDm"
 LOOKBACK_DAYS   = 30
@@ -55,78 +46,30 @@ def get_hist(symbol, tf, dt, bars):
 
 
 def score_entry(symbol, snap_dt):
-    """ทำซ้ำ logic เดียวกับ scoring.compute_score() แต่ใช้ข้อมูลย้อนหลัง ณ snap_dt"""
-    df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)   # 2026-07-27: 210->800 ให้
-                                                                    # trend_flip มีประวัติพอ
-    df_4h = get_hist(symbol, MT5_TIMEFRAMES["4H"], snap_dt, 210)
-    df_1h = get_hist(symbol, MT5_TIMEFRAMES["1H"], snap_dt, 110)
-    if df_1d is None or df_4h is None or df_1h is None:
+    """เรียก scoring.compute_score(as_of=snap_dt) ตรงๆ แทนการ reimplement logic ของมัน
+    (เดิมไฟล์นี้ copy compute_score มาทั้งดุ้นเหมือน backtest_score.py ก่อนแก้ — ดู
+    scoring.py.compute_score docstring) ต้องหา bias เองก่อนเพื่อรู้ว่าจะส่ง direction
+    ไหนให้ compute_score (มันเองก็ตรวจ bias ซ้ำภายในอีกที กันเพี้ยน)"""
+    df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)   # 800 บาร์ให้ trend_flip มีประวัติพอ
+    if df_1d is None or len(df_1d) < 205:
         return None
-    if len(df_1d) < 205 or len(df_4h) < 60 or len(df_1h) < 60:
-        return None
-
     df_1d = merge_real_volume(df_1d, symbol, "1D")
-    df_4h = merge_real_volume(df_4h, symbol, "4H")
-    df_1h = merge_real_volume(df_1h, symbol, "1H")   # 2026-07-27: ให้ตรงกับ scoring.py (เดิมไม่เคย merge)
+    direction, _ = get_trend_bias(symbol, df_1d)
 
-    entry = df_1h["close"].iloc[-1]
-
-    # Bias — 2026-07-27: ให้ตรงกับ scoring.py.compute_score (เดิมใช้ EMA เสมอ)
-    ema50_1d, ema200_1d = ema(df_1d["close"], 50).iloc[-1], ema(df_1d["close"], 200).iloc[-1]
-    trend_flip_k = TREND_FLIP_K.get(symbol)
-    if trend_flip_k is not None:
-        closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
-        flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
-        flip_regime = flip_df["regime"].iloc[-1]
-        if flip_regime in ("Bull", "Bear"):
-            direction = "Long" if flip_regime == "Bull" else "Short"
-        else:
-            direction = "Long" if ema50_1d > ema200_1d else "Short"   # bootstrap ไม่พร้อม -> fallback
-    else:
-        direction = "Long" if ema50_1d > ema200_1d else "Short"
-    is_long   = direction == "Long"
-
-    sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.22)
-    if not sl_info.get("passed"):
+    df_1h_snap = get_hist(symbol, MT5_TIMEFRAMES["1H"], snap_dt, 2)
+    if df_1h_snap is None or df_1h_snap.empty:
         return None
-    sl        = sl_info["sl"]
-    swing_idx = sl_info["swing_idx"]
-    fib       = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.22)
-    tp        = fib["levels"]["0.786"] if fib.get("passed") else (   # ตรงกับ scoring.py/reversal.py ปัจจุบัน (2026-07-23)
-        entry + abs(entry - sl) * MIN_RR if is_long else entry - abs(entry - sl) * MIN_RR
-    )
+    entry = df_1h_snap["close"].iloc[-1]
 
+    try:
+        total, criteria, passed, sl_info = compute_score(symbol, direction, entry, as_of=snap_dt)
+    except ValueError:
+        return None
+    if not passed:
+        return None
+
+    sl, tp = sl_info["sl"], sl_info["tp"]
     rr = calc_rr(entry, sl, tp, direction)
-    if rr < MIN_RR_HARD_BLOCK - 1e-9:
-        return None
-
-    ema50_4h = ema(df_4h["close"], 50).iloc[-1]
-    ema50_1h = ema(df_1h["close"], 50).iloc[-1]
-    obv_1d, obv_4h = calc_obv(df_1d), calc_obv(df_4h)
-    plus_di_1h, minus_di_1h = calc_di(df_1h)
-    macd_line, signal_line, macd_hist = calc_macd(df_4h)
-
-    def obv_rising(obv, lookback):
-        if len(obv) <= lookback:
-            return False
-        return (obv.iloc[-1] > obv.iloc[-1 - lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1 - lookback])
-
-    criteria = [
-        (WEIGHT_TREND_1D,     (entry > ema50_1d) if is_long else (entry < ema50_1d)),
-        (WEIGHT_OBV_1D,       obv_rising(obv_1d, 10)),
-        (WEIGHT_TREND_4H,     (entry > ema50_4h) if is_long else (entry < ema50_4h)),
-        (WEIGHT_OBV_4H,       obv_rising(obv_4h, 10)),
-        (WEIGHT_TREND_1H,     (entry > ema50_1h) if is_long else (entry < ema50_1h)),
-        (WEIGHT_DI_1H,        (plus_di_1h.iloc[-1] > minus_di_1h.iloc[-1]) if is_long
-                              else (minus_di_1h.iloc[-1] > plus_di_1h.iloc[-1])),
-        (WEIGHT_MACD,         macd_ok_for_direction(macd_line, signal_line, macd_hist, direction)),
-        (WEIGHT_RR,           rr >= MIN_RR - 1e-9),
-        # VSA ถูกตัดออกจาก scorecard 2026-07-27 (ดู config.py)
-        # Confirmation ถูกตัดออกจาก scorecard 2026-07-26 (ดู config.py)
-    ]
-    total = sum(w for w, p in criteria if p)
-    if total < MIN_SCORE:
-        return None
 
     return {"direction": direction, "entry": entry, "sl": sl, "tp": tp, "rr": rr,
             "score": total, "time": snap_dt}
