@@ -223,22 +223,22 @@ def find_sl_from_structure(df: pd.DataFrame,
                            vol_multiplier: float = 1.9,
                            wick_ratio_min: float | None = None) -> dict:
     """
-    หา SL อัตโนมัติจาก Swing High/Low **ล่าสุดสุดที่ยังอยู่ถูกฝั่งราคาปัจจุบัน** (ตัด
-    rejection/structure filter ออกแล้ว 2026-07-21 — เดิมเช็ค wick/volume rejection +
-    Lower High/Higher Low ก่อนเลือก ทำให้บางครั้ง SL อ้างอิงคนละ swing point กับ
-    TP/Structure/Confirmation ที่ใช้จุดล่าสุดตรงๆ อยู่แล้วเสมอ — ตอนนี้ใช้กฎเดียวกันหมด
-    ทั้ง 6 จุดที่แตะ swing: เอาจุดล่าสุดสุด)
-    Volume (หรือ wick_ratio_min OR-logic สำหรับ XAU) ยังกรองอยู่ใน find_swing_highs/lows เอง
+    หา SL อัตโนมัติจาก Swing High/Low **ล่าสุดสุดเท่านั้น** — จุดเดียวกับที่
+    find_tp_from_fibonacci ใช้เป็น origin (B) เสมอ ทำให้ SL/TP อ้างอิง swing point
+    เดียวกันเป๊ะทุกครั้งที่เทรดผ่าน (ก่อนหน้านี้ฟังก์ชันนี้ย้อนหาจุดเก่ากว่าถ้าจุดล่าสุด
+    ถูกราคาทะลุไปแล้ว ทำให้ SL/TP หลุด sync กันได้ 24.3% ของเวลา (BTC) / 11.9% (XAU) —
+    วัดจากหน้าต่าง 200 แท่ง — 2026-08-01 เปลี่ยนมาเป็น "ไม่เข้าเทรดเลย" แทนการย้อนหา)
 
-    เช็คฝั่งราคา (เพิ่ม 2026-07-23): swing point ที่ "ยืนยันแล้ว" ล่าสุดอาจเป็นจุดเก่าที่ราคา
-    วิ่งทะลุไปแล้วก่อนจะยืนยันจุดใหม่ทัน (ต้องรอ right แท่งขวาก่อนยืนยัน) ถ้าเอามาทำ SL ตรงๆ
-    จะได้ SL ที่อยู่ผิดฝั่ง (Short: ต่ำกว่าราคา, Long: สูงกว่าราคา) หรือใกล้ราคาเกินจริงจน R:R
-    เพี้ยน (พบจริงจาก backtest — R:R พุ่งถึง 66 เท่าเพราะ risk แคบผิดธรรมชาติ) ตอนนี้ค้นย้อน
-    หลังหาจุดล่าสุดที่ยังอยู่ถูกฝั่งราคาจริง แทนที่จะหยิบจุดล่าสุดสุดมาตรงๆ โดยไม่เช็ค
+    เช็คฝั่งราคา + ผ่อนด้วย ATR (2026-08-01, ใช้ tolerance_atr ตัวเดียวกับที่กรอง swing
+    point — ค่ากลางเดียวที่ sync กันทั้งระบบอยู่แล้ว ไม่เพิ่ม magic number ใหม่): จุด swing
+    ล่าสุดสุดถือว่า "ยังใช้ได้" ถ้าราคาปัจจุบันยังไม่ทะลุเกิน ATR(ปัจจุบัน) × tolerance_atr
+    — กันไม่ให้ wick เหวี่ยงเกินเล็กน้อยถูกนับเป็น "ทะลุจริง" ทั้งที่จริงๆ เป็นแค่ noise ปกติ
+    ถ้าทะลุเกิน tolerance นี้ = SL ไม่ผ่าน (ไม่เข้าเทรดรอบนี้ รอจุด swing ใหม่ยืนยันก่อน)
     """
     is_short      = direction.capitalize() == "Short"
     atr           = calc_atr(df)
     current_price = df["close"].iloc[-1]
+    break_tolerance = atr.iloc[-1] * tolerance_atr
     swing_highs   = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,
                                      vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
     swing_lows    = find_swing_lows(df,  left=left, right=right, tolerance_atr=tolerance_atr,
@@ -249,18 +249,16 @@ def find_sl_from_structure(df: pd.DataFrame,
     if not swings:
         return {"passed": False, "reason": "ไม่พบ Swing ในข้อมูล"}
 
-    idx = None
-    for candidate in reversed(swings):
-        price = df["high"].iloc[candidate] if is_short else df["low"].iloc[candidate]
-        if (is_short and price > current_price) or (not is_short and price < current_price):
-            idx = candidate
-            break
+    idx   = swings[-1]
+    price = df["high"].iloc[idx] if is_short else df["low"].iloc[idx]
+    still_valid = (price > current_price - break_tolerance) if is_short else \
+                  (price < current_price + break_tolerance)
 
-    if idx is None:
+    if not still_valid:
         side = "เหนือ" if is_short else "ใต้"
         return {"passed": False,
-                "reason": f"ราคาทะลุ Swing {'High' if is_short else 'Low'} ที่ยืนยันแล้วทั้งหมดไปแล้ว "
-                         f"(ไม่มีจุดไหนอยู่{side}ราคาปัจจุบัน) — รอจุดใหม่ยืนยันก่อน"}
+                "reason": f"ราคาทะลุ Swing {'High' if is_short else 'Low'} ล่าสุดไปแล้วเกิน "
+                         f"ATR×{tolerance_atr} (ไม่อยู่{side}ราคาปัจจุบันแล้ว) — รอจุดใหม่ยืนยันก่อน"}
 
     atr_val     = atr.iloc[idx]
     swing_price = df["high"].iloc[idx] if is_short else df["low"].iloc[idx]
@@ -422,7 +420,6 @@ def calc_fibonacci_levels(swing_high: float, swing_low: float,
 
 
 def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
-                           sl_swing_idx: int = None,
                            left: int = 4, right: int = 4,
                            tolerance_atr: float = 0.22,
                            vol_multiplier: float = 1.9,
@@ -431,7 +428,7 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
     หา TP อัตโนมัติจาก Fibonacci Extension — ใช้ swing 3 จุดสลับกัน (X -> A -> B)
     วัด "ขนาด impulse เดิม" จากช่วง X->A แล้วฉายต่อจาก B ไปในทิศที่เทรด
 
-    Short:  (ทั้ง 3 จุดหาเองจาก swing ที่ผ่าน volume/wick filter — ดูหมายเหตุ sl_swing_idx)
+    Short:
         B    = Swing High ล่าสุดสุด           <- จุดฉาย (origin)
         A    = Swing Low  ล่าสุดก่อน B
         X    = Swing High ล่าสุดก่อน A        <- ต้นทาง impulse ลง
@@ -447,12 +444,11 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
 
     ไม่ผ่าน (passed=False) เมื่อหา 3 จุดนี้ไม่ครบ หรือ Move <= 0
 
-    หมายเหตุ sl_swing_idx: **รับมาแต่ยังไม่ได้ใช้** (2026-07-25) — ผู้เรียกส่ง swing_idx ที่ SL ใช้
-    มาโดยตั้งใจให้ TP ยึดจุดเดียวกับ SL แต่โค้ดหา B เองจาก swing ล่าสุดสุดเสมอ ผลคือบางครั้ง
-    SL/TP อ้างอิงคนละจุด: find_sl_from_structure จงใจข้ามจุดที่ราคาทะลุไปแล้ว (เช็คฝั่งราคา
-    ตั้งแต่ 2026-07-23) ส่วนที่นี่ไม่เช็ค — วัดจริงบนหน้าต่าง 200 แท่ง: BTC ยึดคนละจุด 24.3%
-    (ห่างเฉลี่ย 92 แท่ง), XAU 11.9% (ห่างเฉลี่ย 51 แท่ง) ยังไม่แก้เพราะต้อง backtest ก่อนว่า
-    การบังคับให้ยึดจุดเดียวกันให้ผลดีกว่าจริงไหม
+    B ใช้ swing ล่าสุดสุดเสมอ (swing_highs[-1]/swing_lows[-1]) — จุดเดียวกับที่
+    find_sl_from_structure ใช้ทำ SL เป๊ะ (2026-08-01: find_sl_from_structure เปลี่ยนมาไม่
+    fallback ไปจุดเก่ากว่าอีกแล้ว ถ้าจุดล่าสุดถูกราคาทะลุไปแล้วก็แค่ไม่เข้าเทรด แทนที่จะ
+    เดิม SL/TP อ้างอิงคนละจุดกัน — parameter sl_swing_idx ที่เคยรับมาแต่ไม่ได้ใช้จึงถูกลบ
+    ทิ้งไปด้วย เพราะตอนนี้ sync กันเองโดยอัตโนมัติอยู่แล้ว ไม่ต้องส่งมาซิงค์อีก)
     """
     is_short    = direction.capitalize() == "Short"
     swing_highs = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,

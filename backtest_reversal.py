@@ -181,7 +181,7 @@ if not sl_info.get("passed"):
     sys.exit()
 sl = sl_info["sl"]
 
-fib_info = find_tp_from_fibonacci(df_4h, direction, sl_info.get("swing_idx"), left=4, right=4,
+fib_info = find_tp_from_fibonacci(df_4h, direction, left=4, right=4,
                                   tolerance_atr=0.22, vol_multiplier=vol_mult, wick_ratio_min=wick_min)
 if fib_info.get("passed"):
     tp = fib_info["levels"]["0.786"]   # ตรงกับ reversal.py ปัจจุบัน (2026-07-23 กลับมาใช้ 0.786)

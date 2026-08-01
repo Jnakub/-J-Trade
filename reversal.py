@@ -99,8 +99,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     fib_info = {}
     used_fallback_tp = False   # TP มาจากสูตร fallback (ไม่ใช่ Fibonacci) — ดูเกณฑ์ R:R ด้านล่าง
     if tp is None:
-        swing_idx = sl_info.get("swing_idx")
-        fib_info  = find_tp_from_fibonacci(df_4h, direction, swing_idx, left=4, right=4, tolerance_atr=0.22,
+        fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
             tp = fib_info["levels"]["0.786"]   # 2026-07-23: กลับมาใช้ 0.786 (ดู scoring.py — backtest
