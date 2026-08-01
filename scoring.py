@@ -20,7 +20,6 @@ from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirm
                    find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min,
                    calc_di)
 from binance import merge_real_volume
-from vsa import check_vsa
 from trend_flip import compute_trend_regime
 
 # k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
@@ -208,10 +207,6 @@ def compute_score(symbol: str, direction: str, entry: float,
             used_fallback_tp = True
             tp = (entry + abs(entry - sl) * MIN_RR) if is_long else (entry - abs(entry - sl) * MIN_RR)
 
-    # VSA — 2026-07-27: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
-    # ยังคำนวณไว้แสดงผลอ้างอิงในรายงานเท่านั้น ไม่มีผลต่อการตัดสินใจเข้าไม้
-    vsa_result  = check_vsa(df_1d, df_4h, direction)
-
     # Confirmation — ราคาทะลุ Swing Low/High บน 4H
     # 2026-07-26: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
     # ยังคำนวณไว้แสดงผลอ้างอิงในรายงานเท่านั้น ไม่มีผลต่อการตัดสินใจเข้าไม้
@@ -253,7 +248,6 @@ def compute_score(symbol: str, direction: str, entry: float,
     sl_info["sl"]           = sl
     sl_info["tp"]           = tp
     sl_info["fib_info"]     = fib_info
-    sl_info["vsa_result"]   = vsa_result
     sl_info["conf_result"]  = conf_result
 
     # Hard block: กันแค่ไม่ให้เสี่ยงมากกว่าได้ (R:R < 1) — ไม่สนคะแนนรวม
@@ -328,14 +322,6 @@ def main() -> None:
             print(f"  ราคาปัจจุบัน : {conf['current_price']}")
             print(f"  Key Level    : {conf['key_level']}")
             print(f"  Result       : {conf['reason']}")
-
-        vsa = sl_info.get("vsa_result", {})
-        if vsa:
-            print(f"\n  VSA (อ้างอิงเท่านั้น — ไม่คิดคะแนน)")
-            print(f"  [Step 1 — 1D] Price Pos : {vsa['price_pos']}  →  {'✅' if vsa['step1_ok'] else '❌'}")
-            print(f"  [Step 2 — 4H] Pattern   : {vsa['pattern']}  →  {'✅' if vsa['step2_ok'] else '❌'}")
-            print(f"  Color {vsa['color']} | Vol {vsa['vol']} | Spread {vsa['spread']} | Close {vsa['close_pos']} | Wick {vsa['wick']}")
-            print(f"  VSA OK     : {'✅ YES' if vsa['vsa_ok'] else '❌ NO'}")
 
         fib = sl_info.get("fib_info", {})
         if fib.get("passed"):

@@ -16,7 +16,6 @@ from mt5_connect import connect
 from config import MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT, MIN_RR, MIN_RR_HARD_BLOCK
 from scoring import ema, calc_obv, calc_macd, calc_rr, macd_ok_for_direction, TREND_FLIP_K
 from swing import find_sl_from_structure, find_tp_from_fibonacci, check_confirmation, swing_vol_multiplier, swing_wick_ratio_min, calc_di
-from vsa import check_vsa
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
 from config import (
@@ -111,7 +110,6 @@ macd_line, signal_line, macd_hist = calc_macd(df_4h)
 def obv_ok(obv, lookback=5):
     return (obv.iloc[-1] > obv.iloc[-1-lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1-lookback])
 
-vsa_result  = check_vsa(df_1d, df_4h, direction)
 conf_result = check_confirmation(price, df_4h, direction, symbol)
 
 criteria = [
@@ -124,8 +122,6 @@ criteria = [
                     else (minus_di_1h.iloc[-1] > plus_di_1h.iloc[-1]),  WEIGHT_DI_1H),
     ("MACD 4H",     macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
     ("R:R",         rr >= MIN_RR,                                           WEIGHT_RR),
-    # VSA ถูกตัดออกจาก scorecard 2026-07-27 (ดู config.py) — vsa_result ยังคำนวณไว้
-    # แสดงผลอ้างอิงด้านล่างเท่านั้น
     # Confirmation ถูกตัดออกจาก scorecard 2026-07-26 (ดู config.py) — conf_result ยัง
     # คำนวณไว้แสดงผลอ้างอิงด้านล่างเท่านั้น ให้ตรงกับ scoring.py
 ]
@@ -135,7 +131,7 @@ passed = total >= MIN_SCORE
 
 print(f"\n{'=' * 48}")
 print(f"  SL={sl:.0f}  TP={tp:.0f}  R:R={rr:.2f}")
-print(f"  VSA: {vsa_result['pattern']} | Conf: {conf_result['reason'][:40]}")
+print(f"  Conf: {conf_result['reason'][:40]}")
 print(f"{'=' * 48}")
 for name, p, w in criteria:
     print(f"  {name:<15} {'PASS' if p else 'FAIL'}  {w if p else 0:.1f}/{w:.1f}")

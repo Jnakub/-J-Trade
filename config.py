@@ -60,8 +60,8 @@ MIN_SCORE       = 6.0     # คะแนนขั้นต่ำจาก TOTAL_
 # ได้ไม้เพิ่ม 13->14) ส่วน XAU แย่ลงเล็กน้อย 8% แต่ได้ไม้เพิ่ม 21% (14->17 ไม้)
 # หมายเหตุ: WEIGHT_VSA_CLIMAX ใน reversal.py เป็นค่าคงที่แยกต่างหาก ไม่ได้ import จากที่นี่
 # — Reversal path (is_climax_bar) ไม่กระทบจากการตัดนี้เลย
-# ฟังก์ชัน check_vsa_trend() ใน vsa.py (Scoring-specific, แยกจาก check_vsa เดิม) ยังอยู่
-# เผื่อเอากลับมาใช้ทีหลังถ้ามีข้อมูลมากพอ — ไม่ได้ถูกเรียกจากไหนแล้วตอนนี้
+# 2026-08-01: check_vsa/check_vsa_trend ใน vsa.py ถูกลบทิ้งแล้ว (ไม่มีใครเรียกใช้อีก) —
+# ตอนนี้ Scoring ไม่แตะ VSA เลย
 WEIGHT_TREND_1D      = 2.0
 WEIGHT_OBV_1D        = 1.0
 WEIGHT_TREND_4H      = 1.0
