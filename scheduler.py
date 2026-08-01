@@ -15,10 +15,10 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 import journal
 from config import (
-    SYMBOLS, ACCOUNT_BALANCE, RISK_PER_TRADE,
+    SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
 )
-from mt5_connect import connect
+from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_ohlcv_real, ema
 from order import calculate_lot_size, clamp_lot, place_order
 from binance import merge_real_volume
@@ -69,15 +69,22 @@ def scan_symbol(symbol: str) -> None:
                 print(f"  [{symbol}] Exit Monitor ERROR — {exc}")
         return
 
-    # 2. Daily loss guard (เช็คเฉพาะตอนจะหา entry ใหม่)
-    if not journal.check_daily_loss(ACCOUNT_BALANCE, MAX_DAILY_LOSS):
+    # 2. ดึงยอดเงินจริงจากบัญชี
+    try:
+        balance = get_account_balance()
+    except RuntimeError as exc:
+        print(f"  [{symbol}] ERROR — {exc}")
+        return
+
+    # 3. Daily loss guard (เช็คเฉพาะตอนจะหา entry ใหม่)
+    if not journal.check_daily_loss(balance, MAX_DAILY_LOSS):
         print(f"  [{symbol}] SKIP — daily loss limit reached")
         return
 
-    # 3. Balance พอ
-    account = mt5.account_info()
-    if account and account.balance < ACCOUNT_BALANCE * RISK_PER_TRADE:
-        print(f"  [{symbol}] SKIP — balance ไม่พอ")
+    # 4. Balance ต้องมากกว่า 0 (risk amount = balance * RISK_PER_TRADE เป็นสัดส่วนของ balance เอง
+    # เสมออยู่แล้ว จุดที่พังจริงคือ balance <= 0 ไม่ใช่สัดส่วน)
+    if balance <= 0:
+        print(f"  [{symbol}] SKIP — balance ไม่พอ ({balance:.2f})")
         return
 
     # 4. Regime Check → เลือกว่าจะเปิด Scoring (ตามเทรนด์) หรือ Reversal (สวนเทรนด์) หรือพักก่อน
@@ -130,7 +137,7 @@ def scan_symbol(symbol: str) -> None:
             return
 
         # 5. Execute
-        lot, _ = calculate_lot_size(symbol, entry, sl, ACCOUNT_BALANCE, RISK_PER_TRADE)
+        lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
         lot    = clamp_lot(symbol, lot)
 
         ticket = place_order(symbol, direction, entry, sl, tp, lot)

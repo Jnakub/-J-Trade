@@ -8,10 +8,10 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 import journal
 from config import (
-    ACCOUNT_BALANCE, RISK_PER_TRADE, MAX_DAILY_LOSS,
+    RISK_PER_TRADE, MAX_DAILY_LOSS,
     MIN_SCORE, TOTAL_WEIGHT,
 )
-from mt5_connect import connect
+from mt5_connect import connect, get_account_balance
 from order import calculate_lot_size, clamp_lot, place_order
 from scoring import compute_score, calc_rr
 
@@ -46,9 +46,9 @@ class ScannerAgent:
 # ---------------------------------------------------------------------------
 
 class RiskCheckerAgent:
-    def check(self, symbol: str) -> tuple[bool, str]:
+    def check(self, symbol: str, balance: float) -> tuple[bool, str]:
         # 1. Daily loss guard
-        if not journal.check_daily_loss(ACCOUNT_BALANCE, MAX_DAILY_LOSS):
+        if not journal.check_daily_loss(balance, MAX_DAILY_LOSS):
             return False, f"Daily loss limit ({MAX_DAILY_LOSS*100:.0f}%) reached for today"
 
         # 2. No open position for this symbol
@@ -57,14 +57,10 @@ class RiskCheckerAgent:
             return False, f"Already have {len(positions)} open position(s) for {symbol}"
 
         # 3. Sufficient balance
-        account = mt5.account_info()
-        if account is None:
-            code, msg = mt5.last_error()
-            return False, f"Cannot get account info  [{code}] {msg}"
-        risk_amount = ACCOUNT_BALANCE * RISK_PER_TRADE
-        if account.balance < risk_amount:
+        risk_amount = balance * RISK_PER_TRADE
+        if balance < risk_amount:
             return False, (
-                f"Balance {account.balance:.2f} insufficient "
+                f"Balance {balance:.2f} insufficient "
                 f"for risk amount {risk_amount:.2f}"
             )
 
@@ -100,10 +96,12 @@ def run_bot(symbol: str, direction: str,
     load_dotenv()
     try:
         connect()
+        balance = get_account_balance()
+        print(f"  Account Balance : {balance:,.2f}")
 
         # Step 1: Risk Check
         risk = RiskCheckerAgent()
-        ok, reason = risk.check(symbol)
+        ok, reason = risk.check(symbol, balance)
         if not ok:
             print(f"BLOCKED by Risk Checker: {reason}")
             return
@@ -145,7 +143,7 @@ def run_bot(symbol: str, direction: str,
                 return
 
         # Step 3: Execute
-        lot, _ = calculate_lot_size(symbol, entry, sl, ACCOUNT_BALANCE, RISK_PER_TRADE)
+        lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
         lot     = clamp_lot(symbol, lot)
 
         print(f"\n  >>> ส่ง order อัตโนมัติ <<<")

@@ -32,8 +32,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-from config import MT5_TIMEFRAMES, ACCOUNT_BALANCE, RISK_PER_TRADE
-from mt5_connect import connect
+from config import MT5_TIMEFRAMES, RISK_PER_TRADE, MIN_RR_HARD_BLOCK
+from mt5_connect import connect, get_account_balance
 from scoring import get_ohlcv, get_ohlcv_real, calc_rr
 from swing import find_sl_from_structure, find_tp_from_fibonacci, swing_vol_multiplier, swing_wick_ratio_min
 from regime_check import (
@@ -54,9 +54,8 @@ TOTAL_WEIGHT       = (WEIGHT_KEY_LEVEL + WEIGHT_DIVERGENCE + WEIGHT_RSI_EXTREME 
 
 MIN_SCORE_REVERSAL = 7
 MIN_RR_REVERSAL    = 2.0   # เกณฑ์ "R:R ดีจริง" ในสกอร์การ์ด + สูตร fallback TP (ยังใช้ 2.0 เหมือนเดิม)
-MIN_RR_HARD_BLOCK  = 1.0   # 2026-07-23: เกณฑ์ขั้นต่ำสุดที่บล็อกได้ไม่ว่าคะแนนรวมเท่าไหร่
-                          # (แยกจาก MIN_RR_REVERSAL แล้ว — เดิมใช้ค่าเดียวกันทำให้ hard block
-                          # กับคะแนนสกอร์การ์ดซ้ำซ้อนกัน ผ่าน hard block ก็ได้คะแนนข้อนี้เสมอ)
+# MIN_RR_HARD_BLOCK มาจาก config.py (2026-08-01) — เดิม duplicate ค่า 1.0 แยกไว้เองในไฟล์นี้
+# ทำให้ถ้าแก้ค่าใน config.py แล้วลืมแก้ที่นี่ด้วย จะเพี้ยนกันเงียบๆ ระหว่าง Scoring กับ Reversal
 RSI_OVERBOUGHT     = 70
 RSI_OVERSOLD       = 30
 
@@ -186,11 +185,11 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
 # ---------------------------------------------------------------------------
 
 def print_report(symbol: str, direction: str, entry: float, score: float,
-                 criteria: list, passed: bool, info: dict) -> None:
+                 criteria: list, passed: bool, info: dict, balance: float) -> None:
     sl, tp, rr = info["sl"], info["tp"], info["rr"]
     risk_pct   = abs(entry - sl) / entry * 100
     reward_pct = abs(tp - entry) / entry * 100
-    lot, decimals = calculate_lot_size(symbol, entry, sl, ACCOUNT_BALANCE, RISK_PER_TRADE)
+    lot, decimals = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
 
     print()
     print("=" * 66)
@@ -238,8 +237,9 @@ def main() -> None:
 
     try:
         connect()
+        balance = get_account_balance()
         score, criteria, passed, info = compute_reversal_score(symbol, direction, entry, sl, tp)
-        print_report(symbol, direction, entry, score, criteria, passed, info)
+        print_report(symbol, direction, entry, score, criteria, passed, info, balance)
     except ValueError as exc:
         print(f"{RED}[ไม่ผ่าน]{RESET} {exc}")
     finally:

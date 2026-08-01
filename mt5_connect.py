@@ -46,6 +46,15 @@ def print_account_info() -> None:
     print(f"Equity   : {info.equity:,.2f} {info.currency}")
 
 
+def get_account_balance() -> float:
+    """ดึงยอดเงินจริงจากบัญชี MT5 ที่ connect() อยู่ (ต้องเรียก connect() ก่อนเสมอ)."""
+    info = mt5.account_info()
+    if info is None:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"ดึง account balance ไม่ได้  [{code}] {msg}")
+    return info.balance
+
+
 def print_prices(symbols: list[str]) -> None:
     print()
     for symbol in symbols:

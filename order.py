@@ -7,34 +7,38 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-from config import ACCOUNT_BALANCE, RISK_PER_TRADE
-from mt5_connect import connect
+from config import RISK_PER_TRADE
+from mt5_connect import connect, get_account_balance
 
 
 # ---------------------------------------------------------------------------
 # Lot size calculation
 # ---------------------------------------------------------------------------
 
+def _decimals_from_step(step: float) -> int:
+    s = f"{step:.10f}".rstrip("0")
+    return len(s.split(".")[1]) if "." in s else 0
+
+
 def calculate_lot_size(symbol: str, entry: float, sl: float,
                        balance: float, risk_pct: float) -> tuple[float, int]:
-    """Return (lot, decimal_places)."""
-    risk_amount  = balance * risk_pct
-    sym_upper    = symbol.upper()
-    distance     = abs(entry - sl)
+    """Return (lot, decimal_places). ใช้ trade_contract_size จริงจาก MT5
+    แทนการเดาจากชื่อ symbol — กันเดาผิดถ้า broker เปลี่ยน spec หรือเพิ่ม symbol ใหม่"""
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"หา symbol info ของ {symbol} ไม่ได้  [{code}] {msg}")
 
-    if any(x in sym_upper for x in ["BTC", "ETH"]):
-        risk_distance_pct = distance / entry
-        raw_lot   = risk_amount / (risk_distance_pct * entry)
-        decimals  = 3
-    elif "XAU" in sym_upper or "GOLD" in sym_upper:
-        raw_lot   = risk_amount / (distance * 100)
-        decimals  = 2
-    elif "JPY" in sym_upper:
-        raw_lot   = risk_amount / (distance * 100000 / entry)
-        decimals  = 2
+    risk_amount   = balance * risk_pct
+    distance      = abs(entry - sl)
+    contract_size = info.trade_contract_size
+    decimals      = _decimals_from_step(info.volume_step)
+
+    if "JPY" in symbol.upper():
+        # คู่ที่ quote currency เป็น JPY ไม่ใช่ account currency (USD) — แปลงคร่าวๆ ด้วย entry
+        raw_lot = risk_amount / (distance * contract_size / entry)
     else:
-        raw_lot   = risk_amount / (distance * 100000)
-        decimals  = 2
+        raw_lot = risk_amount / (distance * contract_size)
 
     lot = math.floor(raw_lot * 10 ** decimals) / 10 ** decimals
     return lot, decimals
@@ -322,9 +326,11 @@ def main() -> None:
     load_dotenv()
 
     try:
+        connect()
+        balance       = get_account_balance()
         lot, decimals = calculate_lot_size(symbol, entry, sl,
-                                           ACCOUNT_BALANCE, RISK_PER_TRADE)
-        risk_amount   = ACCOUNT_BALANCE * RISK_PER_TRADE
+                                           balance, RISK_PER_TRADE)
+        risk_amount   = balance * RISK_PER_TRADE
 
         # reward ประมาณจาก lot × distance_tp (ใช้หน่วยเดียวกับ risk)
         risk_distance = abs(entry - sl)
@@ -341,7 +347,7 @@ def main() -> None:
         print(f"  TP         : {tp}")
         print(f"  Lot Size   : {lot:.{decimals}f}")
         print(f"  Risk       : ${risk_amount:,.2f}  "
-              f"({RISK_PER_TRADE*100:.0f}% of ${ACCOUNT_BALANCE:,.0f})")
+              f"({RISK_PER_TRADE*100:.0f}% of ${balance:,.0f})")
         print(f"  Reward     : ${reward_amount:,.2f}")
         print(f"  R:R        : {tp_distance/risk_distance:.2f}" if risk_distance else "  R:R        : N/A")
         print("=" * 45)
@@ -355,7 +361,6 @@ def main() -> None:
             print("ยกเลิก — ไม่ได้ส่ง order")
             return
 
-        connect()
         lot = clamp_lot(symbol, lot)
         place_order(symbol, direction, entry, sl, tp, lot)
 
