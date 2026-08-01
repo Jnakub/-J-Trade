@@ -28,6 +28,10 @@ from exit_monitor import (
 )
 from regime_check import get_regime
 import reversal
+from logger_setup import get_logger, tee_print
+
+log = get_logger("scheduler")
+print = tee_print(log)   # เขียนทุกอย่างที่ print ลง logs/scheduler.log ด้วย (ดู logger_setup.py)
 
 # Regime ที่ "ไม่เปิด" scorecard ใดๆ — รอความชัดเจนก่อน (ตาม Mutual Exclusivity ที่ตั้งไว้)
 REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH")
@@ -67,6 +71,7 @@ def scan_symbol(symbol: str) -> None:
                 execute_decision(m)
             except Exception as exc:
                 print(f"  [{symbol}] Exit Monitor ERROR — {exc}")
+                log.error(f"[{symbol}] Exit Monitor ERROR", exc_info=True)
         return
 
     # 2. ดึงยอดเงินจริงจากบัญชี
@@ -162,6 +167,7 @@ def scan_symbol(symbol: str) -> None:
         print(f"  [{symbol}] BLOCKED — {exc}")
     except Exception as exc:
         print(f"  [{symbol}] ERROR — {exc}")
+        log.error(f"[{symbol}] scan_symbol ERROR", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +194,7 @@ def run_scheduler() -> None:
                 scan_symbol(symbol)
         except Exception as exc:
             print(f"[ERROR] MT5 connection: {exc}")
+            log.error("MT5 connection ERROR", exc_info=True)
         finally:
             mt5.shutdown()
 

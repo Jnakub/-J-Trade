@@ -30,6 +30,10 @@ from swing import calc_atr, find_swing_highs, find_swing_lows, swing_vol_multipl
 from vsa import _volume_class, _spread_class, _close_position, _price_position, detect_vsa_pattern
 from order import close_order, partial_close_order, modify_sltp, clamp_lot
 import journal
+from logger_setup import get_logger, tee_print
+
+log = get_logger("exit_monitor")
+print = tee_print(log)   # เขียนทุกอย่างที่ print ลง logs/exit_monitor.log ด้วย (ดู logger_setup.py)
 
 AUTO_EXECUTE = True   # False = แค่แนะนำเหมือนเดิม, True = สั่งจริงตามผลลัพธ์ (เฉพาะบัญชี DEMO)
 
@@ -719,6 +723,7 @@ def execute_decision(m: dict) -> None:
 
     except Exception as exc:
         print(f"  {RED}[AUTO] ERROR ticket #{ticket} — {exc}{RESET}")
+        log.error(f"[AUTO] execute_decision ERROR ticket #{ticket}", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -739,6 +744,7 @@ def scan_once():
                 execute_decision(m)
             except Exception as exc:
                 print(_r(f"  [{pos.symbol} #{pos.ticket}] ERROR — {exc}"))
+                log.error(f"[{pos.symbol} #{pos.ticket}] analyze_position ERROR", exc_info=True)
     finally:
         mt5.shutdown()
 
@@ -760,6 +766,7 @@ def run_monitor():
             scan_once()
         except Exception as exc:
             print(_r(f"[ERROR] {exc}"))
+            log.error("run_monitor scan_once ERROR", exc_info=True)
 
         next_run = datetime.fromtimestamp(time.time() + INTERVAL_SECONDS).strftime("%H:%M:%S")
         print(f"\n  รอบถัดไป : {next_run}")
