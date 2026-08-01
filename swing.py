@@ -240,6 +240,12 @@ def find_sl_from_structure(df: pd.DataFrame,
     ตรงๆ มาบวก/ลบ buffer จะได้ SL ที่อยู่ใกล้หรือผิดฝั่งราคาปัจจุบันเลย (Short: SL ต่ำกว่า
     entry ทั้งที่ต้องอยู่เหนือ) กลับไปเจอบั๊กเดิม (R:R แคบผิดธรรมชาติ) แบบเบาลง — ยึดราคา
     ปัจจุบันแทนเมื่อมันไกลจากจุด swing มากกว่า กัน SL ใกล้ราคาเข้าเกินจริง
+
+    เคสยึด current_price (ทะลุแล้ว) ใช้ buffer = max(atr_buffer, tolerance_atr) แทน
+    atr_buffer เฉยๆ (2026-08-01): tolerance_atr (0.22) > atr_buffer (0.1) อยู่แล้ว ถ้ายังใช้
+    atr_buffer ตัวเดิม SL จะห่าง current_price แค่ ATR×0.1 — แคบผิดธรรมชาติอีกแบบ (กันชนที่
+    ออกแบบมาสำหรับเคสปกติที่ SL ยึด swing_price ซึ่งมักไกลจากราคาอยู่แล้ว ไม่ใช่ระยะเสี่ยง
+    ทั้งหมด) เคสปกติ (ไม่ทะลุ) ยังใช้ atr_buffer เดิมเป๊ะ ไม่กระทบพฤติกรรมที่มีอยู่แล้ว
     """
     is_short      = direction.capitalize() == "Short"
     atr           = calc_atr(df)
@@ -268,8 +274,10 @@ def find_sl_from_structure(df: pd.DataFrame,
 
     atr_val     = atr.iloc[idx]
     swing_price = df["high"].iloc[idx] if is_short else df["low"].iloc[idx]
-    anchor      = max(swing_price, current_price) if is_short else min(swing_price, current_price)
-    sl          = anchor + atr_val * atr_buffer if is_short else anchor - atr_val * atr_buffer
+    breached    = (current_price > swing_price) if is_short else (current_price < swing_price)
+    anchor      = current_price if breached else swing_price
+    buffer      = max(atr_buffer, tolerance_atr) if breached else atr_buffer
+    sl          = anchor + atr_val * buffer if is_short else anchor - atr_val * buffer
 
     return {
         "sl":          round(sl, 5),
