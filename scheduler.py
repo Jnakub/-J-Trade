@@ -25,6 +25,7 @@ from binance import merge_real_volume
 from exit_monitor import (
     analyze_position, print_report, execute_decision,
     calc_atr_trailing_sl, BARS as TRAIL_STRUCTURE_BARS,
+    check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS_CURRENCY,
 )
 from regime_check import get_regime
 import reversal
@@ -78,6 +79,15 @@ def scan_symbol(symbol: str) -> None:
     # เสมออยู่แล้ว จุดที่พังจริงคือ balance <= 0 ไม่ใช่สัดส่วน)
     if balance <= 0:
         print(f"  [{symbol}] SKIP — balance ไม่พอ ({balance:.2f})")
+        return
+
+    # 4b. News guard — ไม่เปิดไม้ใหม่ถ้าข่าว High Impact (USD) จะออกภายใน NEWS_IMMINENT_H ชม.
+    #     2026-08-02: เดิมเช็คข่าวแค่ตอนมีไม้เปิดอยู่แล้ว (exit_monitor) ไม่มีจุดไหนกันตอน
+    #     "จะเปิดไม้ใหม่" เลย — เปิดก่อนข่าวใหญ่ 5 นาทีก็เปิดได้ปกติ กว่า Exit Monitor จะเห็น
+    #     ก็รอบสแกนถัดไปซึ่งอาจสายไปแล้ว (ข่าวออกไปแล้ว)
+    has_news, news_detail, _ = check_upcoming_news(hours_ahead=NEWS_IMMINENT_H)
+    if has_news:
+        print(f"  [{symbol}] SKIP — ใกล้ข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ภายใน {NEWS_IMMINENT_H} ชม. — {news_detail}")
         return
 
     # 4. Regime Check → เลือกว่าจะเปิด Scoring (ตามเทรนด์) หรือ Reversal (สวนเทรนด์) หรือพักก่อน

@@ -14,6 +14,7 @@ from config import (
 from mt5_connect import connect, get_account_balance
 from order import calculate_lot_size, clamp_lot, place_order
 from scoring import compute_score, calc_rr
+from exit_monitor import check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS_CURRENCY
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,11 @@ class RiskCheckerAgent:
         positions = mt5.positions_get(symbol=symbol)
         if positions:
             return False, f"Already have {len(positions)} open position(s) for {symbol}"
+
+        # 2b. News guard — ไม่เปิดไม้ใหม่ถ้าข่าว High Impact (USD) จะออกภายใน NEWS_IMMINENT_H ชม.
+        has_news, news_detail, _ = check_upcoming_news(hours_ahead=NEWS_IMMINENT_H)
+        if has_news:
+            return False, f"ใกล้ข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ภายใน {NEWS_IMMINENT_H} ชม. — {news_detail}"
 
         # 3. Sufficient balance
         risk_amount = balance * RISK_PER_TRADE

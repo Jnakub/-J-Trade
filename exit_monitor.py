@@ -43,6 +43,11 @@ SLOW_TRADE_DAYS       = 3
 SLOW_TRADE_R          = 0.5
 
 # News calendar (ForexFactory) — เฉพาะ High impact เท่านั้น
+# 2026-08-02: เคยสงสัยว่า endpoint นี้อาจเป็น "ปฏิทินตามสัปดาห์ปฏิทิน (จ-อา)" ที่จะพลาดข่าว
+# สัปดาห์ถัดไปถ้ารันตอนดึกวันอาทิตย์ — เช็คจริงแล้วไม่ใช่: ทดสอบตอนวันอาทิตย์ (2026-08-02)
+# endpoint คืนช่วงข้อมูล 2026-08-02 -> 2026-08-08 คือ rolling 7 วันนับจากวันที่ request จริง
+# ไม่ใช่ calendar week คงที่ — ไม่มีช่องโหว่นี้ ไม่ต้องดึง nextweek เพิ่ม (ff_calendar_nextweek.json
+# ก็ไม่มีอยู่จริงด้วย ลองยิงแล้วได้ 404)
 NEWS_URL          = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 NEWS_CURRENCY     = "USD"     # BTCUSDm/XAUUSDm ผันผวนตาม USD เป็นหลัก
 NEWS_IMPACT       = "High"
