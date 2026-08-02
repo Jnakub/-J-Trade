@@ -62,16 +62,28 @@ def swing_vol_multiplier(symbol: str) -> float:
 
 
 def swing_wick_ratio_min(symbol: str) -> float | None:
-    """เกณฑ์ wick ratio ขั้นต่ำสำหรับ OR-logic ของ swing (2026-07-21) — ใช้เฉพาะ XAU/Gold
-    เท่านั้น (คืน None สำหรับ symbol อื่นทุกตัว = ปิด OR-logic, พฤติกรรมเดิมเป๊ะ ไม่แตะ BTC)
+    """เกณฑ์ wick ratio ขั้นต่ำสำหรับ OR-logic ของ swing — คืน None = ปิด OR-logic (ใช้ volume
+    อย่างเดียวเหมือนเดิม), คืนตัวเลข = เปิด OR-logic (ผ่านได้ถ้า volume เข้าเกณฑ์ **หรือ**
+    wick ratio ถึงค่านี้)
 
-    เหตุผล: XAUUSDm ไม่มี real volume ให้ merge (COMEX ผ่าน yfinance พังที่ 4H — ดู binance.py)
-    เลยใช้ tick_volume ของโบรกเกอร์เป็น proxy ซึ่งเชื่อถือได้น้อยกว่า BTC ที่มี real volume
-    จาก Bitstamp — wick ratio (สัดส่วนไส้เทียนต่อ range ทั้งแท่ง) เป็นสัญญาณอิสระจาก volume
-    ที่ช่วยกู้ swing point จริงที่ tick_volume มองไม่เห็น (ยืนยันด้วย backtest 400 แท่ง:
-    vol=1.6x เท่านั้น เจอ lows แค่ 9 จุด, เพิ่ม wick>=0.4 OR เข้าไปเจอเพิ่มเป็น 19 จุด)
-    2026-07-24: ปรับเป็น 0.5 — เข้มขึ้นจาก 0.4 เดิม ยังไม่มี backtest ยืนยันค่าใหม่นี้โดยตรง"""
-    return 0.5 if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else None
+    XAU/Gold (2026-07-21, threshold 0.5 ตั้งแต่ 2026-07-24): XAUUSDm ไม่มี real volume ให้
+    merge (COMEX ผ่าน yfinance พังที่ 4H — ดู binance.py) เลยใช้ tick_volume ของโบรกเกอร์เป็น
+    proxy ซึ่งเชื่อถือได้น้อย — wick ratio เป็นสัญญาณอิสระจาก volume ที่ช่วยกู้ swing point จริง
+    ที่ tick_volume มองไม่เห็น (ยืนยันด้วย backtest 400 แท่ง: vol=1.6x เท่านั้น เจอ lows แค่
+    9 จุด, เพิ่ม wick>=0.4 OR เข้าไปเจอเพิ่มเป็น 19 จุด)
+
+    BTC (2026-08-02, threshold 0.5): ต่างจาก XAU ตรงที่ BTC มี real volume จาก Bitstamp
+    เชื่อถือได้อยู่แล้ว แต่ backtest 180 วัน (regime-gated, one-position-at-a-time เหมือน
+    scheduler.py จริง) พบว่า volume อย่างเดียวยังพลาดจุดกลับตัวจริงบางจุดในช่วงที่ราคาวิ่งแรง/
+    ผันผวนสูง (เช่น มี.ค.-เม.ย. ที่ราคาพุ่ง 71,000->82,000 — feed swing high ส่วนใหญ่มาจาก wick
+    ล้วนๆ ไม่ใช่ volume) เปิด wick OR-logic แล้ว: เทรดเพิ่มจาก 4->6 ไม้, Total R +6.41->+7.59,
+    Win Rate 50%->66.7% (ไม้เดิมที่เคยแพ้ 1 ไม้กลับมาชนะเพราะ SL/TP อ้างอิงจุด swing แม่นขึ้น)
+    sample เล็ก (4-6 ไม้) — ควร backtest ซ้ำเมื่อมีข้อมูลเทรดจริงมากพอ"""
+    if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
+        return 0.5
+    if "BTC" in symbol.upper():
+        return 0.5
+    return None
 
 
 def has_high_volume(df: pd.DataFrame, idx: int,
