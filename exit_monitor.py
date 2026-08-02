@@ -80,6 +80,13 @@ TRAIL_TIMEFRAME  = MT5_TIMEFRAMES["1H"]
 TRAIL_ATR_PERIOD = 14
 TRAIL_BARS       = 500   # ~20 วันบน 1H — ต้องครอบคลุมเวลาที่ถือ position
 
+# เพดานการขยาย SL (2026-08-02) — SL ตัวนี้ตั้งใจให้ "หายใจ" ตาม ATR ได้ทั้งสองทาง (ถอยห่างตอน
+# ผันผวนเพื่อไม่ให้โดนเขี่ยแล้วกลับมาที่เดิมตอนสงบ) ไม่ใช่ ratchet ทางเดียวแบบ TP — แต่ lot ถูก
+# คำนวณตอนเปิดไม้จากระยะ SL เริ่มต้น (= 1R) แล้วไม่เปลี่ยนอีก ถ้า ATR ระเบิดจน SL ห่างขึ้นมาก
+# ขาดทุนจริงตอนโดน SL จะเกิน RISK_PER_TRADE ตามสัดส่วน (และทำให้ MAX_DAILY_LOSS เพี้ยนตาม)
+# ค่านี้จำกัดแค่ "หางความเสี่ยง" — ระยะปกติที่ ATR โตราว 2-3 เท่ายังหายใจได้ตามดีไซน์เดิม
+MAX_SL_WIDEN_R   = 1.5   # SL ห่างจาก entry ได้ไม่เกินกี่เท่าของระยะ 1R เริ่มต้น
+
 # TP Trailing (2026-07-23) — เริ่มขยับ TP เข้ามาเมื่อราคาใกล้ TP เดิมมากพอ กันเคส "เกือบถึง
 # TP แล้วราคากลับตัวจนโดน SL" (ไม้เต็มกำไรกลายเป็นขาดทุน) — ใช้ pinned anchor = TP ตอนเปิดไม้
 # จริง (ไม่ใช่ pos.tp ปัจจุบันที่อาจถูกขยับไปแล้ว) + ATR(1H) ล่าสุด แบบเดียวกับ SL Trailing
@@ -510,10 +517,20 @@ def analyze_position(pos) -> dict:
         combined_decision = (combined_label, combined_color)
 
     # ── SL ที่ควรตั้งรอบนี้ — ใช้ trailing SL, ถ้ากำไร >= 1R แล้วห้ามถอยต่ำกว่า Breakeven ──
+    sl_widen_capped = False
     if trailing_sl is not None:
         desired_sl = trailing_sl
+        # เพดานการขยาย — ห้าม SL ห่างจาก entry เกิน MAX_SL_WIDEN_R เท่าของระยะ 1R เริ่มต้น
+        # (ยังปล่อยให้หายใจตาม ATR ได้ตามปกติ ตัดเฉพาะเคส ATR ระเบิดจนความเสี่ยงจริงบานเกินแผน)
+        if sl_range:
+            widen_limit = sl_range * MAX_SL_WIDEN_R
+            capped_sl   = (entry - widen_limit) if direction == "Long" else (entry + widen_limit)
+            if (direction == "Long" and desired_sl < capped_sl) or \
+               (direction == "Short" and desired_sl > capped_sl):
+                desired_sl      = capped_sl
+                sl_widen_capped = True
         if ge1r:
-            desired_sl = max(trailing_sl, entry) if direction == "Long" else min(trailing_sl, entry)
+            desired_sl = max(desired_sl, entry) if direction == "Long" else min(desired_sl, entry)
     else:
         desired_sl = entry if ge1r else None   # คำนวณสูตรไม่ได้ -> ใช้กติกาเดิม (breakeven เมื่อ >=1R)
 
@@ -538,6 +555,7 @@ def analyze_position(pos) -> dict:
         "entry": entry, "sl": sl, "tp": tp, "lot": lot,
         "trail": trail, "initial_sl": initial_sl,
         "trailing_sl": trailing_sl, "desired_sl": desired_sl,
+        "sl_widen_capped": sl_widen_capped,
         "desired_tp": desired_tp,
         "entry_time": entry_time, "current_price": current_price,
         "extreme": extreme, "atr": atr_now, "rsi": rsi_now,
@@ -584,7 +602,10 @@ def print_report(m: dict):
               f"SL รอบนี้ {_b(trailing_str)} (ATRล่าสุด {t['atr_latest']:,.3f})")
     if m["desired_sl"] is not None:
         desired_str = f"{m['desired_sl']:,.3f}"
-        print(f"  SL ที่จะตั้ง     : {_c(desired_str)}")
+        cap_note = ""
+        if m.get("sl_widen_capped"):
+            cap_note = _y(f"  <- ชนเพดานขยาย {MAX_SL_WIDEN_R}R (ATR โตจนจะเสี่ยงเกินแผน)")
+        print(f"  SL ที่จะตั้ง     : {_c(desired_str)}{cap_note}")
     if m["desired_tp"] is not None:
         desired_tp_str = f"{m['desired_tp']:,.3f}"
         print(f"  TP ที่จะตั้ง (Trailing, ห่างเดิม <={TRAIL_TP_TRIGGER_PCT}%) : {_c(desired_tp_str)}")
