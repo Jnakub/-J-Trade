@@ -27,12 +27,17 @@ from trend_flip import compute_trend_regime
 # <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
 #   BTCUSDm: k=0.20  FalseFlip=0/58 (0%)   เร็วกว่า EMA cross เฉลี่ย 9.5 แท่ง  (matched 14 คู่)
 #   XAUUSDm: k=0.40  FalseFlip=0/37 (0%)   เร็วกว่า EMA cross เฉลี่ย 12.4 แท่ง (matched 12 คู่)
+#   ETHUSDm: k=0.40  FalseFlip=0/53 (0%)   เร็วกว่า EMA cross เฉลี่ย 7.8 แท่ง   (matched 19 คู่)
+#            (2026-08-02: k<0.40 ยังมี false flip 2-3 ครั้ง — 0.40 คือจุดแรกที่ 0%)
+#   XRPUSDm: k=0.20  FalseFlip=0/64 (0%)   เร็วกว่า EMA cross เฉลี่ย 8.2 แท่ง   (matched 18 คู่)
 # (ครั้งแรกที่ทำ XAU ใช้ sample เล็กแค่ 2 คู่เทียบได้ k ไม่น่าเชื่อถือ — รันซ้ำด้วยข้อมูลยาวขึ้น
-# แล้วได้ผลที่มั่นใจได้มากกว่านี้ 2026-07-27) symbol ที่ไม่มีในนี้ (เช่น ETH ถ้าเพิ่มมาในอนาคต)
-# จะ fallback ไปใช้ EMA50/200 เดิมโดยอัตโนมัติ จนกว่าจะมีคน sweep หา k ให้
+# แล้วได้ผลที่มั่นใจได้มากกว่านี้ 2026-07-27) symbol ที่ไม่มีในนี้จะได้ bias=None (SKIP ทุกครั้ง
+# ใน Scoring — ไม่มี EMA50/200 fallback แล้วตั้งแต่ 2026-08-01) จนกว่าจะมีคน sweep หา k ให้
 TREND_FLIP_K = {
     "BTCUSDm": 0.20,
     "XAUUSDm": 0.40,
+    "ETHUSDm": 0.40,
+    "XRPUSDm": 0.20,
 }
 
 

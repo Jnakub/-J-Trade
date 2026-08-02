@@ -7,6 +7,7 @@ BITSTAMP_URL = "https://www.bitstamp.net/api/v2/ohlc/{pair}/"
 BITSTAMP_MAP = {
     "BTCUSDm": "btcusd",
     "ETHUSDm": "ethusd",
+    "XRPUSDm": "xrpusd",
 }
 
 # MT5 symbols → yfinance tickers (commodities)
@@ -29,7 +30,7 @@ YFINANCE_INTERVAL_MAP = {
 
 
 # ---------------------------------------------------------------------------
-# Bitstamp — สำหรับ Crypto (BTC, ETH)
+# Bitstamp — สำหรับ Crypto (BTC, ETH, XRP)
 # ---------------------------------------------------------------------------
 
 def fetch_bitstamp_volume(mt5_symbol: str, timeframe: str = "1D",
@@ -118,7 +119,7 @@ def merge_real_volume(df_mt5: pd.DataFrame, mt5_symbol: str,
                       timeframe: str = "1D") -> pd.DataFrame:
     """
     แทนที่ tick_volume ด้วย real volume จากแหล่งที่เหมาะสม:
-      - Crypto (BTC/ETH) → Bitstamp
+      - Crypto (BTC/ETH/XRP) → Bitstamp
       - Gold/Silver      → COMEX Futures ผ่าน yfinance
     ถ้าดึงไม่ได้ → คง tick_volume เดิมไว้
     """

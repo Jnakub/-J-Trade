@@ -87,7 +87,11 @@ TOTAL_WEIGHT = (
 # ---------------------------------------------------------------------------
 # Symbols ที่ trade
 # ---------------------------------------------------------------------------
-SYMBOLS = ["BTCUSDm", "XAUUSDm"]
+# 2026-08-02: เพิ่ม ETHUSDm/XRPUSDm — TREND_FLIP_K (scoring.py) sweep แล้วก่อนเปิดใช้งาน
+# (k=0.40/0.20 ตามลำดับ, FalseFlip 0% ทั้งคู่) real volume (Bitstamp) ยืนยันแล้วว่า merge ได้
+# 100% ทั้ง 2 symbol — swing_vol_multiplier/wick_ratio_min ยังใช้ default เดิม (1.9x, ไม่มี
+# wick filter) เหมือน BTC ก่อนจะ tune เฉพาะเจาะจง ยังไม่ได้ backtest ปรับแยกให้ ETH/XRP
+SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm"]
 
 # ---------------------------------------------------------------------------
 # MT5 Timeframe mapping
