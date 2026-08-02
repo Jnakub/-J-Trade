@@ -15,7 +15,7 @@ from config import (
     WEIGHT_TREND_1H, WEIGHT_DI_1H,
     WEIGHT_MACD, WEIGHT_RR,
     TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK,
-    MAX_TP_DISTANCE_PCT, MIN_SCORE,
+    MIN_SL_DISTANCE_PCT, MAX_TP_DISTANCE_PCT, MIN_SCORE,
 )
 from mt5_connect import connect, get_tick_or_raise
 from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirmation,
@@ -269,6 +269,15 @@ def compute_score(symbol: str, direction: str, entry: float,
     sl_info["tp"]           = tp
     sl_info["fib_info"]     = fib_info
     sl_info["conf_result"]  = conf_result
+
+    # Hard block: ระยะ entry->SL แคบเกินจนอยู่ในระยะ noise ปกติของแท่ง 4H
+    # — ดู comment ที่ config.MIN_SL_DISTANCE_PCT
+    sl_distance_pct = abs(entry - sl) / entry * 100
+    if sl_distance_pct < MIN_SL_DISTANCE_PCT - 1e-9 and not force:
+        raise ValueError(
+            f"ระยะ SL ห่างจาก entry แค่ {sl_distance_pct:.2f}% ต่ำกว่าขั้นต่ำ "
+            f"{MIN_SL_DISTANCE_PCT}% — ห้ามเข้า trade"
+        )
 
     # Hard block: กันแค่ไม่ให้เสี่ยงมากกว่าได้ (R:R < 1) — ไม่สนคะแนนรวม
     # ส่วน "R:R ดีจริง" (>= MIN_RR) ยังต้องผ่านสกอร์การ์ดแยกต่างหากด้านบน (WEIGHT_RR)
