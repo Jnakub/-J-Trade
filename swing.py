@@ -78,10 +78,23 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     ผันผวนสูง (เช่น มี.ค.-เม.ย. ที่ราคาพุ่ง 71,000->82,000 — feed swing high ส่วนใหญ่มาจาก wick
     ล้วนๆ ไม่ใช่ volume) เปิด wick OR-logic แล้ว: เทรดเพิ่มจาก 4->6 ไม้, Total R +6.41->+7.59,
     Win Rate 50%->66.7% (ไม้เดิมที่เคยแพ้ 1 ไม้กลับมาชนะเพราะ SL/TP อ้างอิงจุด swing แม่นขึ้น)
-    sample เล็ก (4-6 ไม้) — ควร backtest ซ้ำเมื่อมีข้อมูลเทรดจริงมากพอ"""
+    sample เล็ก (4-6 ไม้) — ควร backtest ซ้ำเมื่อมีข้อมูลเทรดจริงมากพอ
+
+    ETHUSDm (2026-08-02, threshold 0.5): backtest 180 วัน (เส้นทาง Scoring/TREND เท่านั้น —
+    ยังไม่ได้ทดสอบผลกับ Reversal path) เทรดเท่าเดิม (6 ไม้) แต่ TotalR ดีขึ้น -2.26->-0.98,
+    Win Rate 16.7%->33.3%
+
+    XRPUSDm (2026-08-02, threshold 0.5): backtest ชุดเดียวกันพบว่า **แย่ลง** ชัดเจน
+    (3->7 ไม้, TotalR +6.29->-2.86, Win Rate 33.3%->14.3%) — เปิดใช้ตามคำสั่งผู้ใช้แม้ backtest
+    จะแนะนำให้คงเดิม (None) เพราะยังไม่มีข้อมูลเทรดจริงยืนยัน sample เล็กมาก (3-7 ไม้) ควร
+    เฝ้าดูผลจริงและพร้อมปรับกลับถ้าผลออกมาแย่ตามที่ backtest ชี้"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 0.5
     if "BTC" in symbol.upper():
+        return 0.5
+    if "ETH" in symbol.upper():
+        return 0.5
+    if "XRP" in symbol.upper():
         return 0.5
     return None
 
