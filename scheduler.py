@@ -19,7 +19,7 @@ from config import (
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
 )
 from mt5_connect import connect, get_account_balance
-from scoring import compute_score, calc_rr, get_ohlcv, get_ohlcv_real, ema
+from scoring import compute_score, calc_rr, get_ohlcv, get_ohlcv_real, get_trend_bias
 from order import calculate_lot_size, clamp_lot, place_order
 from binance import merge_real_volume
 from exit_monitor import (
@@ -39,18 +39,6 @@ REGIME_TREND    = ("TREND", "TREND แรงจัด")
 REGIME_REVERSAL = ("REVERSAL-READY",)
 
 INTERVAL_SECONDS = 3600   # เช็คทุก 1 ชั่วโมง
-
-
-# ---------------------------------------------------------------------------
-# Auto-detect direction จาก Bias
-# ---------------------------------------------------------------------------
-
-def get_bias(symbol: str) -> str:
-    df = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
-    df = merge_real_volume(df, symbol, "1D")
-    ema50  = ema(df["close"], 50).iloc[-1]
-    ema200 = ema(df["close"], 200).iloc[-1]
-    return "Long" if ema50 > ema200 else "Short"
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +98,16 @@ def scan_symbol(symbol: str) -> None:
         entry = tick.bid
 
         if regime in REGIME_TREND:
-            # ── เปิด Scoring (trend-following) ──
-            direction = get_bias(symbol)
-            print(f"  [{symbol}] เปิด Scoring — Bias={direction}  Entry={entry:.5f}")
+            # ── เปิด Scoring (trend-following) ── ใช้ get_trend_bias ตัวเดียวกับที่
+            # compute_score เรียกภายใน (trend_flip เท่านั้น ไม่มี EMA fallback) กัน bias
+            # สองจุดขัดกันเอง (เดิม scheduler ใช้ EMA แยกจาก compute_score ที่ใช้ trend_flip)
+            df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
+            df_1d = merge_real_volume(df_1d, symbol, "1D")
+            direction, bias_source = get_trend_bias(symbol, df_1d)
+            if direction is None:
+                print(f"  [{symbol}] SKIP — หา Bias ไม่ได้ ({bias_source})")
+                return
+            print(f"  [{symbol}] เปิด Scoring — Bias={direction} ({bias_source})  Entry={entry:.5f}")
             score, criteria, passed, sl_info = compute_score(symbol, direction, entry)
             sl, tp = sl_info["sl"], sl_info["tp"]
             rr = calc_rr(entry, sl, tp, direction)

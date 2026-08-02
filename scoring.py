@@ -124,26 +124,23 @@ def calc_rr(entry: float, sl: float, tp: float, direction: str) -> float:
 # Reusable scoring function (MT5 must already be initialized by caller)
 # ---------------------------------------------------------------------------
 
-def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str, str]:
-    """คืน (bias, bias_source) — Long/Short ตาม trend_flip (ถ้ามี k ยืนยันแล้วใน
-    TREND_FLIP_K) หรือ EMA50/200 fallback — ดึงมาเป็นฟังก์ชันแยกเพื่อให้ backtest ภายนอก
-    (เช่น backtest_exit_compare.py) รู้ bias ก่อนเรียก compute_score ได้โดยไม่ต้อง copy
-    logic ชุดนี้มาเขียนซ้ำ (compute_score เองก็เรียกตัวนี้ภายใน)
+def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str | None, str]:
+    """คืน (bias, bias_source) — Long/Short ตาม trend_flip เท่านั้น (ไม่มี EMA50/200
+    fallback อีกต่อไป — 2026-08-02 ตัดออก ตามที่ตกลงกันว่า bias ต้องมาจาก trend_flip
+    เพียวๆ) ดึงมาเป็นฟังก์ชันแยกเพื่อให้ backtest ภายนอก (เช่น backtest_exit_compare.py)
+    รู้ bias ก่อนเรียก compute_score ได้โดยไม่ต้อง copy logic ชุดนี้มาเขียนซ้ำ
+    (compute_score เองก็เรียกตัวนี้ภายใน — scheduler.py ก็เรียกตัวนี้แทน EMA ของตัวเองแล้ว)
 
-    2026-07-27: symbol ที่มี k ยืนยันแล้วใน TREND_FLIP_K ใช้ trend_flip (fractal+ratchet+ATR)
-    แทน EMA50/200 เพราะ backtest 403 วันพบว่า EMA bias บล็อกโอกาสไปถึง 65.4% ของเวลา (BTC) /
-    24.9% (XAU) ส่วน trend_flip บล็อกแค่ 12.6% / 8.2% ในข้อมูลเดียวกัน — symbol ที่ไม่มีใน
-    ตาราง fallback ไป EMA เดิมอัตโนมัติ
+    bias = None เมื่อ symbol ไม่มีค่า k ใน TREND_FLIP_K เลย หรือ trend_flip ยัง bootstrap
+    ไม่พร้อม (ไม่ควรเกิดกับ ~800 แท่ง 1D ในทางปฏิบัติ) — ผู้เรียกต้องถือว่า "ยังไม่มี bias
+    ที่เชื่อถือได้" แล้วข้ามรอบสแกนนั้นไปเลย ไม่ใช่เดาทิศทางจาก EMA เหมือนเดิม
 
     ใช้ df_1d.iloc[:-1] (ตัดแท่งวันนี้ที่ยังไม่ปิด) ไม่ใช่ df_1d เต็ม — เพราะ trend_flip ไวกว่า
     EMA มาก การเทียบ close สดของแท่งที่ยังไม่ปิดกับรัศมี k*ATR ที่แคบ เสี่ยง bias "กระพริบ"
-    ไปมาถ้าเรียกหลายครั้งในวันเดียวกันตอนราคาแกว่งใกล้เส้นพอดี (EMA ไม่ค่อยมีปัญหานี้เพราะ
-    period 50/200 ทำให้แท่งเดียวมีน้ำหนักเล็กมาก)"""
-    ema50_1d  = ema(df_1d["close"], 50).iloc[-1]
-    ema200_1d = ema(df_1d["close"], 200).iloc[-1]
+    ไปมาถ้าเรียกหลายครั้งในวันเดียวกันตอนราคาแกว่งใกล้เส้นพอดี"""
     trend_flip_k = TREND_FLIP_K.get(symbol)
     if trend_flip_k is None:
-        return ("Long" if ema50_1d > ema200_1d else "Short"), "EMA50/200"
+        return None, "no_trend_flip_k"
 
     closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
     flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
@@ -152,8 +149,7 @@ def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str, str]:
         return "Long", "trend_flip"
     if flip_regime == "Bear":
         return "Short", "trend_flip"
-    # bootstrap ยังไม่พร้อม (ไม่ควรเกิดกับ ~800 แท่ง 1D — เผื่อไว้กันพังเฉยๆ) fallback ไป EMA
-    return ("Long" if ema50_1d > ema200_1d else "Short"), "EMA50/200"
+    return None, "bootstrap_not_ready"   # trend_flip ยังสรุปทิศทางไม่ได้
 
 
 def compute_score(symbol: str, direction: str, entry: float,
@@ -185,6 +181,10 @@ def compute_score(symbol: str, direction: str, entry: float,
     ema50_1h  = ema(df_1h["close"], 50).iloc[-1]
 
     trend_bias, bias_source = get_trend_bias(symbol, df_1d)
+    if trend_bias is None:
+        reason = ("ไม่มีค่า k ใน TREND_FLIP_K" if bias_source == "no_trend_flip_k"
+                  else "trend_flip ยัง bootstrap ไม่พร้อม")
+        raise ValueError(f"หา Bias ไม่ได้ — {reason} ({bias_source}) — ข้ามรอบนี้")
     if trend_bias != direction.capitalize():
         bias_label = "Downtrend" if trend_bias == "Short" else "Uptrend"
         raise ValueError(

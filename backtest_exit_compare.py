@@ -55,6 +55,8 @@ def score_entry(symbol, snap_dt):
         return None
     df_1d = merge_real_volume(df_1d, symbol, "1D")
     direction, _ = get_trend_bias(symbol, df_1d)
+    if direction is None:
+        return None   # trend_flip ไม่มี k หรือ bootstrap ยังไม่พร้อม — ข้ามจุดนี้
 
     df_1h_snap = get_hist(symbol, MT5_TIMEFRAMES["1H"], snap_dt, 2)
     if df_1h_snap is None or df_1h_snap.empty:
