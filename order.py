@@ -8,7 +8,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import RISK_PER_TRADE
-from mt5_connect import connect, get_account_balance, get_tick_or_raise, get_position_or_raise
+from mt5_connect import connect, get_account_balance, get_tick_or_raise, get_position_or_raise, is_demo_account
+import notify
 
 MAGIC_NUMBER = 234000
 
@@ -118,6 +119,9 @@ def place_order(symbol: str, direction: str, entry: float,
     print(f"  Price     : {result.price}")
     print(f"  SL        : {sl}   TP: {tp}")
     print(f"  Comment   : {comment}")
+
+    notify.notify_order_opened(symbol, direction, result.price, sl, tp, lot,
+                               result.order, is_demo=is_demo_account())
     return result.order
 
 
@@ -178,6 +182,9 @@ def close_order(ticket: int) -> None:
                                pos.sl, pos.tp, lot, 0.0, ticket)
         journal.log_trade_close(ticket, result_label, round(pos.profit, 2))
 
+    notify.notify_order_closed(symbol, direction, ticket, result_label,
+                               round(pos.profit, 2), is_demo=is_demo_account())
+
 
 # ---------------------------------------------------------------------------
 # Partial close (ปิดบางส่วน)
@@ -228,6 +235,9 @@ def partial_close_order(ticket: int, close_volume: float, comment: str = "partia
     print(f"  Symbol      : {symbol}")
     print(f"  Volume ปิด  : {close_volume}  (เหลือ {pos.volume - close_volume})")
     print(f"  Close Price : {result.price}")
+
+    keep_pct = round((pos.volume - close_volume) / pos.volume * 100, 1)
+    notify.notify_partial_close(symbol, ticket, close_volume, keep_pct, is_demo=is_demo_account())
 
 
 # ---------------------------------------------------------------------------

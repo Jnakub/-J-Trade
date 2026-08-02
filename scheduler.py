@@ -29,6 +29,7 @@ from exit_monitor import (
 )
 from regime_check import get_regime
 import reversal
+import notify
 from logger_setup import get_logger, tee_print
 
 log = get_logger("scheduler")
@@ -207,6 +208,7 @@ def run_scheduler() -> None:
                 scan_symbol(symbol)
         except Exception as exc:
             print(f"[ERROR] MT5 connection: {exc}")
+            notify.notify_error("scheduler — MT5 connection", str(exc))
             log.error("MT5 connection ERROR", exc_info=True)
         finally:
             mt5.shutdown()

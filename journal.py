@@ -4,6 +4,9 @@ from datetime import date, datetime
 import MetaTrader5 as mt5
 import pandas as pd
 
+import notify
+from mt5_connect import is_demo_account
+
 LOG_FILE = os.path.join(os.path.dirname(__file__), "trades_log.csv")
 
 COLUMNS = [
@@ -201,6 +204,13 @@ def reconcile_closed_positions() -> int:
         closed += 1
         sign = "+" if net_pnl >= 0 else ""
         print(f"[journal] Reconciled #{ticket}  {result}  P/L {sign}{net_pnl:.2f}  ({close_day})")
+
+        # 2026-08-02: นี่คือจุดเดียวที่รู้ว่าไม้ชน SL/TP เอง (broker ปิดให้ ไม่ใช่บอทสั่งเอง)
+        # ต้องแจ้งเตือนตรงนี้ ไม่งั้นคนไม่มีทางรู้เลยว่าไม้ปิดไปแล้วจนกว่าจะเปิดแอปมาเช็คเอง
+        symbol    = str(df.at[idx, "symbol"])
+        direction = str(df.at[idx, "direction"])
+        notify.notify_order_closed(symbol, direction, ticket, result,
+                                   round(float(net_pnl), 2), is_demo=is_demo_account())
 
     if closed:
         _save(df)

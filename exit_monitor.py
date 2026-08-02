@@ -24,12 +24,13 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import MT5_TIMEFRAMES
-from mt5_connect import connect, get_tick_or_raise
+from mt5_connect import connect, get_tick_or_raise, is_demo_account
 from scoring import get_ohlcv, get_ohlcv_real, ema
 from swing import calc_atr, find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
 from vsa import _volume_class, _spread_class, _close_position, _price_position, detect_vsa_pattern
 from order import close_order, partial_close_order, modify_sltp, clamp_lot
 import journal
+import notify
 from logger_setup import get_logger, tee_print
 
 log = get_logger("exit_monitor")
@@ -699,16 +700,11 @@ def print_report(m: dict):
 # Auto Execute — สั่งจริงตามผลลัพธ์ (เฉพาะบัญชี DEMO เท่านั้น)
 # ---------------------------------------------------------------------------
 
-def _is_demo_account() -> bool:
-    info = mt5.account_info()
-    return info is not None and info.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
-
-
 def execute_decision(m: dict) -> None:
     if not AUTO_EXECUTE:
         return
 
-    if not _is_demo_account():
+    if not is_demo_account():
         print(f"  {RED}[AUTO] ปฏิเสธ — บัญชีนี้ไม่ใช่ DEMO ห้ามสั่งเทรดอัตโนมัติ{RESET}")
         return
 
@@ -817,6 +813,7 @@ def run_monitor():
         except Exception as exc:
             print(_r(f"[ERROR] {exc}"))
             log.error("run_monitor scan_once ERROR", exc_info=True)
+            notify.notify_error("exit_monitor — scan_once", str(exc))
 
         next_run = datetime.fromtimestamp(time.time() + INTERVAL_SECONDS).strftime("%H:%M:%S")
         print(f"\n  รอบถัดไป : {next_run}")

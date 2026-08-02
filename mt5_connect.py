@@ -55,6 +55,13 @@ def get_account_balance() -> float:
     return info.balance
 
 
+def is_demo_account() -> bool:
+    """เช็คว่าบัญชีที่ connect() อยู่เป็น DEMO หรือไม่ — ใช้เป็น hard guard ก่อนสั่งเทรดอัตโนมัติ
+    (exit_monitor.execute_decision) และเป็น label ในข้อความแจ้งเตือน (notify.py)"""
+    info = mt5.account_info()
+    return info is not None and info.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
+
+
 def get_tick_or_raise(symbol: str):
     """ดึง tick ราคาปัจจุบันของ symbol — raise RuntimeError ถ้าดึงไม่ได้ (แทนการเช็ค
     None ซ้ำๆ ทุกจุดที่ต้องใช้ราคา)"""
