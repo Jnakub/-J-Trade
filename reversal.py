@@ -23,6 +23,7 @@ Reversal Scoring Checklist (weight รวม = 10, ผ่านเกณฑ์�
      python reversal.py <SYMBOL> <Long/Short> <entry> <sl> <tp>
 """
 import sys
+from datetime import datetime
 
 import MetaTrader5 as mt5
 import pandas as pd
@@ -38,7 +39,7 @@ from scoring import get_ohlcv, get_ohlcv_real, calc_rr
 from swing import find_sl_from_structure, find_tp_from_fibonacci, swing_vol_multiplier, swing_wick_ratio_min
 from regime_check import (
     calc_adx, adx_peak_info, check_key_level, check_divergence, calc_rsi,
-    ADX_PERIOD, REGIME_TIMEFRAME,
+    ADX_PERIOD, REGIME_TIMEFRAME, KEY_LEVEL_BARS,
 )
 from exit_monitor import is_climax_bar
 from order import calculate_lot_size, clamp_lot
@@ -71,17 +72,21 @@ GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
 def compute_reversal_score(symbol: str, direction: str, entry: float,
                            sl: float = None, tp: float = None,
                            force: bool = False, key_level: dict = None,
-                           df_4h: pd.DataFrame = None) -> tuple[float, list, bool, dict]:
+                           df_4h: pd.DataFrame = None, as_of: datetime = None) -> tuple[float, list, bool, dict]:
     """Return (total_score, criteria_list, passed, info).
     ถ้าไม่ส่ง sl/tp จะหาจาก swing structure/Fibonacci อัตโนมัติ (เกณฑ์เดียวกับ scoring.py)
     key_level: ส่งผลลัพธ์ check_key_level ที่ regime_check.get_regime() คำนวณไว้แล้วมาใช้ซ้ำได้
     (ราคาปิดแท่ง 4H เดียวกับที่ปลดล็อก REVERSAL-READY) — ถ้าไม่ส่งมา จะคำนวณใหม่ด้วย `entry` เอง
     df_4h: ส่ง get_regime()["df_4h"] มาใช้ซ้ำได้ (real volume, BARS แท่ง, ยังไม่ตัดแท่งฟอร์มมิ่ง)
-    กันดึง+merge real volume จาก Bitstamp ซ้ำสองรอบต่อรอบสแกน — ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม"""
+    กันดึง+merge real volume จาก Bitstamp ซ้ำสองรอบต่อรอบสแกน — ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม
+
+    as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ — as_of=datetime = จำลองเช็ค ณ เวลานั้นในอดีต
+    (2026-08-02, ตามแบบ scoring.compute_score) ให้ backtest เรียกตัวนี้ตรงๆ ได้ ไม่ต้อง copy
+    logic มาเขียนซ้ำ — มีผลเฉพาะตอนไม่ได้ส่ง key_level/df_4h มาเอง (จะ fetch ย้อนหลังแทนสด)"""
     is_long = direction.capitalize() == "Long"
 
     if df_4h is None:
-        df_4h = get_ohlcv_real(symbol, "4H", bars=210)
+        df_4h = get_ohlcv_real(symbol, "4H", bars=210, as_of=as_of)
     df_4h = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)   # ตัดแท่งยังไม่ปิด
     vol_multiplier = swing_vol_multiplier(symbol)
     wick_ratio_min = swing_wick_ratio_min(symbol)
@@ -112,7 +117,8 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
 
     # ── ข้อ 1: Key Level ──
     if key_level is None:
-        key_level = check_key_level(symbol, entry)
+        key_level_df = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS, as_of=as_of) if as_of is not None else None
+        key_level = check_key_level(symbol, entry, df=key_level_df)
     at_key = bool(key_level.get("at_key_level"))
 
     # ── ข้อ 2: Divergence RSI ──
@@ -144,7 +150,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     climax = climax_ok
 
     # ── ข้อ 6: ADX peak แล้วเริ่มลงจริง (relative — ไม่ใช้ threshold 40 ตายตัว) ──
-    df_adx     = get_ohlcv(symbol, REGIME_TIMEFRAME, bars=210)
+    df_adx     = get_ohlcv(symbol, REGIME_TIMEFRAME, bars=210, as_of=as_of)
     adx_series = calc_adx(df_adx, ADX_PERIOD)
     peak       = adx_peak_info(adx_series, len(df_adx) - 2)
     adx_ok     = peak["declining"]
