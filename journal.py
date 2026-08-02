@@ -245,9 +245,9 @@ def check_daily_loss(balance: float, max_daily_loss_pct: float) -> bool:
 # Statistics
 # ---------------------------------------------------------------------------
 
-def get_statistics() -> dict:
-    df = _load()
-    closed = df[df["status"] != "Open"].copy()
+def _compute_stats(closed: pd.DataFrame) -> dict:
+    """closed: แถวที่ status != 'Open' แล้ว (ทั้งหมดหรือกรองมาแล้วเฉพาะบางช่วง)"""
+    closed = closed.copy()
     closed["net_pnl"] = pd.to_numeric(closed["net_pnl"], errors="coerce")
     closed = closed.dropna(subset=["net_pnl"])
 
@@ -269,7 +269,7 @@ def get_statistics() -> dict:
     total_pnl  = closed["net_pnl"].sum()
     expectancy = (win_rate * avg_win) + (loss_rate * avg_loss)
 
-    stats = {
+    return {
         "total_trades": total,
         "win_rate":     round(win_rate * 100, 2),
         "total_pnl":    round(total_pnl, 2),
@@ -277,7 +277,23 @@ def get_statistics() -> dict:
         "avg_loss":     round(avg_loss, 2),
         "expectancy":   round(expectancy, 2),
     }
-    return stats
+
+
+def get_daily_statistics(day: str = None) -> dict:
+    """สถิติเฉพาะไม้ที่ "ปิด" ในวันที่ระบุ (default = วันนี้) — กรองด้วย close_date เหมือน
+    check_daily_loss ไม่ใช่ date (วันเปิดไม้) เพราะระบบถือไม้ข้ามวันเป็นปกติ
+    ควรเรียก reconcile_closed_positions() มาก่อนเสมอ ไม่งั้นไม้ที่ชน SL/TP วันนี้จะยังค้าง
+    'Open' และไม่ถูกนับ"""
+    day = day or date.today().strftime("%Y-%m-%d")
+    df = _load()
+    closed_today = df[(df["close_date"] == day) & (df["status"] != "Open")]
+    return _compute_stats(closed_today)
+
+
+def get_statistics() -> dict:
+    df = _load()
+    closed = df[df["status"] != "Open"]
+    return _compute_stats(closed)
 
 
 # ---------------------------------------------------------------------------

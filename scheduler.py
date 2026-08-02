@@ -188,6 +188,12 @@ def run_scheduler() -> None:
     print(f"  Interval : {INTERVAL_SECONDS // 60} นาที")
     print("=" * 52)
 
+    # 2026-08-02: ส่งสรุปรายวันตอนเที่ยงคืน — loop นี้สแกนทุก INTERVAL_SECONDS (1 ชม.) นับจาก
+    # เวลาที่โปรเซสเริ่ม ไม่ได้ sync กับนาฬิกาจริง แต่เพราะ 3600s x 24 = 1 วันพอดี รอบที่ตรง
+    # ชั่วโมง 0 (เที่ยงคืน) จะมาแค่ 1 ครั้งต่อวันเสมอ (นาทีอาจไม่ตรง 00:00 เป๊ะ แต่ชั่วโมงตรง) —
+    # เก็บวันที่ส่งล่าสุดไว้กันส่งซ้ำถ้า loop ดันมาชนชั่วโมง 0 มากกว่า 1 รอบ (เช่น restart)
+    last_summary_date = None
+
     while True:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\n{'=' * 52}")
@@ -203,6 +209,17 @@ def run_scheduler() -> None:
             except Exception as exc:
                 print(f"[journal] reconcile ล้มเหลว — {exc}")
                 log.error("reconcile_closed_positions ERROR", exc_info=True)
+
+            today = datetime.now().date()
+            if datetime.now().hour == 0 and last_summary_date != today:
+                try:
+                    stats = journal.get_daily_statistics()
+                    notify.notify_daily_summary(stats)
+                    print(f"[journal] ส่งสรุปรายวันแล้ว — {stats}")
+                except Exception as exc:
+                    print(f"[journal] ส่งสรุปรายวันล้มเหลว — {exc}")
+                    log.error("notify_daily_summary ERROR", exc_info=True)
+                last_summary_date = today
 
             for symbol in SYMBOLS:
                 scan_symbol(symbol)
