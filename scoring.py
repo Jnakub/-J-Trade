@@ -14,7 +14,7 @@ from config import (
     WEIGHT_TREND_4H, WEIGHT_OBV_4H,
     WEIGHT_TREND_1H, WEIGHT_DI_1H,
     WEIGHT_MACD, WEIGHT_RR,
-    TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MIN_SCORE,
+    TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK, MIN_SCORE,
 )
 from mt5_connect import connect, get_tick_or_raise
 from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirmation,
@@ -267,6 +267,13 @@ def compute_score(symbol: str, direction: str, entry: float,
     if rr < MIN_RR_HARD_BLOCK - 1e-9 and not force:
         raise ValueError(
             f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_HARD_BLOCK}  — ห้ามเข้า trade"
+        )
+
+    # Hard block: R:R สูงผิดปกติ (> MAX_RR_HARD_BLOCK) มักมาจาก Fibonacci TP ยืดไกลเกินจริง
+    # เทียบกับ SL ที่อิงโครงสร้าง ไม่ใช่สัญญาณที่ดีขึ้นจริง — ดู comment ที่ config.MAX_RR_HARD_BLOCK
+    if rr > MAX_RR_HARD_BLOCK + 1e-9 and not force:
+        raise ValueError(
+            f"R:R = {rr:.2f} สูงเกินขั้นสูงสุด {MAX_RR_HARD_BLOCK}  — ห้ามเข้า trade"
         )
 
     total  = sum(w for _, passed, w in criteria if passed)
