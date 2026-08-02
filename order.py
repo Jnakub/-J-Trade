@@ -79,6 +79,14 @@ def _filling_mode(symbol: str) -> int:
 def place_order(symbol: str, direction: str, entry: float,
                 sl: float, tp: float, lot: float,
                 comment: str = "auto-trader") -> int:
+    # Hard guard: เปิดไม้อัตโนมัติได้เฉพาะบัญชี DEMO เท่านั้น — เดิม guard นี้มีแค่ฝั่ง
+    # exit_monitor.execute_decision (ดูแลไม้ที่เปิดอยู่) ทำให้ไม่สมมาตร: ถ้าสลับ .env ไปบัญชีจริง
+    # (ตั้งใจหรือพลาด) บอทจะยังเปิดไม้ใหม่ให้ได้ปกติ แต่ไม่มีการ trail SL / ปิดบางส่วน / จัดการ
+    # ออกให้เลย เพราะฝั่งนั้นถูกบล็อกไปแล้ว — เข้าได้แต่ไม่มีใครดูแลออก 2026-08-02: เติม guard
+    # ฝั่งนี้ให้ตรงกัน กันเงินจริงเสี่ยงแบบควบคุมไม่ได้
+    if not is_demo_account():
+        raise RuntimeError("ปฏิเสธ — บัญชีนี้ไม่ใช่ DEMO ห้ามเปิดไม้อัตโนมัติ")
+
     is_long    = direction.lower() == "long"
     order_type = mt5.ORDER_TYPE_BUY if is_long else mt5.ORDER_TYPE_SELL
 
