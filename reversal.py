@@ -33,7 +33,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-from config import MT5_TIMEFRAMES, RISK_PER_TRADE, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK
+from config import (MT5_TIMEFRAMES, RISK_PER_TRADE, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK,
+                    MAX_TP_DISTANCE_PCT)
 from mt5_connect import connect, get_account_balance
 from scoring import get_ohlcv, get_ohlcv_real, calc_rr
 from swing import find_sl_from_structure, find_tp_from_fibonacci, swing_vol_multiplier, swing_wick_ratio_min
@@ -183,6 +184,12 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     # Hard block: R:R สูงผิดปกติ — ดู comment ที่ config.MAX_RR_HARD_BLOCK
     if rr > MAX_RR_HARD_BLOCK + 1e-9 and not force:
         raise ValueError(f"R:R = {rr:.2f} สูงเกินขั้นสูงสุด {MAX_RR_HARD_BLOCK} — ห้ามเข้า trade")
+
+    # Hard block: TP ไกลเกินจนราคาไปไม่ถึง — ดู comment ที่ config.MAX_TP_DISTANCE_PCT
+    tp_distance_pct = abs(tp - entry) / entry * 100
+    if tp_distance_pct > MAX_TP_DISTANCE_PCT + 1e-9 and not force:
+        raise ValueError(f"TP ห่างจาก entry {tp_distance_pct:.1f}% เกินขั้นสูงสุด "
+                         f"{MAX_TP_DISTANCE_PCT}% — ห้ามเข้า trade")
 
     total  = sum(w for _, passed, w in criteria if passed)
     passed = total >= MIN_SCORE_REVERSAL
