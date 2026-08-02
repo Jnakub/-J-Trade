@@ -702,12 +702,28 @@ def execute_decision(m: dict) -> None:
             return
 
         # 2) ปิดบางส่วนตาม Position Sizing % (เช่น 50%, 60%, 75%)
+        #    คิดเป็น "เป้าหมายว่าควรเหลือกี่ lot เทียบกับ lot ตอนเปิดไม้" แล้วปิดเฉพาะส่วนเกิน
+        #    2026-08-02: เดิมคิด close_vol = lot ปัจจุบัน x (100-keep)% ซึ่งสั่งซ้ำไม่ได้ —
+        #    ทุกชั่วโมงที่ rule ยัง trigger ค้าง (เช่น TP progress ยืนเหนือ 50%) จะปิดทบไปเรื่อยๆ
+        #    1.0 -> 0.6 -> 0.36 -> 0.216 ... จนเหลือ min lot ทั้งที่ควรปิดครั้งเดียว
+        #    แบบใหม่เป็น idempotent: พอถึงเป้าแล้วรอบต่อไปจะไม่ปิดอีก และถ้ามีกฎที่เข้มกว่า
+        #    trigger เพิ่มทีหลัง (keep ลดลง) ก็ปิดเฉพาะส่วนต่างที่เพิ่มขึ้นเท่านั้น
         if keep_pct < 100:
-            close_vol = round(lot * (100 - keep_pct) / 100, 3)
-            close_vol = clamp_lot(symbol, close_vol)
-            if 0 < close_vol < lot:
-                partial_close_order(ticket, close_vol)
-                print(f"  {YELLOW}[AUTO] ปิดบางส่วน #{ticket} {close_vol} lot (เหลือ {keep_pct}%){RESET}")
+            original_lot = journal.get_original_lot(ticket)
+            if original_lot is None:
+                print(f"  {YELLOW}[AUTO] ข้ามปิดบางส่วน #{ticket} — ไม่พบ lot ตอนเปิดไม้ใน journal "
+                      f"(คิด % จาก lot ปัจจุบันจะปิดทบซ้ำ){RESET}")
+            else:
+                target_lot = clamp_lot(symbol, round(original_lot * keep_pct / 100, 3))
+                excess     = round(lot - target_lot, 3)
+                info       = mt5.symbol_info(symbol)
+                min_lot    = info.volume_min if info else 0.01
+                if excess >= min_lot:
+                    close_vol = clamp_lot(symbol, excess)
+                    if 0 < close_vol < lot:
+                        partial_close_order(ticket, close_vol)
+                        print(f"  {YELLOW}[AUTO] ปิดบางส่วน #{ticket} {close_vol} lot "
+                              f"(เหลือ {keep_pct}% ของ {original_lot} = {target_lot}){RESET}")
 
         # 3) ขยับ SL ตาม ATR Trailing (ถ้า >=1R แล้ว desired_sl ถูก clamp ไม่ต่ำกว่า breakeven)
         desired_sl = m["desired_sl"]
@@ -733,6 +749,14 @@ def execute_decision(m: dict) -> None:
 def scan_once():
     connect()
     try:
+        # ปิดบัญชีค้างก่อน — ไม้ที่ชน SL/TP ไปแล้วต้องถูก mark ปิดใน journal ไม่งั้นค้าง 'Open'
+        # ตลอดไป (กระทบ check_daily_loss + get_statistics — ดู journal.reconcile_closed_positions)
+        try:
+            journal.reconcile_closed_positions()
+        except Exception as exc:
+            print(_r(f"  [journal] reconcile ล้มเหลว — {exc}"))
+            log.error("reconcile_closed_positions ERROR", exc_info=True)
+
         positions = mt5.positions_get()
         if not positions:
             print(_y("ไม่มี Open Position อยู่ตอนนี้"))

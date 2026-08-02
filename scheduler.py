@@ -185,6 +185,14 @@ def run_scheduler() -> None:
 
         try:
             connect()
+            # sync journal กับ MT5 ก่อนสแกน — ไม้ที่ชน SL/TP ไปเองต้องถูก mark ปิดก่อน
+            # ไม่งั้น journal.check_daily_loss() ใน scan_symbol จะมองไม่เห็นการขาดทุนพวกนั้น
+            try:
+                journal.reconcile_closed_positions()
+            except Exception as exc:
+                print(f"[journal] reconcile ล้มเหลว — {exc}")
+                log.error("reconcile_closed_positions ERROR", exc_info=True)
+
             for symbol in SYMBOLS:
                 scan_symbol(symbol)
         except Exception as exc:

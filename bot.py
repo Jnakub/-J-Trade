@@ -47,6 +47,13 @@ class ScannerAgent:
 
 class RiskCheckerAgent:
     def check(self, symbol: str, balance: float) -> tuple[bool, str]:
+        # 0. sync journal กับ MT5 ก่อน — ไม้ที่ชน SL/TP เองยังค้างเป็น 'Open' อยู่ ถ้าไม่ sync
+        #    daily loss guard ข้อถัดไปจะมองไม่เห็นการขาดทุนพวกนั้นเลย
+        try:
+            journal.reconcile_closed_positions()
+        except Exception as exc:
+            print(f"[journal] reconcile ล้มเหลว — {exc}")
+
         # 1. Daily loss guard
         if not journal.check_daily_loss(balance, MAX_DAILY_LOSS):
             return False, f"Daily loss limit ({MAX_DAILY_LOSS*100:.0f}%) reached for today"

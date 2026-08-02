@@ -1,6 +1,7 @@
 import os
 from datetime import date, datetime
 
+import MetaTrader5 as mt5
 import pandas as pd
 
 LOG_FILE = os.path.join(os.path.dirname(__file__), "trades_log.csv")
@@ -8,16 +9,24 @@ LOG_FILE = os.path.join(os.path.dirname(__file__), "trades_log.csv")
 COLUMNS = [
     "date", "time", "symbol", "direction", "entry", "sl", "tp",
     "lot", "score", "ticket", "status", "net_pnl", "note",
-    "pinned_swing", "pinned_atr_entry",
+    "pinned_swing", "pinned_atr_entry", "close_date",
 ]
+
+
+# คอลัมน์ที่เก็บข้อความ — ต้องบังคับเป็น object dtype ตอนโหลด ไม่งั้นคอลัมน์ที่ยังว่างทั้งหมด
+# (เช่น close_date/note ของไฟล์เก่า) จะถูก pandas อ่านเป็น float64 แล้วเวลาเขียนสตริงลงไปจะโดน
+# FutureWarning "incompatible dtype" (pandas รุ่นถัดไปจะ raise จริง)
+_TEXT_COLUMNS = ("date", "time", "symbol", "direction", "ticket", "status", "note", "close_date")
 
 
 def _load() -> pd.DataFrame:
     if os.path.exists(LOG_FILE):
         df = pd.read_csv(LOG_FILE, dtype={"ticket": str})
-        for col in COLUMNS:   # เผื่อไฟล์เก่าก่อนมี pinned_swing/pinned_atr_entry
+        for col in COLUMNS:   # เผื่อไฟล์เก่าก่อนมี pinned_swing/pinned_atr_entry/close_date
             if col not in df.columns:
                 df[col] = ""
+        for col in _TEXT_COLUMNS:
+            df[col] = df[col].astype(object).where(df[col].notna(), "")
         return df
     return pd.DataFrame(columns=COLUMNS)
 
@@ -60,9 +69,12 @@ def log_trade_open(symbol: str, direction: str, entry: float,
         "note":      "",
         "pinned_swing":     pinned_swing if pinned_swing is not None else "",
         "pinned_atr_entry": pinned_atr_entry if pinned_atr_entry is not None else "",
+        "close_date":       "",
     }
     new_row = pd.DataFrame([row], columns=COLUMNS)
-    df = pd.concat([df, new_row], ignore_index=True)
+    # ไฟล์ว่าง (ไม้แรก) ห้าม concat กับ DataFrame เปล่า — pandas เตือน FutureWarning เรื่อง dtype
+    # ของคอลัมน์ที่ยัง all-NA และรุ่นถัดไปจะเปลี่ยนพฤติกรรมจริง
+    df = new_row if df.empty else pd.concat([df, new_row], ignore_index=True)
     _save(df)
     print(f"[journal] Open logged  ticket=#{ticket}  {symbol} {direction}")
 
@@ -86,19 +98,29 @@ def get_pinned_anchor(ticket: int) -> tuple:
     return float(swing), float(atr_entry)
 
 
-def get_original_tp(ticket: int) -> float | None:
-    """คืน TP ตอนเปิดไม้จริง (คอลัมน์ 'tp' ที่ log ไว้ตอน log_trade_open) — ใช้เป็น pinned
-    anchor ของ TP Trailing ใน exit_monitor.py (ต้องเป็นค่าดั้งเดิม ไม่ใช่ pos.tp ปัจจุบันที่
-    อาจถูกขยับไปแล้วจากรอบก่อนหน้า) คืน None ถ้าไม่พบ"""
+def _original_field(ticket: int, column: str) -> float | None:
+    """อ่านค่าคอลัมน์ที่ log ไว้ "ตอนเปิดไม้" กลับมา — คืน None ถ้าไม่พบ/ว่าง"""
     df = _load()
     mask = df["ticket"] == str(ticket)
     if not mask.any():
         return None
-    row = df.loc[mask].iloc[-1]
-    tp = row.get("tp", "")
-    if tp == "" or pd.isna(tp):
+    val = df.loc[mask].iloc[-1].get(column, "")
+    if val == "" or pd.isna(val):
         return None
-    return float(tp)
+    return float(val)
+
+
+def get_original_tp(ticket: int) -> float | None:
+    """คืน TP ตอนเปิดไม้จริง — ใช้เป็น pinned anchor ของ TP Trailing ใน exit_monitor.py
+    (ต้องเป็นค่าดั้งเดิม ไม่ใช่ pos.tp ปัจจุบันที่อาจถูกขยับไปแล้วจากรอบก่อนหน้า)"""
+    return _original_field(ticket, "tp")
+
+
+def get_original_lot(ticket: int) -> float | None:
+    """คืน lot ตอนเปิดไม้จริง — Position Sizing Rules ใน exit_monitor.py ต้องคิด % จากค่านี้
+    ไม่ใช่ pos.volume ปัจจุบัน (2026-08-02: เดิมคิดจาก pos.volume ทำให้ทุกชั่วโมงที่ rule ยัง
+    trigger ค้าง จะปิดซ้ำทบไปเรื่อยๆ 1.0 -> 0.6 -> 0.36 -> ... จนเหลือ min lot)"""
+    return _original_field(ticket, "lot")
 
 
 # ---------------------------------------------------------------------------
@@ -106,18 +128,83 @@ def get_original_tp(ticket: int) -> float | None:
 # ---------------------------------------------------------------------------
 
 def log_trade_close(ticket: int, result: str,
-                    net_pnl: float, note: str = "") -> None:
-    """result: 'Take Profit' | 'Stop Loss' | 'Manual Cut'"""
+                    net_pnl: float, note: str = "",
+                    close_date: str = None) -> None:
+    """result: 'Take Profit' | 'Stop Loss' | 'Manual Cut'
+    close_date: 'YYYY-MM-DD' ของ "วันที่ปิด" (ไม่ใส่ = วันนี้) — คนละคอลัมน์กับ 'date' ที่เป็น
+    วันเปิดไม้ เพราะ check_daily_loss ต้องนับตามวันที่ปิดจริง (ไม้ถือข้ามวันเป็นเรื่องปกติ)"""
     df = _load()
     mask = df["ticket"] == str(ticket)
     if not mask.any():
         raise ValueError(f"ticket #{ticket} ไม่พบใน {LOG_FILE}")
-    df.loc[mask, "status"]  = result
-    df.loc[mask, "net_pnl"] = float(net_pnl)
-    df.loc[mask, "note"]    = str(note)
+    df.loc[mask, "status"]     = result
+    df.loc[mask, "net_pnl"]    = float(net_pnl)
+    df.loc[mask, "note"]       = str(note)
+    df.loc[mask, "close_date"] = close_date or date.today().strftime("%Y-%m-%d")
     _save(df)
     sign = "+" if net_pnl >= 0 else ""
     print(f"[journal] Close logged  ticket=#{ticket}  {result}  P/L {sign}{net_pnl:.2f}")
+
+
+# ---------------------------------------------------------------------------
+# Reconcile — ไม้ที่ broker ปิดเอง (ชน SL/TP) ไม่มีใครเรียก log_trade_close ให้
+# ---------------------------------------------------------------------------
+
+_RESULT_BY_DEAL_REASON = {
+    mt5.DEAL_REASON_SL: "Stop Loss",
+    mt5.DEAL_REASON_TP: "Take Profit",
+}
+
+
+def reconcile_closed_positions() -> int:
+    """ไล่ดู row ที่ยังเป็น 'Open' ใน journal แล้วเช็คกับ MT5 ว่า position นั้นปิดไปแล้วหรือยัง
+    ถ้าปิดแล้ว (ชน SL/TP เอง หรือถูกปิดจากที่อื่น) จะอัปเดต status/net_pnl/close_date ให้ตรง
+
+    2026-08-02: เดิม log_trade_close ถูกเรียกจาก order.close_order() เท่านั้น = เฉพาะตอน "บอท
+    สั่งปิดเอง" ไม้ที่ชน SL/TP จึงค้างเป็น 'Open' ตลอดไป ทำให้ check_daily_loss (กรอง
+    status != 'Open') มองไม่เห็นการขาดทุนจาก SL เลย — guard รายวันแทบไม่ทำงานกับเคสที่พบบ่อยสุด
+    ต้องเรียกฟังก์ชันนี้ก่อน check_daily_loss / get_statistics ทุกครั้ง
+
+    คืนจำนวน row ที่อัปเดตสำเร็จ (ต้อง connect() MT5 มาก่อนแล้ว)"""
+    df = _load()
+    open_idx = df.index[df["status"] == "Open"]
+    if len(open_idx) == 0:
+        return 0
+
+    closed = 0
+    for idx in open_idx:
+        raw = str(df.at[idx, "ticket"]).strip()
+        try:
+            ticket = int(float(raw))
+        except (TypeError, ValueError):
+            continue
+
+        if mt5.positions_get(ticket=ticket):
+            continue                      # ยังเปิดอยู่จริง (รวมกรณีปิดไปแค่บางส่วน)
+
+        deals = mt5.history_deals_get(position=ticket)
+        if not deals:
+            continue                      # ไม่มีประวัติ (เช่นบัญชีถูก reset) — ปล่อยให้คนตัดสินใจเอง
+        out_deals = [d for d in deals if d.entry != mt5.DEAL_ENTRY_IN]
+        if not out_deals:
+            continue                      # มีแต่ deal เปิด ยังไม่มี deal ปิด
+
+        net_pnl   = sum(d.profit + d.swap + d.commission for d in deals)
+        last_out  = max(out_deals, key=lambda d: d.time)
+        result    = _RESULT_BY_DEAL_REASON.get(last_out.reason, "Manual Cut")
+        close_day = datetime.fromtimestamp(last_out.time).strftime("%Y-%m-%d")
+
+        df.at[idx, "status"]     = result
+        df.at[idx, "net_pnl"]    = round(float(net_pnl), 2)
+        df.at[idx, "note"]       = "auto-reconciled from MT5 history"
+        df.at[idx, "close_date"] = close_day
+        closed += 1
+        sign = "+" if net_pnl >= 0 else ""
+        print(f"[journal] Reconciled #{ticket}  {result}  P/L {sign}{net_pnl:.2f}  ({close_day})")
+
+    if closed:
+        _save(df)
+    return closed
 
 
 # ---------------------------------------------------------------------------
@@ -125,10 +212,15 @@ def log_trade_close(ticket: int, result: str,
 # ---------------------------------------------------------------------------
 
 def check_daily_loss(balance: float, max_daily_loss_pct: float) -> bool:
-    """Return False if today's closed P/L already breached the daily limit."""
+    """Return False if today's closed P/L already breached the daily limit.
+
+    2026-08-02: กรองด้วย close_date (วันที่ปิดไม้) ไม่ใช่ date (วันที่เปิดไม้) — ระบบนี้ถือไม้
+    ข้ามวันเป็นปกติ (ดู SLOW_TRADE_DAYS=3) ของเดิมจึงมองไม่เห็นไม้ที่เปิดเมื่อวานแล้วมาปิด
+    ขาดทุนวันนี้เลย  ต้องเรียก reconcile_closed_positions() ก่อนเสมอ ไม่งั้นไม้ที่ชน SL
+    ยังค้างเป็น 'Open' และไม่ถูกนับ"""
     df = _load()
     today = date.today().strftime("%Y-%m-%d")
-    closed_today = df[(df["date"] == today) & (df["status"] != "Open")]
+    closed_today = df[(df["close_date"] == today) & (df["status"] != "Open")]
     if closed_today.empty:
         return True
     daily_pnl = pd.to_numeric(closed_today["net_pnl"], errors="coerce").sum()
