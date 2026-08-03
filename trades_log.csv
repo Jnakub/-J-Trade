@@ -1,4 +1,4 @@
-date,time,symbol,direction,entry,sl,tp,lot,score,ticket,status,net_pnl,note
-2026-07-01,16:48:26,BTCUSDm,Short,58822.05,60899.13005,48462.3152,0.1,9.0,4678027021,Manual Cut,-1.76,
-2026-07-01,22:39:09,BTCUSDm,Short,60123.91,60899.13005,48462.3152,0.26,8.0,4680979540,Void,0,"account reset 2026-07-17 -- ticket not in MT5 history, never actually settled"
-2026-07-02,06:38:36,BTCUSDm,Short,60087.08,60899.13005,48462.3152,0.25,8.0,4682361898,Void,0,"account reset 2026-07-17 -- ticket not in MT5 history, never actually settled"
+date,time,symbol,direction,entry,sl,tp,lot,score,ticket,status,net_pnl,note,pinned_swing,pinned_atr_entry,close_date
+2026-07-01,16:48:26,BTCUSDm,Short,58822.05,60899.13005,48462.3152,0.1,9.0,4678027021,Manual Cut,-1.76,,,,
+2026-07-01,22:39:09,BTCUSDm,Short,60123.91,60899.13005,48462.3152,0.26,8.0,4680979540,Void,0.0,"account reset 2026-07-17 -- ticket not in MT5 history, never actually settled",,,
+2026-07-02,06:38:36,BTCUSDm,Short,60087.08,60899.13005,48462.3152,0.25,8.0,4682361898,Void,0.0,"account reset 2026-07-17 -- ticket not in MT5 history, never actually settled",,,
