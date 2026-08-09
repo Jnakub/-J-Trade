@@ -133,16 +133,37 @@ def calc_bollinger(series: pd.Series, period: int = BB_PERIOD, std_mult: float =
     return upper, mid, lower
 
 
+CLIMAX_PRICE_POS_LOOKBACK = 2   # ดู comment ด้านล่าง
+
+
 def is_climax_bar(df: pd.DataFrame, idx: int) -> tuple[bool, str]:
-    """เช็คแท่งปิดล่าสุดว่าเป็น Buying/Selling Climax ไหม (volume สุดขั้ว + range ใหญ่)"""
+    """เช็คแท่งปิดล่าสุดว่าเป็น Buying/Selling Climax ไหม (volume สุดขั้ว + range ใหญ่)
+
+    2026-08-09: price_pos (ตำแหน่งราคาเทียบ 10 แท่งย้อนหลัง) เดิมเช็คจากแท่ง idx เดียวกับ
+    volume/spread/close_pos ทั้งหมด — เก็บข้อมูลจริง BTC 4H ย้อน 100 วัน (600 แท่ง) พบว่าไม่มี
+    Climax แม้แต่ครั้งเดียวที่ offset=0 (ทั้งฝั่ง Long/Short) เพราะจุดต่ำสุด/สูงสุดจริงมักเกิด
+    คนละแท่งกับแท่งที่ volume/close ระเบิด (เช่น ทำ Low แท่งหนึ่ง แล้วเด้งแรงพร้อม volume แท่ง
+    ถัดมา — พอราคาเด้งขึ้นแล้ว price_pos ของแท่งนั้นเองจะเลื่อนไปเป็น "Top" ไม่ใช่ "Bottom" อีก)
+    แก้โดยเช็ค price_pos ย้อนหลังได้ถึง CLIMAX_PRICE_POS_LOOKBACK แท่ง (volume/spread/close_pos
+    ยังคงเช็คจากแท่ง idx เข้มเหมือนเดิม ผ่อนแค่ price_pos) — ข้อมูลจริงพบว่า lookback=2 จับได้
+    45% (Long) / 25% (Short) ของแท่ง "ระเบิด" ทั้งหมด โดยไม่ไกลจนเสี่ยงจับคู่เหตุการณ์คนละช่วง
+    (เกิน 3-4 แท่ง = 12+ ชม. ความเชื่อมโยงเริ่มไม่น่าเชื่อถือ)"""
     row       = df.iloc[idx]
     color     = "Green" if row["close"] >= row["open"] else "Red"
     vol       = _volume_class(df, idx)
     spread    = _spread_class(df, idx)
     close_pos = _close_position(row)
-    price_pos = _price_position(df, idx)
-    pattern, _, _ = detect_vsa_pattern(color, vol, spread, close_pos, "None", price_pos)
-    return ("Climax" in pattern), pattern
+
+    for back in range(CLIMAX_PRICE_POS_LOOKBACK + 1):
+        check_idx = idx - back
+        if check_idx < 0:
+            break
+        price_pos = _price_position(df, check_idx)
+        pattern, _, _ = detect_vsa_pattern(color, vol, spread, close_pos, "None", price_pos)
+        if "Climax" in pattern:
+            return True, pattern
+
+    return False, "No Pattern"
 
 
 # ---------------------------------------------------------------------------
