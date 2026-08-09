@@ -88,7 +88,14 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
 
     if df_4h is None:
         df_4h = get_ohlcv_real(symbol, "4H", bars=210, as_of=as_of)
-    df_4h = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)   # ตัดแท่งยังไม่ปิด
+    # ตัดแท่งยังไม่ปิดทิ้ง — เฉพาะโหมดสด (as_of=None) เท่านั้น เพราะโหมด backtest (as_of=datetime)
+    # get_ohlcv_real ตัดแท่งฟอร์มมิ่งให้เสร็จแล้วในตัวมันเอง (คืน "close ของแท่งล่าสุดก่อนเวลานั้น"
+    # ดู docstring scoring.get_ohlcv) — 2026-08-09: เดิมตัดซ้ำแบบไม่มีเงื่อนไข ทำให้ backtest มองข้าม
+    # แท่งปิดสนิทแท่งล่าสุดไปเสมอ (พบตอน verify fix ของ is_climax_bar ที่ไม่มีผลตอนเรียกผ่านฟังก์ชัน
+    # นี้จริง ทั้งที่เช็คตรงๆ ผ่าน) กระทบทุก criteria ที่อ้างอิง df_4h ตัวนี้ (Key Level/Divergence/
+    # RSI/VSA Climax/TP Fibonacci) เฉพาะตอนใช้ as_of เท่านั้น โหมดสดไม่กระทบ
+    if as_of is None:
+        df_4h = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)
     vol_multiplier = swing_vol_multiplier(symbol)
     wick_ratio_min = swing_wick_ratio_min(symbol)
 
