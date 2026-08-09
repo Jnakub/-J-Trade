@@ -78,7 +78,17 @@ def _filling_mode(symbol: str) -> int:
 
 def place_order(symbol: str, direction: str, entry: float,
                 sl: float, tp: float, lot: float,
-                comment: str = "auto-trader") -> int:
+                comment: str = "auto-trader",
+                score: float = 0.0, strategy: str = "Scoring",
+                pinned_swing: float = None, pinned_atr_entry: float = None) -> int:
+    # 2026-08-09: บันทึก journal ในนี้เสมอ (ดูท้ายฟังก์ชัน) แทนที่จะปล่อยให้ผู้เรียกแยกไปเรียก
+    # journal.log_trade_open() เอง — เดิม scheduler.py/bot.py ต่างก็เรียกแยกหลัง place_order()
+    # สำเร็จ ทำให้ไม้ที่เข้าจริงผ่านทางอื่น (เช่น dry-run test script ที่ดันผ่านเกณฑ์จริงแล้ว
+    # ส่ง order จริงบนบัญชี demo) ไม่ถูกบันทึกเลยถ้าคนเขียนสคริปต์นั้นลืมเรียก journal เอง — เกิด
+    # ขึ้นจริงแล้วครั้งหนึ่ง (ดู commit cde559c) จน journal เสียแถวไม้จริงไปเพราะเข้าใจผิดว่าเป็น
+    # แค่ "dry-run ไม่ใช่ record ที่ควรเก็บ" ทั้งที่จริงเป็นไม้จริงบนบัญชี DEMO — ย้ายมาไว้จุดเดียว
+    # ในนี้แทน รับประกันว่า order ที่ยิงสำเร็จทุกครั้งจะถูกบันทึกเสมอ ไม่ว่าใครจะเป็นคนเรียก
+
     # Hard guard: เปิดไม้อัตโนมัติได้เฉพาะบัญชี DEMO เท่านั้น — เดิม guard นี้มีแค่ฝั่ง
     # exit_monitor.execute_decision (ดูแลไม้ที่เปิดอยู่) ทำให้ไม่สมมาตร: ถ้าสลับ .env ไปบัญชีจริง
     # (ตั้งใจหรือพลาด) บอทจะยังเปิดไม้ใหม่ให้ได้ปกติ แต่ไม่มีการ trail SL / ปิดบางส่วน / จัดการ
@@ -127,6 +137,11 @@ def place_order(symbol: str, direction: str, entry: float,
     print(f"  Price     : {result.price}")
     print(f"  SL        : {sl}   TP: {tp}")
     print(f"  Comment   : {comment}")
+
+    import journal
+    journal.log_trade_open(symbol, direction, result.price, sl, tp, lot, score, result.order,
+                           pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
+                           strategy=strategy)
 
     notify.notify_order_opened(symbol, direction, result.price, sl, tp, lot,
                                result.order, is_demo=is_demo_account())

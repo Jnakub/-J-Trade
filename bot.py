@@ -96,8 +96,8 @@ class ExecutorAgent:
                 entry: float, sl: float, tp: float,
                 lot: float, score: float) -> tuple[bool, int]:
         try:
-            ticket = place_order(symbol, direction, entry, sl, tp, lot)
-            journal.log_trade_open(symbol, direction, entry, sl, tp, lot, score, ticket)
+            # 2026-08-09: place_order() บันทึก journal ให้เองแล้ว (ดู order.py) ไม่ต้องเรียกแยกอีก
+            ticket = place_order(symbol, direction, entry, sl, tp, lot, score=score)
             return True, ticket
         except RuntimeError as exc:
             print(f"[ExecutorAgent] {exc}")

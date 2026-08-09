@@ -153,11 +153,11 @@ def scan_symbol(symbol: str) -> None:
         lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
         lot    = clamp_lot(symbol, lot)
 
-        ticket = place_order(symbol, direction, entry, sl, tp, lot)
-
-        # ── บันทึกฐานตรึงของ ATR Trailing SL ณ ตอนนี้ (entry_time = now) ──
-        # exit_monitor.py จะอ่านค่านี้กลับมาใช้ตลอดการถือ แทนคำนวณ swing/atr_entry ใหม่ทุกชั่วโมง
-        # (กัน anchor สลับถ้าถือยาวจน swing เดิมหลุดขอบ rolling window — ดู known bug ATR trailing anchor)
+        # ── ฐานตรึงของ ATR Trailing SL — คำนวณก่อนส่ง order เพื่อส่งเข้า place_order() รวดเดียว
+        # (2026-08-09: ย้าย journal logging เข้าไปอยู่ใน place_order() เอง ไม่แยกเรียกทีหลังอีก —
+        # กันเคสไม้จริงหลุดไม่ถูกบันทึก ดู comment เต็มที่ order.place_order()) exit_monitor.py จะ
+        # อ่านค่านี้กลับมาใช้ตลอดการถือ แทนคำนวณ swing/atr_entry ใหม่ทุกชั่วโมง (กัน anchor สลับถ้า
+        # ถือยาวจน swing เดิมหลุดขอบ rolling window — ดู known bug ATR trailing anchor)
         #
         # 2026-08-07: ฐานตรึงใช้ `sl` (SL จริงที่คำนวณตอนเข้า = Swing + ATR4H×0.1 buffer, ตัวเดียว
         # กับที่เอาไปคิด R:R และส่งเป็น Broker SL) แทน trail["swing"] (Swing ดิบ ไม่มี buffer) เดิม
@@ -173,9 +173,9 @@ def scan_symbol(symbol: str) -> None:
         except Exception as exc:
             print(f"  [{symbol}] WARNING — บันทึกฐานตรึงไม่ได้ ({exc}) — exit_monitor จะ fallback คำนวณเองภายหลัง")
 
-        journal.log_trade_open(symbol, direction, entry, sl, tp, lot, score, ticket,
-                               pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
-                               strategy=strategy)
+        ticket = place_order(symbol, direction, entry, sl, tp, lot,
+                             score=score, strategy=strategy,
+                             pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
 
     except ValueError as exc:
