@@ -123,6 +123,7 @@ def scan_symbol(symbol: str) -> None:
             sl, tp = sl_info["sl"], sl_info["tp"]
             rr = calc_rr(entry, sl, tp, direction)
             score_total = TOTAL_WEIGHT
+            strategy = "Scoring"
 
         else:  # REGIME_REVERSAL — "REVERSAL-READY"
             # ── เปิด Reversal (ทิศตามขั้ว divergence ที่ทำให้ REVERSAL-READY ยิง ไม่ใช่แค่กลับ bias) ──
@@ -135,6 +136,7 @@ def scan_symbol(symbol: str) -> None:
             sl, tp = info["sl"], info["tp"]
             rr = info["rr"]
             score_total = reversal.TOTAL_WEIGHT
+            strategy = "Reversal"
 
         # แสดงผลสรุป
         failed = [name for name, p, _ in criteria if not p]
@@ -156,17 +158,24 @@ def scan_symbol(symbol: str) -> None:
         # ── บันทึกฐานตรึงของ ATR Trailing SL ณ ตอนนี้ (entry_time = now) ──
         # exit_monitor.py จะอ่านค่านี้กลับมาใช้ตลอดการถือ แทนคำนวณ swing/atr_entry ใหม่ทุกชั่วโมง
         # (กัน anchor สลับถ้าถือยาวจน swing เดิมหลุดขอบ rolling window — ดู known bug ATR trailing anchor)
+        #
+        # 2026-08-07: ฐานตรึงใช้ `sl` (SL จริงที่คำนวณตอนเข้า = Swing + ATR4H×0.1 buffer, ตัวเดียว
+        # กับที่เอาไปคิด R:R และส่งเป็น Broker SL) แทน trail["swing"] (Swing ดิบ ไม่มี buffer) เดิม
+        # — เดิมสองระบบนี้คำนวณจุดยึดคนละจุดกันเอง ทำให้ระยะเสี่ยงจริง (trailing) ไม่ตรงกับ R:R
+        # ที่ใช้กรองตอนเข้า พอ anchor เดียวกัน ทั้ง R:R ตอนเข้า และ Trailing SL ระหว่างถือ จะไปทาง
+        # เดียวกันเสมอ — ยังคง roll ตาม ATR1H รายชั่วโมงเหมือนเดิมทุกอย่าง เปลี่ยนแค่จุดเริ่มต้น
         pinned_swing = pinned_atr_entry = None
         try:
             df_4h_trail = get_ohlcv_real(symbol, "4H", bars=TRAIL_STRUCTURE_BARS)
             trail = calc_atr_trailing_sl(df_4h_trail, symbol, datetime.now(), direction)
             if trail:
-                pinned_swing, pinned_atr_entry = trail["swing"], trail["atr_entry"]
+                pinned_swing, pinned_atr_entry = sl, trail["atr_entry"]
         except Exception as exc:
             print(f"  [{symbol}] WARNING — บันทึกฐานตรึงไม่ได้ ({exc}) — exit_monitor จะ fallback คำนวณเองภายหลัง")
 
         journal.log_trade_open(symbol, direction, entry, sl, tp, lot, score, ticket,
-                               pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
+                               pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
+                               strategy=strategy)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
 
     except ValueError as exc:

@@ -157,26 +157,31 @@ def extreme_price_since_entry(df: pd.DataFrame, entry_time: pd.Timestamp, direct
 
 
 # ---------------------------------------------------------------------------
-# ATR Trailing SL — Swing ฐานหาจาก 4H, ATR ใช้ ATR(14) บน 1H (roll ทุกชั่วโมง)
-#   ฐานตรึง (Long)  = Swing Low 4H ก่อนเข้า − ATR 1H แท่งปิดก่อนเข้า (ไม่เปลี่ยนตลอดการถือ)
-#   SL(t)           = ฐานตรึง − ATR 1H แท่งปิดล่าสุด                 (roll ใหม่ทุกแท่ง 1H)
-#   SL เริ่มต้น      = ฐานตรึง − ATR ตอนเข้า = Swing − 2×ATR ตอนเข้า
+# ATR Trailing SL — ฐานตรึงยึดจาก SL ที่คำนวณตอนเข้าไม้จริง (Swing + ATR4H×0.1 buffer, ตัวเดียว
+# กับที่ใช้คิด R:R และเป็น Broker SL — ดู scoring.find_sl_from_structure), ATR trail ใช้ ATR(14)
+# บน 1H (roll ทุกชั่วโมง) — 2026-08-07: เปลี่ยนจากยึด Swing ดิบ (ไม่มี buffer) มาเป็นยึด SL ข้อ 1
+# ตรงๆ แทน กัน R:R ตอนเข้ากับระยะเสี่ยงจริงตอนถือ (trailing) ห่างกันคนละสูตร
+#   ฐานตรึง (Long)  = SL ตอนเข้า − ATR 1H แท่งปิดก่อนเข้า                (ไม่เปลี่ยนตลอดการถือ)
+#   SL(t)           = ฐานตรึง − ATR 1H แท่งปิดล่าสุด                     (roll ใหม่ทุกแท่ง 1H)
+#   SL เริ่มต้น      = ฐานตรึง − ATR ตอนเข้า = SL ตอนเข้า − 2×ATR ตอนเข้า
 #                     → ใช้เป็นระยะ 1R คงที่ (คำนวณย้อนได้เสมอ ไม่ต้องเก็บ state)
-#   ฝั่ง Short กลับด้าน: Swing High + ATR
+#   ฝั่ง Short กลับด้าน: SL ตอนเข้า + ATR
 # ---------------------------------------------------------------------------
 
 def calc_atr_trailing_sl(df_swing: pd.DataFrame, symbol: str,
                          entry_time: pd.Timestamp, direction: str,
                          pinned_swing: float = None, pinned_atr_entry: float = None) -> dict | None:
-    """df_swing = ข้อมูล 4H สำหรับหา Swing ฐาน — ATR ดึง 1H ภายในฟังก์ชันเอง
-    คืน {swing, atr_entry, atr_latest, pinned_base, initial_sl, new_sl}
+    """df_swing = ข้อมูล 4H สำหรับหา Swing ฐาน (เฉพาะ fallback path ที่ไม่มี pinned_swing ส่งมา)
+    — ATR ดึง 1H ภายในฟังก์ชันเอง คืน {swing, atr_entry, atr_latest, pinned_base, initial_sl, new_sl}
     หรือ None ถ้าข้อมูลย้อนหลังไม่พอ (เช่น position เก่ากว่าจำนวนแท่งที่ดึงมา)
 
-    pinned_swing/pinned_atr_entry: ค่าที่บันทึกไว้ตอนเปิดไม้ (journal.get_pinned_anchor) —
-    ถ้าส่งมาครบทั้งคู่ จะใช้ค่านี้ตรงๆ แทนการคำนวณ swing/atr_entry ใหม่จาก rolling window
+    pinned_swing/pinned_atr_entry: ค่าที่บันทึกไว้ตอนเปิดไม้ (journal.get_pinned_anchor) — ปกติ
+    pinned_swing คือ SL ที่คำนวณตอนเข้าไม้จริง (Swing + ATR4H×0.1 buffer, ดู scheduler.py) ไม่ใช่
+    Swing ดิบ ถ้าส่งมาครบทั้งคู่ จะใช้ค่านี้ตรงๆ แทนการคำนวณ swing/atr_entry ใหม่จาก rolling window
     (กัน anchor สลับถ้าถือ position ยาวจน swing เดิมหลุดขอบหน้าต่างข้อมูล) — atr_latest
     ยังคำนวณสดเสมอไม่ว่ากรณีไหน เพราะเป็นตัวที่ทำให้ SL trail จริงทุกชั่วโมงตามดีไซน์เดิม
-    ถ้าไม่ส่งมา (position เก่าก่อนมีฟีเจอร์นี้) จะ fallback ไปคำนวณแบบเดิมทุกประการ"""
+    ถ้าไม่ส่งมา (position เก่าก่อนมีฟีเจอร์นี้ หรือบันทึกฐานตรึงไม่สำเร็จตอนเข้า) จะ fallback ไป
+    คำนวณ Swing ดิบใหม่จาก rolling window แบบเดิม (ไม่ใช้ SL ข้อ 1 buffer — เคสนี้พบยาก)"""
     # ── ATR(14) จาก 1H — atr_latest คำนวณสดเสมอ ──
     df_1h = get_ohlcv(symbol, TRAIL_TIMEFRAME, bars=TRAIL_BARS)
     atr_1h = calc_atr(df_1h, TRAIL_ATR_PERIOD)
@@ -235,28 +240,84 @@ def calc_atr_trailing_sl(df_swing: pd.DataFrame, symbol: str,
 
 
 # ---------------------------------------------------------------------------
-# ข้อ 1 — Daily/4H ปิดสวน trend ที่ใช้เข้า? (EMA50 บน 1D และ 4H)
+# ข้อ 1 — Daily ปิดสวน trend ที่ใช้เข้า? (EMA50 บน 1D เท่านั้น — 2026-08-07 ตัด 4H ออก)
 # ---------------------------------------------------------------------------
+# เดิมเช็ค 1D OR 4H — 4H ไวเกินไป (เคสจริง: ราคาหลุด EMA50 บน 4H อยู่ 15 แท่ง (~2.5 วัน) ก่อนดีด
+# กลับไปกำไร >1R ออกไปก่อนหน้านั้นเสียโอกาสฟรีทั้งที่ trend ใหญ่ยังไม่พัง) Daily กรอง noise ในตัว
+# อยู่แล้ว (ต้องปิดทั้งวันถึงนับ) จึงตัด 4H ออกจากเงื่อนไข hard-invalidation ไปเลย เหลือ Daily อย่างเดียว
+#
+# เพิ่ม grace period + 3 ระดับความรุนแรงตามความต่อเนื่อง (2026-08-07):
+#   - TREND_CHECK_GRACE_BARS แท่ง Daily แรกหลังเข้าไม้ — ไม่เช็คเลย ให้ thesis มีเวลาพิสูจน์ตัวเอง
+#     ก่อนตัดสิน (กันโดนตัดทันทีที่เพิ่งเข้า จากที่ entry ผ่าน MIN_SCORE ได้แม้ trend criteria จะ
+#     เฉียดขอบพอดี)
+#   - ปิดสวน trend ติดกัน 1 แท่ง Daily (หลัง grace) -> ออก 25% (เผื่อเป็นแค่ noise แล้วดีดกลับ)
+#   - ปิดสวน trend ติดกัน 2 แท่ง -> ออก เพิ่มเป็น 50% รวม
+#   - ปิดสวน trend ติดกัน 3 แท่งขึ้นไป -> ออก 100% (thesis พังจริง)
+#   - ไม้ Reversal ข้าม check นี้ทั้งหมด (เข้าสวน trend โดยดีไซน์อยู่แล้ว — direction มาจาก divergence
+#     polarity ไม่ใช่ trend bias เช็คนี้จะ false-positive ตั้งแต่แท่งแรกที่เปิดไม้)
+TREND_CHECK_GRACE_BARS = 5
+TREND_CHECK_KEEP_BY_CONSEC = {1: 75, 2: 50, 3: 0}   # แท่งปิดสวนติดกัน -> % lot ที่ควรเหลือ
+TREND_CHECK_MAX_CONSEC     = max(TREND_CHECK_KEEP_BY_CONSEC)
 
-def check_trend_invalidation(symbol: str, direction: str) -> bool:
+
+def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timestamp,
+                             strategy: str = "Scoring") -> dict:
+    """คืน {"active", "consec_break", "keep_pct", "reason"} — keep_pct = % lot ที่ควรเหลือ
+    (100 = ปกติ, 75/50 = เตือนภัยบางส่วน, 0 = invalidated เต็มรูปแบบ)
+    strategy == 'Reversal' -> ข้าม check นี้ทั้งหมด (active=False เสมอ ไม่มีทาง invalidate)"""
+    if strategy == "Reversal":
+        return {"active": False, "consec_break": 0, "keep_pct": 100,
+                "reason": "ข้าม — ไม้ Reversal เข้าสวน trend โดยดีไซน์อยู่แล้ว"}
+
     df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=210)
-    df_4h = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=210)
-    close_1d, ema50_1d = df_1d["close"].iloc[-2], ema(df_1d["close"], 50).iloc[-2]
-    close_4h, ema50_4h = df_4h["close"].iloc[-2], ema(df_4h["close"], 50).iloc[-2]
-    if direction == "Long":
-        return (close_1d < ema50_1d) or (close_4h < ema50_4h)
-    return (close_1d > ema50_1d) or (close_4h > ema50_4h)
+    close = df_1d["close"]
+    ema50 = ema(close, 50)
+    is_long = direction == "Long"
+
+    last_closed_idx = len(df_1d) - 2   # แท่ง Daily ปิดล่าสุด (แท่งสุดท้ายยังไม่ปิด)
+    in_1d = df_1d.index[df_1d["time"] <= entry_time]
+    entry_idx = in_1d[-1] if len(in_1d) else last_closed_idx
+    bars_since_entry = max(0, last_closed_idx - entry_idx)
+
+    if bars_since_entry < TREND_CHECK_GRACE_BARS:
+        return {"active": False, "consec_break": 0, "keep_pct": 100,
+                "reason": f"อยู่ในช่วง grace period ({bars_since_entry}/{TREND_CHECK_GRACE_BARS} แท่ง Daily หลังเข้าไม้)"}
+
+    consec = 0
+    idx = last_closed_idx
+    while idx > entry_idx and consec < TREND_CHECK_MAX_CONSEC:
+        broken = (close.iloc[idx] < ema50.iloc[idx]) if is_long else (close.iloc[idx] > ema50.iloc[idx])
+        if not broken:
+            break
+        consec += 1
+        idx -= 1
+
+    if consec == 0:
+        return {"active": True, "consec_break": 0, "keep_pct": 100, "reason": "OK"}
+
+    keep_pct = TREND_CHECK_KEEP_BY_CONSEC[consec]
+    if keep_pct <= 0:
+        reason = f"Daily ปิดสวน trend ติดกัน {consec} แท่ง — thesis พังจริง"
+    else:
+        reason = f"Daily ปิดสวน trend ติดกัน {consec} แท่ง — ออก {100 - keep_pct}% เผื่อไว้ก่อน"
+
+    return {"active": True, "consec_break": consec, "keep_pct": keep_pct, "reason": reason}
 
 
 # ---------------------------------------------------------------------------
 # ข้อ 2 — Structure ที่ใช้เข้าพังแล้ว? (หลุด Swing Low/High ล่าสุดบน 4H)
 # ---------------------------------------------------------------------------
+# 2026-08-07: เพิ่ม ATR buffer กันปิดทะลุแค่เฉียดๆ ด้วย noise ปกติ — เดิมเทียบ close_price กับ
+# ราคา Swing ดิบๆ แบบ strict ไม่มี buffer เลย ปิดต่ำ/สูงกว่าแม้แค่นิดเดียวก็ออก 100% ทันที ใช้สูตร
+# เดียวกับ "still_valid" ใน swing.find_sl_from_structure (ATR × STRUCTURE_TOLERANCE) ไม่เพิ่ม
+# magic number ใหม่ — ต้องปิดทะลุเกิน ATR×0.22 ถึงนับว่า broken จริง
 
 def check_structure_break(symbol: str, direction: str) -> bool:
     df_4h = get_ohlcv_real(symbol, "4H", bars=210)
     vol_mult = swing_vol_multiplier(symbol)
     wick_min = swing_wick_ratio_min(symbol)
     close_price = df_4h["close"].iloc[-2]
+    buffer = calc_atr(df_4h).iloc[-2] * STRUCTURE_TOLERANCE
     highs = find_swing_highs(df_4h, left=STRUCTURE_LEFT_RIGHT, right=STRUCTURE_LEFT_RIGHT,
                              tolerance_atr=STRUCTURE_TOLERANCE, vol_multiplier=vol_mult,
                              wick_ratio_min=wick_min)
@@ -267,10 +328,10 @@ def check_structure_break(symbol: str, direction: str) -> bool:
     if direction == "Long":
         if not lows:
             return False
-        return close_price < df_4h["low"].iloc[lows[-1]]
+        return close_price < (df_4h["low"].iloc[lows[-1]] - buffer)
     if not highs:
         return False
-    return close_price > df_4h["high"].iloc[highs[-1]]
+    return close_price > (df_4h["high"].iloc[highs[-1]] + buffer)
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +477,11 @@ def analyze_position(pos) -> dict:
     time_held_days = (now - entry_time).total_seconds() / 86400
 
     # ── 2) รัน Exit Decision Checklist โดยใช้ r_multiple/time_held ข้างบน (ก่อนคิด Chandelier) ──
-    trend_broken     = check_trend_invalidation(symbol, direction)
+    strategy       = journal.get_trade_strategy(pos.ticket)
+    trend_info     = check_trend_invalidation(symbol, direction, entry_time, strategy)
+    trend_keep_pct = trend_info["keep_pct"]
+    trend_broken_full    = trend_keep_pct <= 0
+    trend_broken_partial = 0 < trend_keep_pct < 100
     structure_broken = check_structure_break(symbol, direction)
     has_news, news_detail, news_hours_left = check_upcoming_news()
     news_imminent = has_news and news_hours_left is not None and news_hours_left <= NEWS_IMMINENT_H
@@ -425,11 +490,13 @@ def analyze_position(pos) -> dict:
     ge1r             = r_multiple is not None and r_multiple >= 1.0
     slow_trade       = time_held_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
 
-    invalidated = trend_broken or structure_broken or post_news_no_profit
-    if trend_broken or structure_broken:
+    invalidated = trend_broken_full or structure_broken or post_news_no_profit
+    if trend_broken_full or structure_broken:
         final_decision = ("ออก 100% ทันที — Trend/Structure พัง", RED)
     elif post_news_no_profit:
         final_decision = ("ออก 100% ทันที — ข่าวสงบแล้วแต่ไม่กำไร", RED)
+    elif trend_broken_partial:
+        final_decision = (f"ออก {100 - trend_keep_pct}% — {trend_info['reason']}", YELLOW)
     elif slow_trade:
         final_decision = ("ออก 50% (Time exit) — รอ setup ใหม่", YELLOW)
     elif ge1r:
@@ -439,10 +506,12 @@ def analyze_position(pos) -> dict:
 
     breakeven_str = f"{entry:,.3f}"
     checklist = [
-        {"no": 1, "q": "Daily/4H ปิดสวน trend ที่ใช้เข้า?",           "answer": trend_broken,
-         "action": "ออก 100% = Invalidation" if trend_broken else "",
-         "severity": "red",
-         "note": "เช่น Long แต่ Daily ปิดต่ำกว่า EMA 50"},
+        {"no": 1, "q": "Daily ปิดสวน trend ที่ใช้เข้า? (พ้น grace period แล้ว)",
+         "answer": trend_broken_full or trend_broken_partial,
+         "action": (f"ออก 100% = Invalidation (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)" if trend_broken_full else
+                    f"ออก {100 - trend_keep_pct}% = เตือนภัย (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)" if trend_broken_partial else ""),
+         "severity": "red" if trend_broken_full else "yellow",
+         "note": trend_info["reason"]},
         {"no": 2, "q": "Structure ที่ใช้เข้าพังแล้ว?",                 "answer": structure_broken,
          "action": "ออก 100% = Structure broken" if structure_broken else "",
          "severity": "red",
@@ -468,6 +537,8 @@ def analyze_position(pos) -> dict:
     # ── 4) Final Decision แปลงเป็น % ฐาน — 0% หยุดคิดทันที (คูณอะไรก็ยังเป็น 0) ──
     if invalidated:
         base_keep_pct = 0
+    elif trend_broken_partial:
+        base_keep_pct = trend_keep_pct   # เตือนภัย ยังไม่ฟันธง 100% — ปิดกันไว้ก่อนตามระดับความต่อเนื่อง (75/50)
     elif slow_trade:
         base_keep_pct = 50
     else:
@@ -535,6 +606,30 @@ def analyze_position(pos) -> dict:
                (direction == "Short" and desired_sl > capped_sl):
                 desired_sl      = capped_sl
                 sl_widen_capped = True
+
+        # Ratchet กันขึ้นลงๆ (2026-08-07): ATR1H ผันผวนรายชั่วโมงทำให้ trailing SL แกว่งได้ทั้งสองทาง
+        # (ATR ล่าสุดหด -> SL ขยับเข้าใกล้ entry กว่ารอบก่อน) ทิศทางที่ "ห้ามถอย" สลับด้านกันตาม
+        # ว่า SL ปัจจุบันบน broker (pos.sl) ผ่าน breakeven (entry) มาแล้วหรือยัง:
+        #   - ยังไม่ถึง breakeven (sl ยัง "แคบกว่า" entry ฝั่งเสี่ยง): ห้ามถอยเข้าใกล้ entry กว่า sl
+        #     เดิม (ขยับออกห่าง entry เพิ่มได้เสมอ)
+        #   - ผ่าน breakeven ไปแล้ว (sl ไปถึง/เลย entry แล้ว): สลับกติกาเป็นห้ามถอยกลับต่ำกว่า sl
+        #     เดิม (ขยับเข้าใกล้ราคาปัจจุบันเพิ่ม/ล็อกกำไรเพิ่มได้เท่านั้น) — กัน ge1r ที่ไม่ sticky
+        #     (คำนวณจากราคาสดทุกรอบ) หลุด False ตอนราคาย่อกลับต่ำกว่า 1R แล้วดึง SL ที่ล็อก
+        #     breakeven ไปแล้วให้ถอยกลับต่ำกว่า entry ซ้ำ (บั๊กที่พบตอนจำลอง: 900 -> 1000(BE) -> 850)
+        if sl:
+            past_breakeven = (sl >= entry) if direction == "Long" else (sl <= entry)
+            if direction == "Long":
+                if past_breakeven:
+                    desired_sl = max(desired_sl, sl)
+                elif desired_sl > sl:
+                    desired_sl = sl
+            else:
+                if past_breakeven:
+                    desired_sl = min(desired_sl, sl)
+                elif desired_sl < sl:
+                    desired_sl = sl
+
+        # Breakeven force เป็นข้อยกเว้นตั้งใจ (กำไร >= 1R) — ให้ขยับเข้าหา entry ได้ ทับ ratchet ด้านบน
         if ge1r:
             desired_sl = max(desired_sl, entry) if direction == "Long" else min(desired_sl, entry)
     else:

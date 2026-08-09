@@ -1,5 +1,5 @@
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import MetaTrader5 as mt5
 import pandas as pd
@@ -12,14 +12,15 @@ LOG_FILE = os.path.join(os.path.dirname(__file__), "trades_log.csv")
 COLUMNS = [
     "date", "time", "symbol", "direction", "entry", "sl", "tp",
     "lot", "score", "ticket", "status", "net_pnl", "note",
-    "pinned_swing", "pinned_atr_entry", "close_date",
+    "pinned_swing", "pinned_atr_entry", "close_date", "close_time",
+    "strategy",
 ]
 
 
 # คอลัมน์ที่เก็บข้อความ — ต้องบังคับเป็น object dtype ตอนโหลด ไม่งั้นคอลัมน์ที่ยังว่างทั้งหมด
 # (เช่น close_date/note ของไฟล์เก่า) จะถูก pandas อ่านเป็น float64 แล้วเวลาเขียนสตริงลงไปจะโดน
 # FutureWarning "incompatible dtype" (pandas รุ่นถัดไปจะ raise จริง)
-_TEXT_COLUMNS = ("date", "time", "symbol", "direction", "ticket", "status", "note", "close_date")
+_TEXT_COLUMNS = ("date", "time", "symbol", "direction", "ticket", "status", "note", "close_date", "close_time", "strategy")
 
 
 def _load() -> pd.DataFrame:
@@ -50,10 +51,17 @@ def _save(df: pd.DataFrame) -> None:
 def log_trade_open(symbol: str, direction: str, entry: float,
                    sl: float, tp: float, lot: float,
                    score: float, ticket: int,
-                   pinned_swing: float = None, pinned_atr_entry: float = None) -> None:
+                   pinned_swing: float = None, pinned_atr_entry: float = None,
+                   strategy: str = "Scoring") -> None:
     """pinned_swing/pinned_atr_entry: ฐานตรึงของ ATR Trailing SL ณ ตอนเปิดไม้ (exit_monitor.py
-    ใช้ค่านี้ตลอดการถือ แทนคำนวณ swing ใหม่จาก rolling window ทุกชั่วโมง — กัน anchor สลับ
-    ถ้าถือ position ยาวจน swing เดิมหลุดขอบหน้าต่างข้อมูล) — ไม่ส่งมาได้ (เช่นหา SL ไม่ได้ตอนเข้า)"""
+    ใช้ค่านี้ตลอดการถือ แทนคำนวณใหม่จาก rolling window ทุกชั่วโมง — กัน anchor สลับถ้าถือ position
+    ยาวจน swing เดิมหลุดขอบหน้าต่างข้อมูล) — pinned_swing คือ SL ที่คำนวณตอนเข้าไม้จริง (Swing +
+    ATR4H×0.1 buffer, ตัวเดียวกับที่คิด R:R และเป็น Broker SL) ไม่ใช่ Swing ดิบ (2026-08-07 เปลี่ยน
+    มาให้ R:R ตอนเข้ากับ Trailing SL ระหว่างถือไปทิศทางเดียวกัน) — ไม่ส่งมาได้ (เช่นหา SL ไม่ได้ตอนเข้า)
+
+    strategy: 'Scoring' (trend-following) | 'Reversal' — exit_monitor.py ใช้ตัดสินว่าจะรัน
+    check #1 (Daily Trend Invalidation) ไหม เพราะไม้ Reversal เข้าสวน trend โดยดีไซน์อยู่แล้ว
+    เช็ค trend break ตอนเข้าจะ false-positive ทันที (2026-08-07)"""
     df = _load()
     now = datetime.now()
     row = {
@@ -73,6 +81,8 @@ def log_trade_open(symbol: str, direction: str, entry: float,
         "pinned_swing":     pinned_swing if pinned_swing is not None else "",
         "pinned_atr_entry": pinned_atr_entry if pinned_atr_entry is not None else "",
         "close_date":       "",
+        "close_time":       "",
+        "strategy":         strategy,
     }
     new_row = pd.DataFrame([row], columns=COLUMNS)
     # ไฟล์ว่าง (ไม้แรก) ห้าม concat กับ DataFrame เปล่า — pandas เตือน FutureWarning เรื่อง dtype
@@ -119,6 +129,19 @@ def get_original_tp(ticket: int) -> float | None:
     return _original_field(ticket, "tp")
 
 
+def get_trade_strategy(ticket: int) -> str:
+    """คืน 'Scoring' | 'Reversal' ที่บันทึกไว้ตอนเปิดไม้ — 'Scoring' เป็นค่า default ถ้าไม่พบ
+    (ไม้เก่าก่อนมีคอลัมน์นี้ ล้วนเปิดด้วย Scoring เพราะ Reversal ยังไม่มีตอนนั้น)"""
+    df = _load()
+    mask = df["ticket"] == str(ticket)
+    if not mask.any():
+        return "Scoring"
+    val = df.loc[mask].iloc[-1].get("strategy", "")
+    if val == "" or pd.isna(val):
+        return "Scoring"
+    return str(val)
+
+
 def get_original_lot(ticket: int) -> float | None:
     """คืน lot ตอนเปิดไม้จริง — Position Sizing Rules ใน exit_monitor.py ต้องคิด % จากค่านี้
     ไม่ใช่ pos.volume ปัจจุบัน (2026-08-02: เดิมคิดจาก pos.volume ทำให้ทุกชั่วโมงที่ rule ยัง
@@ -132,18 +155,22 @@ def get_original_lot(ticket: int) -> float | None:
 
 def log_trade_close(ticket: int, result: str,
                     net_pnl: float, note: str = "",
-                    close_date: str = None) -> None:
+                    close_date: str = None, close_time: str = None) -> None:
     """result: 'Take Profit' | 'Stop Loss' | 'Manual Cut'
     close_date: 'YYYY-MM-DD' ของ "วันที่ปิด" (ไม่ใส่ = วันนี้) — คนละคอลัมน์กับ 'date' ที่เป็น
-    วันเปิดไม้ เพราะ check_daily_loss ต้องนับตามวันที่ปิดจริง (ไม้ถือข้ามวันเป็นเรื่องปกติ)"""
+    วันเปิดไม้ เพราะ check_daily_loss ต้องนับตามวันที่ปิดจริง (ไม้ถือข้ามวันเป็นเรื่องปกติ)
+    close_time: 'HH:MM:SS' ของเวลาปิด (ไม่ใส่ = ตอนนี้) — ใช้คู่กับ close_date ให้ check_cooldown
+    นับ cooldown ได้ละเอียดถึงชั่วโมง ไม่ใช่แค่วัน"""
     df = _load()
     mask = df["ticket"] == str(ticket)
     if not mask.any():
         raise ValueError(f"ticket #{ticket} ไม่พบใน {LOG_FILE}")
+    now = datetime.now()
     df.loc[mask, "status"]     = result
     df.loc[mask, "net_pnl"]    = float(net_pnl)
     df.loc[mask, "note"]       = str(note)
-    df.loc[mask, "close_date"] = close_date or date.today().strftime("%Y-%m-%d")
+    df.loc[mask, "close_date"] = close_date or now.strftime("%Y-%m-%d")
+    df.loc[mask, "close_time"] = close_time or now.strftime("%H:%M:%S")
     _save(df)
     sign = "+" if net_pnl >= 0 else ""
     print(f"[journal] Close logged  ticket=#{ticket}  {result}  P/L {sign}{net_pnl:.2f}")
@@ -193,14 +220,17 @@ def reconcile_closed_positions() -> int:
             continue                      # มีแต่ deal เปิด ยังไม่มี deal ปิด
 
         net_pnl   = sum(d.profit + d.swap + d.commission for d in deals)
-        last_out  = max(out_deals, key=lambda d: d.time)
-        result    = _RESULT_BY_DEAL_REASON.get(last_out.reason, "Manual Cut")
-        close_day = datetime.fromtimestamp(last_out.time).strftime("%Y-%m-%d")
+        last_out   = max(out_deals, key=lambda d: d.time)
+        result     = _RESULT_BY_DEAL_REASON.get(last_out.reason, "Manual Cut")
+        close_dt   = datetime.fromtimestamp(last_out.time)
+        close_day  = close_dt.strftime("%Y-%m-%d")
+        close_time = close_dt.strftime("%H:%M:%S")
 
         df.at[idx, "status"]     = result
         df.at[idx, "net_pnl"]    = round(float(net_pnl), 2)
         df.at[idx, "note"]       = "auto-reconciled from MT5 history"
         df.at[idx, "close_date"] = close_day
+        df.at[idx, "close_time"] = close_time
         closed += 1
         sign = "+" if net_pnl >= 0 else ""
         print(f"[journal] Reconciled #{ticket}  {result}  P/L {sign}{net_pnl:.2f}  ({close_day})")
@@ -239,6 +269,54 @@ def check_daily_loss(balance: float, max_daily_loss_pct: float) -> bool:
         print(f"[journal] Daily loss limit hit: {daily_pnl:.2f} <= {limit:.2f}  — ห้ามเข้า trade เพิ่ม")
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Cooldown — ห้ามเข้าไม้ symbol เดิมซ้ำเร็วเกินไปหลังปิดไม้ก่อนหน้า (ทั้งกำไรและขาดทุน)
+# ---------------------------------------------------------------------------
+
+def _closed_datetime(row) -> datetime | None:
+    """รวม close_date + close_time เป็น datetime เดียว — ไม้เก่าก่อนมีคอลัมน์ close_time
+    จะ fallback เป็นเที่ยงคืนของ close_date แทน (ยังพอใช้เทียบ cooldown ระดับวันได้)"""
+    close_date = row.get("close_date", "")
+    if close_date == "" or pd.isna(close_date):
+        return None
+    close_time = row.get("close_time", "")
+    if close_time == "" or pd.isna(close_time):
+        close_time = "00:00:00"
+    try:
+        return datetime.strptime(f"{close_date} {close_time}", "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def check_cooldown(symbol: str, cooldown_hours: float) -> tuple[bool, str]:
+    """Return False ถ้ายังอยู่ในช่วง cooldown หลังปิดไม้ symbol นี้ล่าสุด (นับทั้งกำไร/ขาดทุน)
+    เรียกหลัง reconcile_closed_positions() เสมอ ไม่งั้นไม้ที่เพิ่งชน SL/TP เองจะยังนับเป็น 'Open'
+    และมองไม่เห็นเวลาปิดจริง"""
+    if cooldown_hours <= 0:
+        return True, "OK"
+
+    df = _load()
+    closed = df[(df["symbol"] == symbol) & (df["status"] != "Open") & (df["status"] != "")]
+    if closed.empty:
+        return True, "OK"
+
+    close_times = [dt for dt in closed.apply(_closed_datetime, axis=1) if dt is not None]
+    if not close_times:
+        return True, "OK"
+
+    last_close = max(close_times)
+    elapsed = datetime.now() - last_close
+    cooldown = timedelta(hours=cooldown_hours)
+    if elapsed < cooldown:
+        remaining = cooldown - elapsed
+        hrs = remaining.total_seconds() / 3600
+        return False, (
+            f"Cooldown {symbol}: ปิดไม้ล่าสุดเมื่อ {last_close.strftime('%Y-%m-%d %H:%M')} "
+            f"— ต้องรออีก {hrs:.1f} ชม. ({cooldown_hours:.0f} ชม. cooldown)"
+        )
+    return True, "OK"
 
 
 # ---------------------------------------------------------------------------

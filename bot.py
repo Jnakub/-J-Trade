@@ -10,6 +10,7 @@ import journal
 from config import (
     RISK_PER_TRADE, MAX_DAILY_LOSS,
     MIN_SCORE, TOTAL_WEIGHT,
+    COOLDOWN_HOURS_BY_SYMBOL,
 )
 from mt5_connect import connect, get_account_balance
 from order import calculate_lot_size, clamp_lot, place_order
@@ -63,6 +64,12 @@ class RiskCheckerAgent:
         positions = mt5.positions_get(symbol=symbol)
         if positions:
             return False, f"Already have {len(positions)} open position(s) for {symbol}"
+
+        # 2a. Cooldown guard — เพิ่งปิดไม้ symbol นี้ไปไม่นาน (ดู config.COOLDOWN_HOURS_BY_SYMBOL)
+        cooldown_hours = COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)
+        ok, reason = journal.check_cooldown(symbol, cooldown_hours)
+        if not ok:
+            return False, reason
 
         # 2b. News guard — ไม่เปิดไม้ใหม่ถ้าข่าว High Impact (USD) จะออกภายใน NEWS_IMMINENT_H ชม.
         has_news, news_detail, _ = check_upcoming_news(hours_ahead=NEWS_IMMINENT_H)
