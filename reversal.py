@@ -126,7 +126,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     # ── ข้อ 1: Key Level ──
     if key_level is None:
         key_level_df = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS, as_of=as_of) if as_of is not None else None
-        key_level = check_key_level(symbol, entry, df=key_level_df)
+        key_level = check_key_level(symbol, entry, df=key_level_df, as_of=as_of)
     at_key = bool(key_level.get("at_key_level"))
 
     # ── ข้อ 2: Divergence RSI ──

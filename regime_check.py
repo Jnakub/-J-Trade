@@ -27,6 +27,7 @@ Checklist:
      python regime_check.py BTCUSDm          # เช็คเฉพาะ symbol ที่ระบุ
 """
 import sys
+from datetime import datetime
 
 import MetaTrader5 as mt5
 import pandas as pd
@@ -257,13 +258,20 @@ def cluster_price_zones(points: list[tuple[float, pd.Timestamp, str]], pct_tol: 
     return zones
 
 
-def check_key_level(symbol: str, current_price: float, df: pd.DataFrame = None) -> dict:
+def check_key_level(symbol: str, current_price: float, df: pd.DataFrame = None,
+                    as_of: datetime = None) -> dict:
     """df: ส่งข้อมูล 4H (real volume, >= KEY_LEVEL_BARS แท่ง) ที่ดึงมาแล้วมาใช้ซ้ำได้
-    (เช่นจาก get_regime() ที่ดึงไปแล้วรอบหนึ่ง) — ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม"""
+    (เช่นจาก get_regime() ที่ดึงไปแล้วรอบหนึ่ง) — ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม
+
+    as_of: ส่งมาเมื่อเรียกจาก backtest (เช่น reversal.compute_reversal_score) — ถ้าไม่ส่ง df
+    มาเอง จะ fetch ด้วย as_of นี้แทนดึงสด และ**ไม่ตัดแท่งท้ายซ้ำ** เพราะ get_ohlcv_real(as_of=...)
+    ตัดแท่งฟอร์มมิ่งให้เสร็จแล้วในตัวมันเอง (2026-08-09: เดิมตัดซ้ำแบบไม่มีเงื่อนไขเหมือนบั๊กที่
+    เจอใน reversal.py — reversal.py ส่ง df ที่ bound ด้วย as_of มาแล้วแต่ตัวนี้ตัดทิ้งซ้ำอีกแท่ง)"""
     if df is None:
-        df = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS)
+        df = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS, as_of=as_of)
     df = df.iloc[-KEY_LEVEL_BARS:].reset_index(drop=True)
-    df = df.iloc[:len(df) - 1].reset_index(drop=True)   # ตัดแท่งยังไม่ปิด
+    if as_of is None:
+        df = df.iloc[:len(df) - 1].reset_index(drop=True)   # ตัดแท่งยังไม่ปิด (เฉพาะโหมดสด)
     vol_mult = swing_vol_multiplier(symbol)
     wick_min = swing_wick_ratio_min(symbol)
 
