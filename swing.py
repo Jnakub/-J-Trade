@@ -57,8 +57,14 @@ def has_rejection(df: pd.DataFrame, idx: int, atr: pd.Series,
 def swing_vol_multiplier(symbol: str) -> float:
     """เกณฑ์ volume ของ swing ตาม symbol — จุดเดียวทั้งระบบ ห้าม hardcode ซ้ำที่อื่น
     XAU/Gold 1.5x (volume ทองแรงน้อยกว่า — ปรับจาก 1.6 เมื่อ 2026-07-24 ยังไม่มี backtest
-    ยืนยันค่าใหม่นี้โดยตรง), อื่นๆ 1.9x"""
-    return 1.5 if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else 1.9
+    ยืนยันค่าใหม่นี้โดยตรง), USDJPYm 1.6x (2026-08-09 — เทียบ swing count ที่ 1.5/1.6/1.9 บน
+    400 แท่ง 4H แล้ว: 16/13/11 High, 17/14/12 Low ตามลำดับ เลือก 1.6 เป็นจุดกึ่งกลาง ยังไม่มี
+    ข้อมูลเทรดจริงยืนยัน), อื่นๆ 1.9x"""
+    if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
+        return 1.5
+    if "JPY" in symbol.upper():
+        return 1.6
+    return 1.9
 
 
 def swing_wick_ratio_min(symbol: str) -> float | None:
@@ -89,18 +95,19 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     จะแนะนำให้คงเดิม (None) เพราะยังไม่มีข้อมูลเทรดจริงยืนยัน sample เล็กมาก (3-7 ไม้) ควร
     เฝ้าดูผลจริงและพร้อมปรับกลับถ้าผลออกมาแย่ตามที่ backtest ชี้
 
-    USDJPYm (2026-08-09, threshold 0.5): เหตุผลเดียวกับ XAU เป๊ะ — Forex เป็นตลาด OTC ไม่มี
+    USDJPYm (2026-08-09, threshold 0.55): เหตุผลเดียวกับ XAU เป๊ะ — Forex เป็นตลาด OTC ไม่มี
     "real volume" ให้ merge ได้จริงในทางทฤษฎี (ไม่มี exchange กลางรวม volume แบบ crypto/futures)
     ต้องใช้ tick_volume ของโบรกเกอร์เป็น proxy เชื่อถือได้น้อยเหมือน XAU เปิด wick OR-logic ไว้
     ตั้งแต่เริ่มเลย (ไม่รอ backtest แยกเหมือน ETH/XRP เพราะสถานการณ์เหมือน XAU ตรงๆ ไม่ใช่กรณี
-    "มี real volume อยู่แล้วแต่ยังพลาดบางจุด" แบบ BTC/ETH/XRP) — ยังไม่มีข้อมูลเทรดจริงยืนยัน
-    ควรเฝ้าดูผลจริงเหมือน symbol อื่น"""
+    "มี real volume อยู่แล้วแต่ยังพลาดบางจุด" แบบ BTC/ETH/XRP) — threshold ปรับจาก 0.5 เป็น 0.55
+    ตามคำสั่งผู้ใช้หลังดูรายจุด (vol ratio/wick ratio) จริงของ swing ที่เจอแล้ว ยังไม่มีข้อมูล
+    เทรดจริงยืนยัน ควรเฝ้าดูผลจริงเหมือน symbol อื่น"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 0.5
     if "BTC" in symbol.upper():
         return 0.5
     if "JPY" in symbol.upper():
-        return 0.5
+        return 0.55
     if "ETH" in symbol.upper():
         return 0.5
     if "XRP" in symbol.upper():
