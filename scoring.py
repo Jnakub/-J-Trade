@@ -34,11 +34,17 @@ from trend_flip import compute_trend_regime
 # (ครั้งแรกที่ทำ XAU ใช้ sample เล็กแค่ 2 คู่เทียบได้ k ไม่น่าเชื่อถือ — รันซ้ำด้วยข้อมูลยาวขึ้น
 # แล้วได้ผลที่มั่นใจได้มากกว่านี้ 2026-07-27) symbol ที่ไม่มีในนี้จะได้ bias=None (SKIP ทุกครั้ง
 # ใน Scoring — ไม่มี EMA50/200 fallback แล้วตั้งแต่ 2026-08-01) จนกว่าจะมีคน sweep หา k ให้
+#
+# 2026-08-09: เพิ่ม USDJPYm (k=0.20, FalseFlip=0/62=0%, เร็วกว่า EMA cross เฉลี่ย 16.6 แท่ง,
+# matched 24 คู่) — sweep ซ้ำ BTC/XAU/ETH/XRP ด้วยข้อมูลสดพร้อมกัน (methodology เดิมเป๊ะ: 1D,
+# 3000 แท่ง) ยืนยันว่าทั้ง 4 ตัวยังได้ค่าเดิมเป๊ะทุกตัว ไม่ต้องปรับ — พร้อมกับแก้บั๊กเกณฑ์เลือก
+# k* ใน backtest_trend_flip_ksweep.py (เดิมเลือกจาก false_n ดิบ ไม่ใช่ false_pct — ดู git log)
 TREND_FLIP_K = {
     "BTCUSDm": 0.20,
     "XAUUSDm": 0.40,
     "ETHUSDm": 0.40,
     "XRPUSDm": 0.20,
+    "USDJPYm": 0.20,
 }
 
 

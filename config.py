@@ -139,7 +139,12 @@ TOTAL_WEIGHT = (
 # (k=0.40/0.20 ตามลำดับ, FalseFlip 0% ทั้งคู่) real volume (Bitstamp) ยืนยันแล้วว่า merge ได้
 # 100% ทั้ง 2 symbol — swing_vol_multiplier/wick_ratio_min ยังใช้ default เดิม (1.9x, ไม่มี
 # wick filter) เหมือน BTC ก่อนจะ tune เฉพาะเจาะจง ยังไม่ได้ backtest ปรับแยกให้ ETH/XRP
-SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm"]
+#
+# 2026-08-09: เพิ่ม USDJPYm — TREND_FLIP_K sweep แล้ว (k=0.20, FalseFlip 0%) เหมือนกัน แต่ไม่มี
+# real volume ให้ merge เลย (Forex เป็นตลาด OTC ไม่มี exchange กลาง ไม่ใช่แค่ยังไม่ได้ต่อแหล่ง
+# ข้อมูล) เลยเปิด wick_ratio_min=0.5 ชดเชยตั้งแต่แรกเหมือน XAU (ดู comment เต็มที่
+# swing.swing_wick_ratio_min) แทนที่จะปล่อย default (None) แบบ ETH/XRP ตอนเริ่มเปิดใช้งาน
+SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm", "USDJPYm"]
 
 # ---------------------------------------------------------------------------
 # Cooldown หลังปิดไม้ — กันเข้าไม้ symbol เดิมซ้ำเร็วเกินไปหลังปิด (นับทั้งกำไร/ขาดทุน)
@@ -151,6 +156,7 @@ COOLDOWN_HOURS_BY_SYMBOL = {
     "ETHUSDm": 48,
     "XRPUSDm": 48,
     "XAUUSDm": 48,
+    "USDJPYm": 48,
 }
 
 # ---------------------------------------------------------------------------

@@ -87,10 +87,19 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     XRPUSDm (2026-08-02, threshold 0.5): backtest ชุดเดียวกันพบว่า **แย่ลง** ชัดเจน
     (3->7 ไม้, TotalR +6.29->-2.86, Win Rate 33.3%->14.3%) — เปิดใช้ตามคำสั่งผู้ใช้แม้ backtest
     จะแนะนำให้คงเดิม (None) เพราะยังไม่มีข้อมูลเทรดจริงยืนยัน sample เล็กมาก (3-7 ไม้) ควร
-    เฝ้าดูผลจริงและพร้อมปรับกลับถ้าผลออกมาแย่ตามที่ backtest ชี้"""
+    เฝ้าดูผลจริงและพร้อมปรับกลับถ้าผลออกมาแย่ตามที่ backtest ชี้
+
+    USDJPYm (2026-08-09, threshold 0.5): เหตุผลเดียวกับ XAU เป๊ะ — Forex เป็นตลาด OTC ไม่มี
+    "real volume" ให้ merge ได้จริงในทางทฤษฎี (ไม่มี exchange กลางรวม volume แบบ crypto/futures)
+    ต้องใช้ tick_volume ของโบรกเกอร์เป็น proxy เชื่อถือได้น้อยเหมือน XAU เปิด wick OR-logic ไว้
+    ตั้งแต่เริ่มเลย (ไม่รอ backtest แยกเหมือน ETH/XRP เพราะสถานการณ์เหมือน XAU ตรงๆ ไม่ใช่กรณี
+    "มี real volume อยู่แล้วแต่ยังพลาดบางจุด" แบบ BTC/ETH/XRP) — ยังไม่มีข้อมูลเทรดจริงยืนยัน
+    ควรเฝ้าดูผลจริงเหมือน symbol อื่น"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 0.5
     if "BTC" in symbol.upper():
+        return 0.5
+    if "JPY" in symbol.upper():
         return 0.5
     if "ETH" in symbol.upper():
         return 0.5
