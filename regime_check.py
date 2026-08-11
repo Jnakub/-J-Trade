@@ -429,11 +429,15 @@ def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
     """คืน (regime, action, color)"""
     # CHOPPY — ห้ามเทรด
     if adx_now < ADX_CHOPPY:
-        return ("CHOPPY", "พัก — การไม่เทรดคือ position ที่ถูกต้อง (ADX < 20)", RED)
+        return ("CHOPPY", f"พัก — การไม่เทรดคือ position ที่ถูกต้อง (ADX < {ADX_CHOPPY:.0f})", RED)
 
-    # เขตเทา 20-25
+    # เขตเทา — 2026-08-11: ข้อความเดิม hardcode "20-25" ค้างมาจากก่อนแก้ ADX_GRAY_HIGH จาก 25
+    # เป็น 22 (ดู comment ที่นิยามค่าคงที่ด้านบน) ทำให้ log แสดงช่วงผิดจากเกณฑ์จริงมาตลอด — ใช้
+    # ค่าคงที่จริงแทน hardcode กันเพี้ยนซ้ำถ้ามีคนปรับ threshold อีกในอนาคตแล้วลืมแก้ข้อความ
     if adx_now < ADX_GRAY_HIGH:
-        return ("เขตเทา", "รอ ADX เลือกทางก่อน ห้ามฝืนเปิด scorecard (ADX 20-25)", YELLOW)
+        return ("เขตเทา",
+                f"รอ ADX เลือกทางก่อน ห้ามฝืนเปิด scorecard (ADX {ADX_CHOPPY:.0f}-{ADX_GRAY_HIGH:.0f})",
+                YELLOW)
 
     # Reversal candidate — relative peak & decline: ทำจุดสูงสุดใหม่ในรอบที่มองย้อน (ไม่ว่าตัวเลขจะเป็นเท่าไหร่
     # เช่น 28, 32, 45) แล้วโค้งลงติดกันครบแท่ง — ไม่ใช้ threshold ตายตัวอย่าง 40 อีกต่อไป เพราะ "แรงสุดของรอบนั้น"
