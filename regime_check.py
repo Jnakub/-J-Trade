@@ -156,11 +156,15 @@ def adx_peak_info(adx: pd.Series, closed_idx: int) -> dict:
     peak_pos = window.idxmax()               # index จริงใน series
     bars_since_peak = closed_idx - peak_pos
 
-    # เช็คว่าลดลง "ติดต่อกัน" จาก peak ถึงแท่งปิดล่าสุดไหม
+    # เช็คว่าลดลง "ติดต่อกัน" ไหม — 2026-08-11: เดิมเช็คทั้งช่วงตั้งแต่ peak มาจนถึงตอนนี้
+    # (seg = adx.iloc[peak_pos:closed_idx+1]) ทำให้ยิ่ง bars_since_peak มาก ยิ่งต้องลงรวดเดียว
+    # ไม่สะดุดเลยนานขึ้นเรื่อยๆ ทั้งที่ backtest ที่อ้างอิง (ดู comment ที่ ADX_DECLINE_BARS
+    # ด้านบน: "ลงติดกัน 3 แท่ง -> ADX ลงต่อจริง 100%") วัดจากแค่ 3 แท่งล่าสุดเท่านั้น ไม่ใช่
+    # ทั้งช่วงจาก peak — แก้ให้เช็คแค่ ADX_DECLINE_BARS แท่งล่าสุดตรงตามที่ backtest พิสูจน์ไว้จริง
     declining = False
     if bars_since_peak >= ADX_DECLINE_BARS:
-        seg = adx.iloc[peak_pos: closed_idx + 1]
-        declining = all(seg.iloc[i + 1] < seg.iloc[i] for i in range(len(seg) - 1))
+        recent = adx.iloc[closed_idx - ADX_DECLINE_BARS + 1: closed_idx + 1]
+        declining = all(recent.iloc[i + 1] < recent.iloc[i] for i in range(len(recent) - 1))
 
     return {"peak": peak_val, "bars_since_peak": bars_since_peak, "declining": declining}
 
