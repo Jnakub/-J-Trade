@@ -86,9 +86,12 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     Win Rate 50%->66.7% (ไม้เดิมที่เคยแพ้ 1 ไม้กลับมาชนะเพราะ SL/TP อ้างอิงจุด swing แม่นขึ้น)
     sample เล็ก (4-6 ไม้) — ควร backtest ซ้ำเมื่อมีข้อมูลเทรดจริงมากพอ
 
-    ETHUSDm (2026-08-02, threshold 0.5): backtest 180 วัน (เส้นทาง Scoring/TREND เท่านั้น —
+    ETHUSDm (2026-08-02, threshold 0.5 ตอนแรก): backtest 180 วัน (เส้นทาง Scoring/TREND เท่านั้น —
     ยังไม่ได้ทดสอบผลกับ Reversal path) เทรดเท่าเดิม (6 ไม้) แต่ TotalR ดีขึ้น -2.26->-0.98,
     Win Rate 16.7%->33.3%
+    2026-08-11: threshold ปรับเป็น 0.55 ตามคำสั่งผู้ใช้หลังดูรายจุด (vol ratio/wick ratio) จริง
+    ของ swing 400 แท่งล่าสุด (High เกิดจาก wick ล้วนๆ 6/19 จุด, Low 9/19 จุด) — ยังไม่มี backtest
+    ยืนยันค่าใหม่นี้โดยตรง ควรเฝ้าดูผลจริงและพร้อมปรับกลับถ้าจำเป็น
 
     XRPUSDm (2026-08-02, threshold 0.5): backtest ชุดเดียวกันพบว่า **แย่ลง** ชัดเจน
     (3->7 ไม้, TotalR +6.29->-2.86, Win Rate 33.3%->14.3%) — เปิดใช้ตามคำสั่งผู้ใช้แม้ backtest
@@ -109,7 +112,7 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     if "JPY" in symbol.upper():
         return 0.55
     if "ETH" in symbol.upper():
-        return 0.5
+        return 0.55
     if "XRP" in symbol.upper():
         return 0.5
     return None
