@@ -119,7 +119,9 @@ def scan_symbol(symbol: str) -> None:
                 print(f"  [{symbol}] SKIP — หา Bias ไม่ได้ ({bias_source})")
                 return
             print(f"  [{symbol}] เปิด Scoring — Bias={direction} ({bias_source})  Entry={entry:.5f}")
-            score, criteria, passed, sl_info = compute_score(symbol, direction, entry)
+            # ส่ง df_1d ที่ดึงไปแล้วข้างบน (สำหรับ get_trend_bias) ให้ compute_score ใช้ซ้ำ —
+            # กันดึง+merge_real_volume 1D ซ้ำสองรอบข้อมูลชุดเดียวกันเป๊ะ (2026-08-11)
+            score, criteria, passed, sl_info = compute_score(symbol, direction, entry, df_1d=df_1d)
             sl, tp = sl_info["sl"], sl_info["tp"]
             rr = calc_rr(entry, sl, tp, direction)
             score_total = TOTAL_WEIGHT

@@ -166,7 +166,8 @@ def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str | None, str]:
 
 def compute_score(symbol: str, direction: str, entry: float,
                   sl: float = None, tp: float = None,
-                  force: bool = False, as_of: datetime = None) -> tuple[float, list, bool, dict]:
+                  force: bool = False, as_of: datetime = None,
+                  df_1d: pd.DataFrame = None) -> tuple[float, list, bool, dict]:
     """Return (total_score, criteria_list, passed, sl_info).
     ถ้าไม่ส่ง sl จะหาจาก swing structure อัตโนมัติ
     ถ้าไม่ส่ง tp จะคำนวณจาก SL × MIN_RR อัตโนมัติ
@@ -175,11 +176,17 @@ def compute_score(symbol: str, direction: str, entry: float,
     as_of=datetime    = จำลองเช็ค ณ เวลานั้นในอดีต (ราคา = close 1H ล่าสุดก่อนเวลานั้น,
         bars ทั้งหมดตัดที่เวลานั้น) — ให้ backtest_score.py เรียกตัวนี้ตรงๆ แทนการ copy
         logic มาเขียนซ้ำ กันผลลัพธ์ backtest เพี้ยนจากของจริงตอนแก้ scoring.py แล้วลืมแก้ตาม
-    """
+
+    df_1d: ส่ง df_1d (real volume, bars=800, as_of เดียวกัน) ที่ดึงมาแล้วมาใช้ซ้ำได้ — เช่นจาก
+    scheduler.py ที่ต้องดึง df_1d ไปเช็ค get_trend_bias() เองอยู่แล้วก่อนเรียกฟังก์ชันนี้ (2026-08-11:
+    เดิมดึง+merge_real_volume ซ้ำสองรอบ ข้อมูลชุดเดียวกันเป๊ะ เสียเวลา/ยิง Bitstamp API ซ้ำโดยไม่
+    จำเป็นสำหรับ BTC/ETH/XRP) ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม (ต้อง bars/as_of ตรงกันเป๊ะ ไม่งั้น
+    EMA50/200 คลาดเคลื่อนจาก warm-up window ที่ต่างกัน)"""
     is_long = direction.capitalize() == "Long"
 
-    df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800, as_of=as_of)
-    df_1d = merge_real_volume(df_1d, symbol, "1D")
+    if df_1d is None:
+        df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800, as_of=as_of)
+        df_1d = merge_real_volume(df_1d, symbol, "1D")
     df_4h = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=200, as_of=as_of)
     df_4h = merge_real_volume(df_4h, symbol, "4H")
     df_1h = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], as_of=as_of)
