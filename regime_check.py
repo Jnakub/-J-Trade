@@ -57,6 +57,47 @@ ADX_GRAY_HIGH    = 22     # 20-22 = เขตเทา รอ ADX เลือ�
                           # ยืนยัน แค่ยืนยันว่าเปิดโอกาสได้บ่อยขึ้น
 ADX_REVERSAL     = 40     # peak ต้อง >= 40 ถึงเข้าเกณฑ์ Reversal
 
+# ---------------------------------------------------------------------------
+# ⚠️ ADX_BAR_OFFSET_H — ต้องตั้งค่าให้ทุก symbol ใหม่ที่เพิ่มเข้า config.SYMBOLS
+# ---------------------------------------------------------------------------
+# ปัญหา (เจอ 2026-08-12 ตอนเพิ่ม US500m): MT5 ตัดแท่ง 4H ตามเวลาเซิร์ฟเวอร์โบรก แต่ TradingView
+# ตัดตาม session ของ feed ที่เลือก — ขอบแท่งคนละจุด => OHLC ทุกแท่งต่างกัน => TR/DM ต่างกัน =>
+# ADX ต่างกัน ทั้งที่ period เดียวกันและสูตรเดียวกันเป๊ะ
+#
+# วัดจริงบน 4H แท่งปิดล่าสุด (รวมแท่ง 1H เป็น 4H ด้วย offset 0-3 ชม.) — ADX แกว่งแรงมาก:
+#   BTCUSDm  18.67 / 18.20 / 15.43 / 15.23   (แกว่ง 3.45)
+#   XAUUSDm  38.91 / 40.54 / 42.70 / 39.53   (แกว่ง 3.79)
+#   ETHUSDm  16.48 / 14.20 / 15.73 / 14.03   (แกว่ง 2.45)
+#   XRPUSDm  26.00 / 31.29 / 33.90 / 28.63   (แกว่ง 7.90 — ไวที่สุด)
+#   USDJPYm  26.70 / 28.11 / 26.22 / 29.09   (แกว่ง 2.87)
+#   US500m   21.51 / 23.29 / 25.93 / 26.51   (แกว่ง 5.00 — ข้ามเส้น ADX_GRAY_HIGH ได้)
+# ตอนวัด มีแค่ US500m ที่ค่าคร่อมเส้น 22 พอดีจนเปลี่ยนคำตัดสิน regime (เทา <-> TREND) ตัวอื่น
+# ค่าอยู่ลึกในเขตเดียวกันหมดเลยยังไม่เห็นผล — แต่เป็นปัญหาแฝงของทุก symbol วันไหนค่าเข้าใกล้
+# เส้น 20 หรือ 22 ก็เจอทันที
+#
+# ค่าใน dict = จำนวนชั่วโมงที่ต้องเลื่อนขอบแท่ง 4H จากของ MT5 เพื่อให้ตรงกับ TradingView
+# (0 = ใช้แท่ง 4H ของ MT5 ตรงๆ ไม่ต้องรวมใหม่) — ผู้ใช้ไล่เทียบกับจอ TradingView เองทีละตัว
+# เมื่อ 2026-08-12 ไม่ได้มาจาก backtest
+#
+# 🔴 เพิ่ม symbol ใหม่ต้องมาเช็คตรงนี้ทุกครั้ง: เปิดกราฟ 4H ของ symbol นั้นบน TradingView
+#    ตั้ง ADX เป็น 20/20 แล้วเทียบค่ากับที่ระบบคำนวณ ลอง offset 0-3 หาว่าอันไหนตรงที่สุด
+#    symbol ที่ไม่มีในนี้จะ default = 0 (ใช้แท่ง MT5 ตรงๆ) ซึ่งอาจไม่ตรงกับ TradingView
+#
+# หมายเหตุข้อจำกัด: ต่อให้ offset ตรงแล้วค่าก็ยังไม่เท่า TradingView เป๊ะ 100% เพราะ feed ราคา
+# คนละเจ้ากัน (Exness vs feed ที่ TradingView ใช้) เช่น US500m offset=2 ได้ 25.93 แต่จอได้
+# 25.44 — alignment อธิบายช่องว่างได้ ~90% ที่เหลือแก้ไม่ได้เพราะไม่มีข้อมูลของเขา
+#
+# ขอบเขตที่แก้: เฉพาะ ADX/regime เท่านั้น — swing/SL/TP/Key Level/Divergence ยังใช้แท่ง 4H
+# ของ MT5 ตามเดิม (ค่า wick/vol ที่ tune ไว้ผูกกับแท่งชุดนั้น ถ้าเปลี่ยนด้วยต้อง sweep ใหม่หมด)
+ADX_BAR_OFFSET_H = {
+    "BTCUSDm": 0,
+    "XAUUSDm": 1,
+    "ETHUSDm": 2,
+    "XRPUSDm": 0,
+    "USDJPYm": 1,
+    "US500m":  2,
+}
+
 # ค่าเดิมจาก backtest 400 แท่ง 1D (BTC/XAU): 5 แท่งนิ่งกว่า 3 แท่งชัดเจน (ทิศสลับ ~52 vs
 # ~76 ครั้ง) — แต่ backtest นั้นทำบน 1D ทั้งที่ตัวจริงรันบน 4H (คนละ scale เวลา) เลยรัน
 # ใหม่บน 4H โดยตรง (2026-07-24, ~5000 แท่ง 2+ ปี ทั้ง BTC/XAU, ไม่ติด limit เพราะ ADX ไม่พึ่ง
@@ -126,11 +167,34 @@ GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
 
 
 # ---------------------------------------------------------------------------
-# ADX(14) — สูตร Wilder
+# ADX (period = ADX_PERIOD = 20) — สูตร Wilder
 # ---------------------------------------------------------------------------
 
 # calc_adx ย้ายไป indicators.py แล้ว (2026-08-01) — เดิมซ้ำกับ swing.calc_di ทุกประการ
 # เพราะติด circular import (ดู indicators.py docstring)
+
+
+def get_adx_bars(symbol: str, bars: int = BARS) -> pd.DataFrame:
+    """ดึงแท่ง 4H สำหรับคำนวณ ADX โดยเลื่อนขอบแท่งตาม ADX_BAR_OFFSET_H ให้ตรงกับ TradingView
+    (ดูคำอธิบายเต็มที่ ADX_BAR_OFFSET_H ด้านบน) — offset=0 ใช้แท่ง 4H ของ MT5 ตรงๆ เหมือนเดิม
+    ทุกประการ ไม่มี resample มาเกี่ยวเลย, offset!=0 ดึง 1H มารวมเป็น 4H เองด้วย offset นั้น
+
+    คืน DataFrame ที่มีคอลัมน์เดียวกับ get_ohlcv (time/open/high/low/close/tick_volume)
+    ใช้กับ calc_adx ได้ตรงๆ (calc_adx แตะแค่ high/low/close ไม่พึ่ง volume)"""
+    offset = ADX_BAR_OFFSET_H.get(symbol, 0)
+    if offset == 0:
+        return get_ohlcv(symbol, REGIME_TIMEFRAME, bars=bars)
+
+    # เผื่อแท่ง 1H ให้พอ: 4 แท่ง/1 แท่ง 4H + เผื่อ gap ช่วงตลาดปิด (index/forex ไม่ได้เทรด 24/7)
+    # และเผื่อแท่งหัว-ท้ายที่ resample แล้วไม่เต็ม 4 ชม.
+    h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=bars * 4 + 50)
+    g = (h1.set_index("time")
+           .resample("4h", offset=f"{offset}h")
+           .agg({"open": "first", "high": "max", "low": "min",
+                 "close": "last", "tick_volume": "sum"})
+           .dropna()
+           .reset_index())
+    return g.iloc[-bars:].reset_index(drop=True)
 
 # ---------------------------------------------------------------------------
 # ข้อ 2 — ทิศของเส้น ADX (ขึ้น/ทรง/ลง เทียบ ADX_DIR_BARS แท่งล่าสุด)
@@ -477,7 +541,8 @@ def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
 def get_regime(symbol: str) -> dict:
     """เก็บ logic การเก็บข้อมูล+ตัดสินใจ Regime ทั้งหมดไว้ที่เดียว — ใช้ทั้งจาก CLI (run_check)
     และจากที่อื่น (เช่น scheduler.py) โดยไม่ต้อง print รายงานเต็ม"""
-    df = get_ohlcv(symbol, REGIME_TIMEFRAME, bars=BARS)   # 4H — ADX ไม่ต้องพึ่ง volume
+    # 4H — ADX ไม่ต้องพึ่ง volume | ขอบแท่งเลื่อนตาม ADX_BAR_OFFSET_H ให้ตรง TradingView
+    df = get_adx_bars(symbol, bars=BARS)
     adx = calc_adx(df, ADX_PERIOD)
     closed_idx = len(df) - 2                 # แท่ง 4H ปิดล่าสุด
 

@@ -145,10 +145,18 @@ TOTAL_WEIGHT = (
 # ข้อมูล) เลยเปิด wick_ratio_min=0.5 ชดเชยตั้งแต่แรกเหมือน XAU (ดู comment เต็มที่
 # swing.swing_wick_ratio_min) แทนที่จะปล่อย default (None) แบบ ETH/XRP ตอนเริ่มเปิดใช้งาน
 #
-# 2026-08-12: เพิ่ม US500m (S&P500 index, Exness suffix m) — ยังไม่ได้รัน TREND_FLIP_K sweep
-# (backtest_trend_flip_ksweep.py ต้องต่อ MT5 terminal จริง รันใน sandbox นี้ไม่ได้) จึงยังไม่ใส่
-# ค่าใน scoring.TREND_FLIP_K โดยตั้งใจ — ผลคือ bias=None ทุกครั้ง (SKIP ใน Scoring ทั้งหมด ไม่มี
-# ไม้เปิดจาก symbol นี้) จนกว่าจะรัน sweep บนเครื่องที่มี MT5 แล้วเพิ่มค่า k ให้ครบ
+# 🔴 เช็คลิสต์ตอนเพิ่ม symbol ใหม่ (ทุกช่องต้องตั้งค่า ไม่งั้นได้ default ที่อาจไม่เหมาะ):
+#   1. scoring.TREND_FLIP_K        — รัน backtest_trend_flip_ksweep.py หา k (ไม่มี = bias None = SKIP ตลอด)
+#   2. swing.swing_vol_multiplier  — default 1.9x
+#   3. swing.swing_wick_ratio_min  — default 0.5
+#   4. regime_check.ADX_BAR_OFFSET_H — default 0 ⚠️ ต้องเทียบกับจอ TradingView เอง ไม่งั้น ADX
+#      ที่ระบบเห็นจะไม่ตรงกับที่คุณดู และอาจตัดสิน regime คนละแบบ (ดูคำอธิบายเต็มในไฟล์นั้น)
+#   5. COOLDOWN_HOURS_BY_SYMBOL ด้านล่าง
+#
+# 2026-08-12: เพิ่ม US500m (S&P500 index, Exness suffix m) — ครบทั้ง 5 ช่องแล้ว: k=0.20,
+# vol=2.0x, wick=0.6, ADX offset=2, cooldown 48 ชม. (ดูรายละเอียด/ที่มาของแต่ละค่าในไฟล์นั้นๆ)
+# ไม่มี real volume ให้ merge เหมือน XAU/USDJPY — index ซื้อขายกระจายหลาย exchange ไม่มีตัวเลข
+# volume รวมศูนย์ ต้องใช้ tick_volume โบรกเป็น proxy
 SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm", "USDJPYm", "US500m"]
 
 # ---------------------------------------------------------------------------
