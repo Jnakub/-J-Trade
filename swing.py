@@ -59,11 +59,15 @@ def swing_vol_multiplier(symbol: str) -> float:
     XAU/Gold 1.5x (volume ทองแรงน้อยกว่า — ปรับจาก 1.6 เมื่อ 2026-07-24 ยังไม่มี backtest
     ยืนยันค่าใหม่นี้โดยตรง), USDJPYm 1.6x (2026-08-09 — เทียบ swing count ที่ 1.5/1.6/1.9 บน
     400 แท่ง 4H แล้ว: 16/13/11 High, 17/14/12 Low ตามลำดับ เลือก 1.6 เป็นจุดกึ่งกลาง ยังไม่มี
-    ข้อมูลเทรดจริงยืนยัน), อื่นๆ 1.9x"""
+    ข้อมูลเทรดจริงยืนยัน), US500m 2.0x (2026-08-12 — ปรับขึ้นจาก default 1.9 ตามคำสั่งผู้ใช้
+    หลังดูตาราง swing จริง 400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ ควรเฝ้าดูผลจริง),
+    อื่นๆ 1.9x"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 1.5
     if "JPY" in symbol.upper():
         return 1.6
+    if "US500" in symbol.upper():
+        return 2.0
     return 1.9
 
 
@@ -104,7 +108,20 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     ตั้งแต่เริ่มเลย (ไม่รอ backtest แยกเหมือน ETH/XRP เพราะสถานการณ์เหมือน XAU ตรงๆ ไม่ใช่กรณี
     "มี real volume อยู่แล้วแต่ยังพลาดบางจุด" แบบ BTC/ETH/XRP) — threshold ปรับจาก 0.5 เป็น 0.55
     ตามคำสั่งผู้ใช้หลังดูรายจุด (vol ratio/wick ratio) จริงของ swing ที่เจอแล้ว ยังไม่มีข้อมูล
-    เทรดจริงยืนยัน ควรเฝ้าดูผลจริงเหมือน symbol อื่น"""
+    เทรดจริงยืนยัน ควรเฝ้าดูผลจริงเหมือน symbol อื่น
+
+    US500m (2026-08-12, threshold 0.6): เหตุผลเดียวกับ XAU เป๊ะ — S&P500 index ไม่มีแหล่ง real
+    volume รวมศูนย์ให้ merge ได้เลย (ไม่อยู่ใน BITSTAMP_MAP/YFINANCE_MAP ของ binance.py และ
+    โดยธรรมชาติ index ซื้อขายกระจายหลาย exchange/futures พร้อมกัน ไม่มีตัวเลข volume "จริง"
+    เดียวที่รวมทุกที่) เปิด wick OR-logic ตั้งแต่เริ่มใช้งานเลยตามคำสั่งผู้ใช้ เริ่มต้นที่ 0.5
+    เท่า XAU ก่อน แล้วปรับขึ้นเป็น 0.6 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง 400 แท่ง 4H —
+    ยังไม่มี backtest/ข้อมูลเทรดจริงยืนยันค่านี้โดยเฉพาะสำหรับ US500m ควรเฝ้าดูผลจริงเหมือน
+    symbol อื่น
+
+    Default (2026-08-12, threshold 0.5): เปลี่ยนจาก None เป็น 0.5 ตามคำสั่งผู้ใช้ตอนเพิ่ม
+    US500m — symbol ใหม่ที่ยังไม่มี branch เฉพาะจะเปิด wick OR-logic ทันทีแทนที่จะปิดไว้ก่อน
+    (พฤติกรรมเดิม) ยังไม่มี backtest ยืนยันว่า 0.5 เหมาะกับทุก asset class ในอนาคต — ควรพิจารณา
+    ปรับเป็นค่าเฉพาะเมื่อมีข้อมูลเทรดจริงของ symbol นั้นๆ"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 0.5
     if "BTC" in symbol.upper():
@@ -115,7 +132,9 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
         return 0.52
     if "XRP" in symbol.upper():
         return 0.5
-    return None
+    if "US500" in symbol.upper():
+        return 0.6
+    return 0.5
 
 
 def has_high_volume(df: pd.DataFrame, idx: int,

@@ -39,12 +39,20 @@ from trend_flip import compute_trend_regime
 # matched 24 คู่) — sweep ซ้ำ BTC/XAU/ETH/XRP ด้วยข้อมูลสดพร้อมกัน (methodology เดิมเป๊ะ: 1D,
 # 3000 แท่ง) ยืนยันว่าทั้ง 4 ตัวยังได้ค่าเดิมเป๊ะทุกตัว ไม่ต้องปรับ — พร้อมกับแก้บั๊กเกณฑ์เลือก
 # k* ใน backtest_trend_flip_ksweep.py (เดิมเลือกจาก false_n ดิบ ไม่ใช่ false_pct — ดู git log)
+#
+# 2026-08-12: เพิ่ม US500m (S&P500, k=0.20, FalseFlip=1/71=1.4%, เร็วกว่า EMA cross เฉลี่ย
+# 10.6 แท่ง, matched 22 คู่) — รัน sweep ผ่าน Wine (MT5 for Mac) 2999 แท่ง 4H ต่างจาก symbol
+# อื่นตรงที่ไม่มี k ไหนได้ FalseFlip 0% เลย (ต่ำสุดคือ 1.4% เท่ากันที่ k=0.20/0.25/0.30) เลือก
+# 0.20 ตามเกณฑ์อัตโนมัติของสคริปต์ (FalseFlip ต่ำสุด + lag ยังติดลบ) — sample แค่ ~500 วัน
+# (3000 แท่ง 4H) ยังไม่ได้สั่นสะเทือนช่วงเวลายาวเหมือน symbol อื่น ควรเฝ้าดูผลเทรดจริงและพร้อม
+# ปรับ/ปิดถ้า false flip เกิดถี่กว่าที่ backtest ชี้
 TREND_FLIP_K = {
     "BTCUSDm": 0.20,
     "XAUUSDm": 0.40,
     "ETHUSDm": 0.40,
     "XRPUSDm": 0.20,
     "USDJPYm": 0.20,
+    "US500m": 0.20,
 }
 
 

@@ -144,7 +144,12 @@ TOTAL_WEIGHT = (
 # real volume ให้ merge เลย (Forex เป็นตลาด OTC ไม่มี exchange กลาง ไม่ใช่แค่ยังไม่ได้ต่อแหล่ง
 # ข้อมูล) เลยเปิด wick_ratio_min=0.5 ชดเชยตั้งแต่แรกเหมือน XAU (ดู comment เต็มที่
 # swing.swing_wick_ratio_min) แทนที่จะปล่อย default (None) แบบ ETH/XRP ตอนเริ่มเปิดใช้งาน
-SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm", "USDJPYm"]
+#
+# 2026-08-12: เพิ่ม US500m (S&P500 index, Exness suffix m) — ยังไม่ได้รัน TREND_FLIP_K sweep
+# (backtest_trend_flip_ksweep.py ต้องต่อ MT5 terminal จริง รันใน sandbox นี้ไม่ได้) จึงยังไม่ใส่
+# ค่าใน scoring.TREND_FLIP_K โดยตั้งใจ — ผลคือ bias=None ทุกครั้ง (SKIP ใน Scoring ทั้งหมด ไม่มี
+# ไม้เปิดจาก symbol นี้) จนกว่าจะรัน sweep บนเครื่องที่มี MT5 แล้วเพิ่มค่า k ให้ครบ
+SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm", "USDJPYm", "US500m"]
 
 # ---------------------------------------------------------------------------
 # Cooldown หลังปิดไม้ — กันเข้าไม้ symbol เดิมซ้ำเร็วเกินไปหลังปิด (นับทั้งกำไร/ขาดทุน)
@@ -157,6 +162,7 @@ COOLDOWN_HOURS_BY_SYMBOL = {
     "XRPUSDm": 48,
     "XAUUSDm": 48,
     "USDJPYm": 48,
+    "US500m": 48,
 }
 
 # ---------------------------------------------------------------------------
