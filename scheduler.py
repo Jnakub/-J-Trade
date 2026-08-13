@@ -17,6 +17,7 @@ import journal
 from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
+    COOLDOWN_HOURS_BY_SYMBOL,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_ohlcv_real, get_trend_bias
@@ -74,6 +75,22 @@ def scan_symbol(symbol: str) -> None:
     # 3. Daily loss guard (เช็คเฉพาะตอนจะหา entry ใหม่)
     if not journal.check_daily_loss(balance, MAX_DAILY_LOSS):
         print(f"  [{symbol}] SKIP — daily loss limit reached")
+        return
+
+    # 3b. Cooldown guard — เพิ่งปิดไม้ symbol นี้ไปไม่นาน (ดู config.COOLDOWN_HOURS_BY_SYMBOL)
+    #     2026-08-13: **บั๊กที่เพิ่งเจอ** — เดิม check_cooldown() ถูกเรียกจาก bot.py เท่านั้น
+    #     แต่ไม่มีไฟล์ไหน import bot.py เลย (dead code) ส่วน scheduler.py ที่รันจริงไม่เคยเรียก
+    #     => cooldown ไม่เคยทำงานจริงเลยตั้งแต่ตั้งค่ามา COOLDOWN_HOURS_BY_SYMBOL เป็นแค่ตัวเลข
+    #     ประดับ เคสที่ทำให้เจอ: XAUUSDm ปิดไม้ 00:20 (Manual Cut, -2.00) แล้วเปิดไม้ใหม่ 01:30
+    #     วันเดียวกัน = ห่างแค่ 70 นาที ทั้งที่ตั้ง cooldown ไว้ 48 ชม.
+    #     วางไว้ก่อน News guard เพราะอ่าน CSV อย่างเดียว (ถูกกว่า) ส่วน News ต้องยิงเน็ตไป
+    #     ForexFactory — ตัดจบตรงนี้ได้ก็ไม่ต้องเสียเวลาไปเรียก
+    #     ต้องอยู่หลัง reconcile_closed_positions() (เรียกใน run_scheduler ต้นรอบ) เสมอ ไม่งั้น
+    #     ไม้ที่ชน SL/TP เองจะยังค้างเป็น 'Open' และมองไม่เห็นเวลาปิดจริง
+    cooldown_hours = COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)
+    ok, cooldown_reason = journal.check_cooldown(symbol, cooldown_hours)
+    if not ok:
+        print(f"  [{symbol}] SKIP — {cooldown_reason}")
         return
 
     # 4. Balance ต้องมากกว่า 0 (risk amount = balance * RISK_PER_TRADE เป็นสัดส่วนของ balance เอง
