@@ -184,7 +184,9 @@ sl = sl_info["sl"]
 fib_info = find_tp_from_fibonacci(df_4h, direction, left=4, right=4,
                                   tolerance_atr=0.22, vol_multiplier=vol_mult, wick_ratio_min=wick_min)
 if fib_info.get("passed"):
-    tp = fib_info["levels"]["0.786"]   # ตรงกับ reversal.py ปัจจุบัน (2026-07-23 กลับมาใช้ 0.786)
+    tp = fib_info["tp"]   # 2026-08-13: เดิม hardcode "0.786" พร้อม comment ว่าตรงกับ reversal.py
+                          # แต่ reversal.py เปลี่ยนเป็น 1.618 ตั้งแต่ 2026-08-02 => backtest วัด
+                          # คนละสูตรกับระบบจริงมา 11 วัน ตอนนี้อ่าน config.TP_FIB_RATIO ร่วมกันแล้ว
 else:
     tp = (entry + abs(entry - sl) * rev.MIN_RR_REVERSAL) if is_long else (entry - abs(entry - sl) * rev.MIN_RR_REVERSAL)
 

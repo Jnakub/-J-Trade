@@ -239,11 +239,7 @@ def compute_score(symbol: str, direction: str, entry: float,
         fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
-            tp = fib_info["levels"]["1.618"]   # 2026-08-02: เปลี่ยนจาก 0.786 -> 1.618 — backtest 180 วัน
-                                              # พบ BTC ดีขึ้นชัดเจน (TotalR/win rate สูงขึ้น) ส่วน XAU แย่ลง
-                                              # เพราะ TP ยืดไกลเกินจริงบางเคส — ชดเชยด้วย MAX_RR_HARD_BLOCK=15
-                                              # (บล็อกเคส TP ยืดเกินจริงสุดโต่งไปแล้ว) และ Hard Block ขั้นต่ำ
-                                              # ขึ้นเป็น 1.5 (ดู config.MIN_RR_HARD_BLOCK)
+            tp = fib_info["tp"]   # อัตราส่วนมาจาก config.TP_FIB_RATIO (ดูที่มา/เหตุผลที่นั่น)
         else:
             used_fallback_tp = True
             tp = (entry + abs(entry - sl) * MIN_RR) if is_long else (entry - abs(entry - sl) * MIN_RR)
@@ -376,9 +372,10 @@ def main() -> None:
             print(f"  SL {auto}")
             print(f"  Swing High   : {sl_info['swing_price']}")
             print(f"  ATR buffer   : {sl_info['atr']}")
-            print(f"  Rejection    : {sl_info.get('rejection', '-')}")
-            print(f"  Volume OK    : {sl_info.get('volume_ok', '-')}")
-            print(f"  Structure OK : {sl_info.get('structure_ok', '-')}")
+            # 2026-08-13: ลบ 3 บรรทัด Rejection/Volume OK/Structure OK ทิ้ง — ทั้งสาม key นี้
+            # find_sl_from_structure() ไม่เคยคืนมาเลย (คืนแค่ sl/swing_price/swing_idx/atr/
+            # passed/reason) จึงตกไปที่ default '-' ตลอดกาล เป็นช่องว่างเปล่าที่ดูเหมือนมีข้อมูล
+            # (has_rejection/_rejection_ok ที่เคยเป็นแหล่งข้อมูลก็ถูกลบไปแล้วในคอมมิตเดียวกัน)
             print(f"  SL           : {sl}")
 
         conf = sl_info.get("conf_result", {})

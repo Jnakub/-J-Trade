@@ -1,53 +1,13 @@
 import pandas as pd
 
+from config import TP_FIB_RATIO
 from indicators import calc_atr, calc_di   # re-exported เพื่อไม่ให้ต้องแก้ import ที่อื่น
 
 
-# ---------------------------------------------------------------------------
-# ข้อ 1 — Rejection Check
-# ---------------------------------------------------------------------------
-
-def has_rejection(df: pd.DataFrame, idx: int, atr: pd.Series,
-                  wick_body_ratio: float = 1.5,
-                  wick_atr_ratio:  float = 0.3) -> tuple[bool, str]:
-    """
-    เช็คว่าแท่งที่ idx มี rejection ชัดไหม
-
-    Pattern A (Single Candle):
-        upper_wick >= body × wick_body_ratio
-        upper_wick >= ATR  × wick_atr_ratio
-
-    Pattern B (Bearish Engulfing — 2 แท่ง):
-        แท่ง idx   ปิดบวก
-        แท่ง idx+1 ปิดลบ และ body กิน body แท่ง idx ทั้งหมด
-
-    คืน (True/False, ชื่อ pattern)
-    """
-    if idx < 0 or idx >= len(df):
-        return False, "out of range"
-
-    c = df.iloc[idx]
-    body        = abs(c["close"] - c["open"])
-    upper_wick  = c["high"] - max(c["close"], c["open"])
-    atr_val     = atr.iloc[idx]
-
-    # Pattern A
-    body_ok = body > 0 and upper_wick >= body * wick_body_ratio
-    atr_ok  = upper_wick >= atr_val * wick_atr_ratio
-    if body_ok and atr_ok:
-        return True, "PatternA-Wick"
-
-    # Pattern B — ต้องมีแท่งถัดไป
-    if idx + 1 < len(df):
-        n = df.iloc[idx + 1]
-        curr_bullish  = c["close"] > c["open"]
-        next_bearish  = n["close"] < n["open"]
-        engulf        = n["open"] >= max(c["open"], c["close"]) and \
-                        n["close"] <= min(c["open"], c["close"])
-        if curr_bullish and next_bearish and engulf:
-            return True, "PatternB-Engulfing"
-
-    return False, "no rejection"
+# 2026-08-13: ลบ has_rejection() / _rejection_ok() ทิ้ง — ทั้งคู่ไม่มีใครเรียกเลย (ตรวจทั้ง repo
+# แล้ว) แต่ scoring.py ยังพิมพ์ `sl_info.get('rejection', '-')` อยู่ ทั้งที่ find_sl_from_structure
+# ไม่เคยคืน key 'rejection' => บรรทัดนั้นพิมพ์ '-' ตลอดกาล ดูเหมือนมีข้อมูลทั้งที่ว่างเปล่า
+# ลบทั้งฟังก์ชันและบรรทัดที่พิมพ์ออกพร้อมกัน (เจอตอนไล่ dead code หลังบั๊ก cooldown)
 
 
 # ---------------------------------------------------------------------------
@@ -240,42 +200,13 @@ def collapse_swing_runs(swing_highs: list[int], swing_lows: list[int],
     return clean_highs, clean_lows
 
 
-def is_lower_high(swing_highs: list[int], df: pd.DataFrame) -> bool:
-    """
-    ตรวจว่า Swing High ล่าสุดเป็น Lower High จริงไหม
-    (ต่ำกว่า Swing High ก่อนหน้า = โครงสร้างขาลงยังอยู่)
-    """
-    if len(swing_highs) < 2:
-        return False
-    prev_high = df["high"].iloc[swing_highs[-2]]
-    last_high = df["high"].iloc[swing_highs[-1]]
-    return last_high < prev_high
+# 2026-08-13: ลบ is_lower_high() ทิ้ง — ไม่มีใครเรียก ถูกแทนด้วย regime_check.check_structure()
+# ที่ละเอียดกว่า (เทียบ 3 จุดสุดท้ายแบบข้ามจุดกลาง ไม่ใช่เทียบแค่ 2 จุดล่าสุด)
 
 
 # ---------------------------------------------------------------------------
 # Main Function — หา SL จาก Swing High ที่ผ่านเกณฑ์ทั้ง 3 ข้อ
 # ---------------------------------------------------------------------------
-
-def _rejection_ok(df: pd.DataFrame, idx: int, atr: pd.Series) -> tuple[bool, str]:
-    """
-    Rejection check สำหรับ 4H:
-      wick >= ATR×0.5  OR  Volume ratio >= 2.0x
-    """
-    c          = df.iloc[idx]
-    upper_wick = c["high"] - max(c["close"], c["open"])
-    lower_wick = min(c["close"], c["open"]) - c["low"]
-    atr_val    = atr.iloc[idx]
-    avg        = df["tick_volume"].iloc[max(0, idx - 4): idx + 1].mean()
-    vol_ratio  = df["tick_volume"].iloc[idx] / avg if avg > 0 else 0.0
-
-    # Short ดู upper wick, Long ดู lower wick
-    wick = upper_wick  # caller เลือก wick ตาม direction
-    if wick >= atr_val * 0.5:
-        return True, f"wick={wick:.0f}"
-    if vol_ratio >= 2.0:
-        return True, f"vol={vol_ratio:.2f}x"
-    return False, "no rejection"
-
 
 def find_sl_from_structure(df: pd.DataFrame,
                            direction: str,
@@ -408,14 +339,17 @@ def check_confirmation(current_price: float, df: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Fibonacci Retracement — หา TP
+# Fibonacci — หา TP  (ดู find_tp_from_fibonacci ด้านล่าง)
 # ---------------------------------------------------------------------------
-
-FIB_LEVELS = {
-    "tp1": 0.382,
-    "tp2": 0.618,
-    "tp3": 1.000,
-}
+# 2026-08-13: ลบ FIB_LEVELS (0.382/0.618/1.000) + calc_fibonacci_levels() ทิ้ง — เป็นกับดัก
+# ตัวจริง ไม่ใช่แค่โค้ดค้าง: FIB_LEVELS นั่งอยู่ใต้หัวข้อ "Fibonacci — หา TP" หน้าตาเหมือนค่า
+# config ที่ปรับ TP ได้ แต่มีที่เดียวที่อ่านมันคือ calc_fibonacci_levels() ซึ่งไม่มีใครเรียกเลย
+# (git log: ไม่เคยถูกแก้เลยตั้งแต่ initial commit) — ใครไปแก้เลขในนั้นเพื่อจูน TP จะไม่มีอะไร
+# เกิดขึ้น เหมือนกรณี COOLDOWN_HOURS_BY_SYMBOL ที่ไม่มีผลจริงเป๊ะ
+# ซ้ำร้ายสองฟังก์ชันคำนวณคนละวิธี: calc_fibonacci_levels เป็น retracement (2 จุด ไม่เกิน 1.0)
+# ส่วนตัวที่ใช้จริงเป็น extension 3 จุด (X->A->B) ยิงได้ถึง 1.618 — ถ้าเผลอสลับไปใช้ตัวที่ตาย
+# จะได้ TP ใกล้กว่าเดิมมากโดยไม่รู้ตัว
+# ตอนนี้เหลือทางเดียว: find_tp_from_fibonacci() + config.TP_FIB_RATIO
 
 
 def find_swing_lows(df: pd.DataFrame, left: int = 3, right: int = 3,
@@ -443,58 +377,6 @@ def find_swing_lows(df: pd.DataFrame, left: int = 3, right: int = 3,
                 if vol_ok or _wick_ratio(df, i, is_high=False) >= wick_ratio_min:
                     lows.append(i)
     return lows
-
-
-def calc_fibonacci_levels(swing_high: float, swing_low: float,
-                           direction: str) -> dict:
-    """
-    คำนวณ Fibonacci Retracement levels
-
-    Short: วัดจาก Swing High (0) → Swing Low (1)
-           TP อยู่ต่ำกว่า entry → ราคาลงไปหา Fib levels
-
-    Long:  วัดจาก Swing Low (0) → Swing High (1)
-           TP อยู่สูงกว่า entry → ราคาขึ้นไปหา Fib levels
-
-    คืน dict: { "tp1": ราคา, "tp2": ราคา, "tp3": ราคา, "levels": {...} }
-    """
-    move = swing_high - swing_low
-
-    if direction.capitalize() == "Short":
-        levels = {
-            "0":     swing_high,
-            "0.236": swing_high - move * 0.236,
-            "0.382": swing_high - move * 0.382,
-            "0.5":   swing_high - move * 0.5,
-            "0.618": swing_high - move * 0.618,
-            "0.786": swing_high - move * 0.786,
-            "1":     swing_low,
-        }
-        tp1 = round(swing_high - move * FIB_LEVELS["tp1"], 5)
-        tp2 = round(swing_high - move * FIB_LEVELS["tp2"], 5)
-        tp3 = round(swing_low, 5)
-    else:
-        levels = {
-            "0":     swing_low,
-            "0.236": swing_low + move * 0.236,
-            "0.382": swing_low + move * 0.382,
-            "0.5":   swing_low + move * 0.5,
-            "0.618": swing_low + move * 0.618,
-            "0.786": swing_low + move * 0.786,
-            "1":     swing_high,
-        }
-        tp1 = round(swing_low + move * FIB_LEVELS["tp1"], 5)
-        tp2 = round(swing_low + move * FIB_LEVELS["tp2"], 5)
-        tp3 = round(swing_high, 5)
-
-    return {
-        "tp1":        tp1,
-        "tp2":        tp2,
-        "tp3":        tp3,
-        "swing_high": swing_high,
-        "swing_low":  swing_low,
-        "levels":     {k: round(v, 5) for k, v in levels.items()},
-    }
 
 
 def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
@@ -587,18 +469,20 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
     if move <= 0:
         return {"passed": False, "reason": "Move ต้องมากกว่า 0"}
 
-    levels = {}
-    for ratio in [0, 0.236, 0.382, 0.5, 0.618, 0.786, 0.886, 1.0, 1.272, 1.618]:
-        levels[str(ratio)] = round(origin + sign * move * ratio, 5)
+    # levels = ตารางอ้างอิงไว้ดูประกอบเท่านั้น — TP ที่ระบบใช้จริงคือ key "tp" ด้านล่าง
+    # (2026-08-13: เพิ่ม TP_FIB_RATIO เข้าไปในลิสต์ด้วย เผื่อปรับ config เป็นค่าที่ไม่อยู่ในนี้
+    # จะได้ยังเห็นในตาราง — ไม่งั้นตารางกับ TP จริงจะไม่ตรงกัน)
+    ratios = sorted({0, 0.236, 0.382, 0.5, 0.618, 0.786, 0.886, 1.0, 1.272, 1.618, TP_FIB_RATIO})
+    levels = {str(r): round(origin + sign * move * r, 5) for r in ratios}
 
     return {
         "passed":       True,
         "origin":       origin,
         "move":         round(move, 5),
-        "tp1":          levels["0.382"],
-        "tp2":          levels["0.618"],
-        "tp3":          levels["1.0"],
-        "tp4":          levels["1.618"],
+        # TP ที่ใช้จริง — คำนวณจาก config.TP_FIB_RATIO จุดเดียว (เดิม caller ไปหยิบ
+        # levels["1.618"] ด้วย string key hardcode เองคนละที่ จน backtest หลุด sync)
+        "tp":           round(origin + sign * move * TP_FIB_RATIO, 5),
+        "tp_ratio":     TP_FIB_RATIO,
         "swing_high":   b_price if is_short else a_price,
         "swing_low":    a_price if is_short else b_price,
         "x_price":      x_price,

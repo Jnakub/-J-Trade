@@ -115,8 +115,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
         fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
-            tp = fib_info["levels"]["1.618"]   # 2026-08-02: เปลี่ยนจาก 0.786 -> 1.618 (ดู scoring.py
-                                              # comment เดียวกัน — ปรับพร้อมกันทั้ง 2 scorecard)
+            tp = fib_info["tp"]   # อัตราส่วนมาจาก config.TP_FIB_RATIO (ดูที่มา/เหตุผลที่นั่น)
         else:
             used_fallback_tp = True
             tp = (entry + abs(entry - sl) * MIN_RR_REVERSAL) if is_long else (entry - abs(entry - sl) * MIN_RR_REVERSAL)
