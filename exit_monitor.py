@@ -600,7 +600,15 @@ def analyze_position(pos) -> dict:
         recommended_keep_pct = 0
     else:
         recommended_keep_pct = round(base_keep_pct * stage_keep_pct / 100, 1)
-    remaining_lot = round(lot * recommended_keep_pct / 100, 3)
+    # 2026-08-15: คิดจาก lot ตอนเปิดไม้ ไม่ใช่ lot ปัจจุบัน — ให้ตรงกับที่ execute_decision
+    # ทำจริง (บรรทัด target_lot = original_lot * keep_pct/100) เดิมจอคิดจาก lot ปัจจุบันคนละ
+    # ฐานกับการทำงานจริง พอไม้ถูกปิดบางส่วนไปแล้วจะอ่านขัดกันเอง เช่นไม้เปิด 1.91 ปิดเหลือ
+    # 1.43 (75%) แล้วกฎ 75% trigger ซ้ำ จอจะขึ้น "1.43 -> 1.073" เหมือนจะตัดอีกรอบ ทั้งที่
+    # ของจริง target = 1.91x0.75 = 1.433 ซึ่งถือครบแล้ว ไม่ตัดอะไรเพิ่ม
+    original_lot  = journal.get_original_lot(pos.ticket)
+    lot_basis     = original_lot if original_lot is not None else lot
+    remaining_lot = round(lot_basis * recommended_keep_pct / 100, 3)
+    held_pct      = round(lot / lot_basis * 100, 1) if lot_basis else 100.0
 
     final_label, final_color = final_decision
     if base_keep_pct == 0:
@@ -691,6 +699,9 @@ def analyze_position(pos) -> dict:
         "base_keep_pct": base_keep_pct, "stage_keep_pct": stage_keep_pct,
         "recommended_keep_pct": recommended_keep_pct,
         "remaining_lot": remaining_lot,
+        "original_lot": original_lot,   # None = ไม่พบใน journal (ไม้เก่า/เปิดมือ) -> fallback ใช้ lot ปัจจุบัน
+        "lot_basis": lot_basis,         # ฐานที่ใช้คิด % — ตัวเดียวกับที่ execute_decision ใช้
+        "held_pct": held_pct,           # ตอนนี้ถืออยู่กี่ % ของไม้เดิม (<100 = เคยปิดบางส่วนไปแล้ว)
         "combined_decision": combined_decision,
     }
 
@@ -798,8 +809,20 @@ def print_report(m: dict):
     base_str = f"{m['base_keep_pct']}%"
     stage_str = f"{m['stage_keep_pct']}%" if m["stage_keep_pct"] is not None else "-"
     print(f"  Final % (ฐาน) = {base_str}   x   Position Sizing % = {stage_str}")
+    # แสดงทั้ง 3 ตัวเลขให้ครบ กัน "100%" อ่านแล้วเข้าใจผิดว่าไม้ยังเต็มจำนวนทั้งที่ปิดไปบางส่วนแล้ว
+    # (ทุกอย่างคิดจาก lot ตอนเปิดไม้ = ฐานเดียวกับ execute_decision เป๊ะ)
+    basis_note = "" if m["original_lot"] is not None else f" {DIM}(ไม่พบ lot เปิดใน journal — ใช้ lot ปัจจุบันแทน){RESET}"
     print(f"  {_b('สรุป: ควรเหลือ Position')} = {keep_color}{keep_str}{RESET}"
-          f"   (จาก lot {m['lot']} -> เหลือ {keep_color}{lot_str}{RESET})")
+          f" ของ lot ตอนเปิด {m['lot_basis']} = {keep_color}{lot_str}{RESET}{basis_note}")
+    held_color = GREEN if m["held_pct"] >= 100 else YELLOW
+    print(f"  ตอนนี้ถืออยู่ {held_color}{m['lot']} ({m['held_pct']:g}% ของไม้เดิม){RESET}", end="")
+    diff = round(m["lot"] - m["remaining_lot"], 3)
+    info = mt5.symbol_info(m["symbol"])
+    min_lot = info.volume_min if info else 0.01
+    if diff >= min_lot:
+        print(f" -> {YELLOW}ต้องปิดเพิ่ม {diff:g} lot{RESET}")
+    else:
+        print(f" -> {DIM}ถึงเป้าแล้ว ไม่ต้องทำอะไรเพิ่ม{RESET}")
 
     label, color = m["final_decision"]
     print("=" * 62)
