@@ -65,6 +65,21 @@ def scan_symbol(symbol: str) -> None:
                 log.error(f"[{symbol}] Exit Monitor ERROR", exc_info=True)
         return
 
+    # 1b. โบรกปิดเทรด symbol นี้ไว้ไหม (trade_mode != FULL) — เช็คก่อนวิเคราะห์อะไรเลย
+    # 2026-08-15: เจอ XRPUSDm ถูก Exness ปิดเทรดบนเซิร์ฟเวอร์ trial (trade_mode=DISABLED)
+    # ทั้งที่ยังส่ง quote ปกติ — ระบบเคยวิเคราะห์เต็มรูปแบบทุกชั่วโมง (ดึง 1D/4H/1H + merge
+    # real volume) แล้วพังตอนส่ง order เป็น retcode=10017 [Trade disabled] ทุกรอบ กันไว้ตรงนี้
+    # ก่อนเสียเวลาวิเคราะห์ — ไม่เอา symbol ออกจาก SYMBOLS เพราะถ้าโบรกเปิดกลับมาจะได้เทรดต่อ
+    # อัตโนมัติทันทีโดยไม่ต้องแก้ config
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        print(f"  [{symbol}] ERROR — หา symbol info ไม่ได้")
+        return
+    if info.trade_mode != mt5.SYMBOL_TRADE_MODE_FULL:
+        print(f"  [{symbol}] SKIP — โบรกปิดเทรด symbol นี้ไว้ (trade_mode={info.trade_mode}) "
+              f"— เช็คสถานะที่ MT5 Market Watch หรือถามโบรกเรื่อง instrument นี้")
+        return
+
     # 2. ดึงยอดเงินจริงจากบัญชี
     try:
         balance = get_account_balance()
