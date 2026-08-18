@@ -1,7 +1,7 @@
 """
 exit_monitor.py — รันค้างไว้ อัปเดตข้อมูล Exit ของทุก Open Position ทุก 1 ชั่วโมง
 
-ดึงจาก MT5 อัตโนมัติ: Current Price, Extreme Price ตั้งแต่เข้า, ATR(22),
+ดึงจาก MT5 อัตโนมัติ: Current Price, Extreme Price ตั้งแต่เข้า, ATR(14),
 RSI(14), Bollinger Bands(20,2), Climax check แล้วรัน Exit Decision Checklist
 + Position Sizing Rules — จากนั้น "สั่งจริง" ตามผลลัพธ์ (ปิด 100%/บางส่วน,
 ขยับ SL เป็น Breakeven) โดยอัตโนมัติ — มี hard guard: สั่งได้เฉพาะบัญชี DEMO
@@ -76,7 +76,14 @@ INTERVAL_SECONDS  = 3600
 MONITOR_TIMEFRAME = MT5_TIMEFRAMES["4H"]
 BARS              = 210
 
-ATR_PERIOD     = 22
+ATR_PERIOD     = 14   # 2026-08-17: เปลี่ยนจาก 22 -> 14 ตามคำสั่งผู้ใช้ — เดิม 22 ใช้แค่โชว์บน
+                      # รายงาน (ไม่เคยคุม SL/TP จริง ตัวที่คุม SL trailing จริงคือ TRAIL_ATR_PERIOD
+                      # ด้านล่างซึ่งเป็น 14 อยู่แล้ว) ความต่างระหว่าง 22 บนหน้าจอกับ 14 ที่ใช้จริง
+                      # ทำให้สับสนว่า SL คุมด้วยค่าไหนกันแน่ — ยกเลิกความต่างนี้โดยรวมเป็น 14 ทั้ง
+                      # ระบบ ยังไม่มี backtest ยืนยันว่า 14 ดีกว่า 22 จริง (ดูเหตุผลเต็มในแชท
+                      # ตอนตัดสินใจ — 22 เดิมอ้างอิง Chandelier Exit ของ Chuck LeBeau ซึ่งออกแบบ
+                      # มาสำหรับแท่งรายวัน เอามาใช้ตรงๆ กับแท่ง 1H ความหมาย "1 เดือน" ที่ตั้งใจไว้
+                      # เสียไปอยู่แล้ว ทั้ง 14/22 ในบริบท 1H นี้ไม่มีตัวไหนมี backtest รองรับจริง)
 RSI_PERIOD     = 14
 BB_PERIOD      = 20
 BB_STD         = 2.0

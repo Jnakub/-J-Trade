@@ -31,7 +31,12 @@ STRUCT_LR       = 5        # left/right สำหรับ swing structure trail
 ADX_PERIOD      = 14
 ADX_TREND_TH    = 25       # ADX >= นี้ = trending
 ADX_CHOPPY_TH   = 20       # ADX <  นี้ = choppy
-ATR_PERIOD      = 22       # ตามมาตรฐาน Chandelier Exit ดั้งเดิม (Chuck LeBeau)
+ATR_PERIOD      = 14       # 2026-08-17: เปลี่ยนจาก 22 -> 14 ตามคำสั่งผู้ใช้ (unify ทั้งระบบ)
+                          # เดิมอ้างอิง Chandelier Exit ดั้งเดิมของ Chuck LeBeau (22 ~ 1 เดือนเทรด)
+                          # แต่นั่นออกแบบมาสำหรับแท่งรายวัน สคริปต์นี้รันบน SIM_TIMEFRAME="4H" —
+                          # เอา 22 มาใช้ตรงๆ กับ 4H ก็ไม่ได้แปลว่า "1 เดือน" อยู่ดี (22x4H=88ชม.
+                          # ~3.7 วัน) ความหมายเดิมของเลขนี้เสียไปตั้งแต่ย้ายไทม์เฟรมแล้ว ไม่มีทั้ง
+                          # 14/22 ตัวไหนมี backtest ยืนยันโดยเฉพาะสำหรับ TF นี้จริงๆ
 SIM_TIMEFRAME   = "4H"     # กริดที่ใช้เดินจำลอง exit — ให้ตรงกับ TF ที่ใช้หา SL/Structure ตอนเข้า
 COOLDOWN_BARS   = 6        # เข้าได้อีกทีหลังไม้ก่อนปิดแล้ว (กันเข้าซ้อน) — 6 แท่ง 4H = 1 วัน
 
