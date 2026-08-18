@@ -46,6 +46,10 @@ from trend_flip import compute_trend_regime
 # 0.20 ตามเกณฑ์อัตโนมัติของสคริปต์ (FalseFlip ต่ำสุด + lag ยังติดลบ) — sample แค่ ~500 วัน
 # (3000 แท่ง 4H) ยังไม่ได้สั่นสะเทือนช่วงเวลายาวเหมือน symbol อื่น ควรเฝ้าดูผลเทรดจริงและพร้อม
 # ปรับ/ปิดถ้า false flip เกิดถี่กว่าที่ backtest ชี้
+#
+# 2026-08-17: เพิ่ม EURUSDm (k=0.20, FalseFlip=0/67=0%, เร็วกว่า EMA cross เฉลี่ย 5.2 แท่ง,
+# matched 18 คู่) และ GBPUSDm (k=0.20, FalseFlip=1/78=1.3%, เร็วกว่า EMA cross เฉลี่ย 4.6 แท่ง,
+# matched 21 คู่ — เหมือนเคส US500m ไม่ได้ 0% แต่ต่ำสุดในกลุ่มที่ทดสอบ 0.20-0.60) sweep 2999 แท่ง 4H
 TREND_FLIP_K = {
     "BTCUSDm": 0.20,
     "XAUUSDm": 0.40,
@@ -53,6 +57,8 @@ TREND_FLIP_K = {
     "XRPUSDm": 0.20,
     "USDJPYm": 0.20,
     "US500m": 0.20,
+    "EURUSDm": 0.20,
+    "GBPUSDm": 0.20,
 }
 
 

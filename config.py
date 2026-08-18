@@ -173,7 +173,15 @@ TOTAL_WEIGHT = (
 # vol=2.0x, wick=0.6, ADX offset=2, cooldown 48 ชม. (ดูรายละเอียด/ที่มาของแต่ละค่าในไฟล์นั้นๆ)
 # ไม่มี real volume ให้ merge เหมือน XAU/USDJPY — index ซื้อขายกระจายหลาย exchange ไม่มีตัวเลข
 # volume รวมศูนย์ ต้องใช้ tick_volume โบรกเป็น proxy
-SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm", "USDJPYm", "US500m"]
+#
+# 2026-08-17: เพิ่ม EURUSDm/GBPUSDm — k-sweep แล้ว (EUR: k=0.20 FalseFlip 0%/67, GBP: k=0.20
+# FalseFlip 1.3%/78 — เหมือนเคส US500m ไม่ได้ 0% แต่ต่ำสุดในกลุ่มที่ทดสอบ) เป็น Forex OTC เหมือน
+# USDJPYm ไม่มี real volume ให้ merge เลย แต่ "ไม่" เปิด wick_ratio_min เฉพาะทันทีแบบ USDJPYm —
+# ปล่อยตาม default กลาง (1.9x / 0.5) ไปก่อนเพราะยังไม่ได้ดูตาราง swing จริงเทียบกับผู้ใช้เหมือน
+# ที่ทำตอน US500m/USDJPYm (ทั้งคู่ปรับ wick ตามคำสั่งผู้ใช้หลังดูข้อมูลจริง ไม่ใช่ default ตรงๆ)
+# ADX_BAR_OFFSET_H ยังไม่ตั้ง (default=0) — ยังไม่ได้เทียบกับจอ TradingView (วัด sensitivity ไว้
+# แล้ว: EUR แกว่ง 4.22 จุดตาม offset, GBP แกว่ง 2.54 จุด — ใกล้เคียงตัวอื่นๆ ไม่ผิดปกติ)
+SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "XRPUSDm", "USDJPYm", "US500m", "EURUSDm", "GBPUSDm"]
 
 # ---------------------------------------------------------------------------
 # Cooldown หลังปิดไม้ — กันเข้าไม้ symbol เดิมซ้ำเร็วเกินไปหลังปิด (นับทั้งกำไร/ขาดทุน)
@@ -200,6 +208,8 @@ COOLDOWN_HOURS_BY_SYMBOL = {
     "XAUUSDm": 0,
     "USDJPYm": 0,
     "US500m": 0,
+    "EURUSDm": 0,
+    "GBPUSDm": 0,
 }
 
 # ---------------------------------------------------------------------------
