@@ -21,13 +21,16 @@ def swing_vol_multiplier(symbol: str) -> float:
     400 แท่ง 4H แล้ว: 16/13/11 High, 17/14/12 Low ตามลำดับ เลือก 1.6 เป็นจุดกึ่งกลาง ยังไม่มี
     ข้อมูลเทรดจริงยืนยัน), US500m 2.0x (2026-08-12 — ปรับขึ้นจาก default 1.9 ตามคำสั่งผู้ใช้
     หลังดูตาราง swing จริง 400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ ควรเฝ้าดูผลจริง),
-    อื่นๆ 1.9x"""
+    EURUSDm 1.8x (2026-08-17 — ปรับลงจาก default 1.9 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง
+    400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ), อื่นๆ 1.9x"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 1.5
     if "JPY" in symbol.upper():
         return 1.6
     if "US500" in symbol.upper():
         return 2.0
+    if "EUR" in symbol.upper():
+        return 1.8
     return 1.9
 
 
@@ -81,7 +84,11 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     Default (2026-08-12, threshold 0.5): เปลี่ยนจาก None เป็น 0.5 ตามคำสั่งผู้ใช้ตอนเพิ่ม
     US500m — symbol ใหม่ที่ยังไม่มี branch เฉพาะจะเปิด wick OR-logic ทันทีแทนที่จะปิดไว้ก่อน
     (พฤติกรรมเดิม) ยังไม่มี backtest ยืนยันว่า 0.5 เหมาะกับทุก asset class ในอนาคต — ควรพิจารณา
-    ปรับเป็นค่าเฉพาะเมื่อมีข้อมูลเทรดจริงของ symbol นั้นๆ"""
+    ปรับเป็นค่าเฉพาะเมื่อมีข้อมูลเทรดจริงของ symbol นั้นๆ
+
+    EURUSDm (2026-08-17, threshold 0.6): เหตุผลเดียวกับ USDJPYm — Forex OTC ไม่มี real volume
+    ให้ merge เลย ปรับขึ้นจาก default 0.5 เป็น 0.6 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง 400 แท่ง
+    4H (ดู inspect_swings.py) — ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ ควรเฝ้าดูผลจริง"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 0.5
     if "BTC" in symbol.upper():
@@ -93,6 +100,8 @@ def swing_wick_ratio_min(symbol: str) -> float | None:
     if "XRP" in symbol.upper():
         return 0.5
     if "US500" in symbol.upper():
+        return 0.6
+    if "EUR" in symbol.upper():
         return 0.6
     return 0.5
 
