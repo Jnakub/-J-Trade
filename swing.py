@@ -22,14 +22,15 @@ def swing_vol_multiplier(symbol: str) -> float:
     ข้อมูลเทรดจริงยืนยัน), US500m 2.0x (2026-08-12 — ปรับขึ้นจาก default 1.9 ตามคำสั่งผู้ใช้
     หลังดูตาราง swing จริง 400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ ควรเฝ้าดูผลจริง),
     EURUSDm 1.8x (2026-08-17 — ปรับลงจาก default 1.9 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง
-    400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ), อื่นๆ 1.9x"""
+    400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ), GBPUSDm 1.8x (2026-08-18 — ตามคำสั่ง
+    ผู้ใช้ ค่าเท่ากับ EURUSDm — ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ), อื่นๆ 1.9x"""
     if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
         return 1.5
     if "JPY" in symbol.upper():
         return 1.6
     if "US500" in symbol.upper():
         return 2.0
-    if "EUR" in symbol.upper():
+    if "EUR" in symbol.upper() or "GBP" in symbol.upper():
         return 1.8
     return 1.9
 
