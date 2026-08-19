@@ -27,24 +27,38 @@ import pandas as pd
 
 from config import MT5_TIMEFRAMES
 
-# 2026-08-18: re-sweep offset 0-3 ใหม่ทั้งหมดหลังเพิ่ม gap-filter (ดู get_aligned_4h) โดยเทียบ
-# กับ ATR(14)+ADX(20) จริงจาก TradingView พร้อมกัน (เลือก offset ที่ผลรวม |ต่าง ATR%|+|ต่าง ADX%|
-# น้อยสุด) — ค่าเดิมก่อนหน้านี้ (ตอนยังไม่มี gap-filter) ใช้ไม่ได้แล้วเพราะวิธีคำนวณเปลี่ยน:
-#   BTCUSDm  0->3   (รวม 8.25->0.89, ATR/ADX เห็นตรงกันชัดเจน)
-#   XAUUSDm  1->0   (รวม 22.40->4.44, ATR/ADX เห็นตรงกันชัดเจน)
-#   US500m   2->3   (รวม 10.05->4.04, ATR/ADX เห็นตรงกันชัดเจน)
-#   USDJPYm  1->1   (ไม่เปลี่ยน — offset=1 ยังดีสุดทั้ง ATR −6.60% และ ADX −0.37%)
-#   EURUSDm  0->3   (รวม 8.52->3.96, ADX เป็นตัวชี้ขาด −0.60% แม้ ATR เดี่ยวๆ จะชอบ offset=1 กว่า)
-#   GBPUSDm  2->1   (รวม 9.24->3.53, ATR/ADX เห็นตรงกันชัดเจน)
+# 2026-08-18: sweep offset 0-3 เทียบกับ ATR(14)+ADX(20) จริงจาก TradingView พร้อมกัน (เลือก
+# offset ที่ผลรวม |ต่าง ATR%|+|ต่าง ADX%| น้อยสุด — ใช้ทั้งสองตัวเพราะเจอเคส USDJPYm ที่ ATR กับ
+# ADX ชี้ offset คนละตัว ต้องชั่งน้ำหนักรวม)
+#
+# ⚠️ บทเรียนสำคัญ: sweep ต้องวัดด้วย "path ที่ระบบใช้จริงในแต่ละ offset" ไม่ใช่ path เดียวกันหมด
+# รอบแรกวัดผิดโดยใช้ resample+filter กับทุก offset รวมทั้ง offset=0 ทั้งที่ของจริง offset=0 ใช้
+# แท่ง native ของ MT5 (ไม่ผ่าน resample เลย) — สอง path นี้ให้ค่าต่างกันมากถ้า symbol มี gap
+# (XAUUSDm: native ATR=29.47/ADX=23.93 vs resample@0 ATR=32.28/ADX=25.97) ทำให้เลือก XAUUSDm=0
+# ไปทั้งที่ของจริงห่างเป้า -10.3%/-12.5% ไม่ใช่ -1.7%/-5.0% ตามที่วัดได้ — แก้แล้วในรอบนี้
+# (symbol ที่ไม่มี gap เลยอย่าง crypto สอง path ให้ค่าเท่ากันเป๊ะ ปัญหานี้เกิดเฉพาะ forex/index)
+#
+# ผลรอบที่ถูกต้อง (n_bars=209 ทุกตัวหลังแก้ headroom ด้านล่างแล้ว):
+#   BTCUSDm  3   ATR +0.69%  ADX +0.20%  (รวม 0.89 — ดีสุดในระบบ)
+#   XAUUSDm  2   ATR -3.90%  ADX +2.74%  (รวม 6.64 — offset=0 ที่เคยเลือกผิดได้ 22.72)
+#   USDJPYm  1   ATR -6.60%  ADX -0.37%  (รวม 6.97 — ATR ยังห่างสุดในระบบ ดูหมายเหตุด้านล่าง)
+#   US500m   3   ATR -1.03%  ADX -3.03%  (รวม 4.06)
+#   EURUSDm  0   ATR -2.17%  ADX +1.77%  (รวม 3.94 — native ชนะ resample ทุก offset)
+#   GBPUSDm  1   ATR -1.37%  ADX +2.16%  (รวม 3.53)
 # ETHUSDm/XRPUSDm ยังไม่มีเป้า ATR/ADX จริงจาก TradingView ให้เทียบ — คงค่าเดิมไว้ก่อน
+#
+# หมายเหตุ residual ที่เหลือ (~1-7%): แก้ไม่ได้ด้วย offset เพราะ feed คนละเจ้า (Exness vs feed
+# ที่ TradingView ใช้) OHLC แต่ละแท่งไม่เท่ากันเป๊ะอยู่แล้ว — ยืนยันตั้งแต่เคส US500m ADX ครั้งแรก
+# (offset ถูกแล้วยังห่าง 2%) USDJPYm ที่ ATR ห่าง 6.6% เป็นตัวที่แย่สุด อาจต้องยอมรับหรือหา
+# วิธีอื่น (เช่น เทียบ feed ที่ TradingView ใช้ว่าเป็นเจ้าไหน)
 BAR_OFFSET_H = {
     "BTCUSDm": 3,
-    "XAUUSDm": 0,
+    "XAUUSDm": 2,
     "ETHUSDm": 2,
     "XRPUSDm": 0,
     "USDJPYm": 1,
     "US500m":  3,
-    "EURUSDm": 3,
+    "EURUSDm": 0,
     "GBPUSDm": 1,
 }
 
@@ -71,9 +85,12 @@ def get_aligned_4h(symbol: str, bars: int, as_of=None) -> pd.DataFrame:
         df["time"] = pd.to_datetime(df["time"], unit="s")
         return df
 
-    # เผื่อแท่ง 1H ให้พอ: 4 แท่ง/1 แท่ง 4H + เผื่อ gap ช่วงตลาดปิด (forex/index ไม่ได้เทรด 24/7)
-    # และเผื่อแท่งหัว-ท้ายที่ resample แล้วไม่เต็ม 4 ชม.
-    h1_bars = bars * 4 + 50
+    # เผื่อแท่ง 1H: ขั้นต่ำทางทฤษฎีคือ 4 แท่ง/1 แท่ง 4H แต่ต้องเผื่อ gap ช่วงตลาดปิดเยอะกว่านั้น
+    # มาก เพราะแท่ง 4H ที่คร่อม gap จะถูก gap-filter ด้านล่างตัดทิ้ง — 2026-08-18: เดิมใช้
+    # bars*4+50 ไม่พอ US500m ขอ 210 แท่งได้จริงแค่ 193 (หาย 17) เพราะ index/gold มี gap ถึง 22
+    # ครั้งใน 500 แท่ง 1H (ปิดรายวัน ไม่ใช่แค่เสาร์-อาทิตย์แบบ forex ที่มีแค่ 4 ครั้ง) ตัวเลข
+    # x8+200 ทดสอบแล้วได้ครบ 209/210 ทุก symbol รวม US500m ที่ gap หนักสุด
+    h1_bars = bars * 8 + 200
     if as_of is None:
         rates = mt5.copy_rates_from_pos(symbol, MT5_TIMEFRAMES["1H"], 0, h1_bars)
     else:
@@ -111,4 +128,12 @@ def get_aligned_4h(symbol: str, bars: int, as_of=None) -> pd.DataFrame:
     if live_bar.index[0] not in g.index:
         g = pd.concat([g, live_bar])
     g = g.drop(columns="n_sub_bars").sort_index().reset_index()
-    return g.iloc[-bars:].reset_index(drop=True)
+    out = g.iloc[-bars:].reset_index(drop=True)
+
+    # เตือนถ้า gap กินจนได้แท่งไม่ครบตามที่ขอ — เคยเกิดเงียบๆ กับ US500m (ขอ 210 ได้ 193) แล้ว
+    # ไม่มีใครรู้ จนไปเจอตอนไล่ debug ATR ไม่ตรง TradingView: แท่งหายกระทบ EMA warm-up ของ
+    # ATR/ADX, หน้าต่าง swing detection และทุกที่ที่ index ด้วย iloc[-N] โดยคาดว่าได้ครบ
+    if len(out) < bars:
+        print(f"  [bars] ⚠️ {symbol}: ขอแท่ง 4H {bars} ได้จริง {len(out)} "
+              f"(gap-filter ตัดทิ้ง — เพิ่ม h1_bars headroom ถ้าเจอบ่อย)")
+    return out
