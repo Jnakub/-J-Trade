@@ -27,15 +27,25 @@ import pandas as pd
 
 from config import MT5_TIMEFRAMES
 
+# 2026-08-18: re-sweep offset 0-3 ใหม่ทั้งหมดหลังเพิ่ม gap-filter (ดู get_aligned_4h) โดยเทียบ
+# กับ ATR(14)+ADX(20) จริงจาก TradingView พร้อมกัน (เลือก offset ที่ผลรวม |ต่าง ATR%|+|ต่าง ADX%|
+# น้อยสุด) — ค่าเดิมก่อนหน้านี้ (ตอนยังไม่มี gap-filter) ใช้ไม่ได้แล้วเพราะวิธีคำนวณเปลี่ยน:
+#   BTCUSDm  0->3   (รวม 8.25->0.89, ATR/ADX เห็นตรงกันชัดเจน)
+#   XAUUSDm  1->0   (รวม 22.40->4.44, ATR/ADX เห็นตรงกันชัดเจน)
+#   US500m   2->3   (รวม 10.05->4.04, ATR/ADX เห็นตรงกันชัดเจน)
+#   USDJPYm  1->1   (ไม่เปลี่ยน — offset=1 ยังดีสุดทั้ง ATR −6.60% และ ADX −0.37%)
+#   EURUSDm  0->3   (รวม 8.52->3.96, ADX เป็นตัวชี้ขาด −0.60% แม้ ATR เดี่ยวๆ จะชอบ offset=1 กว่า)
+#   GBPUSDm  2->1   (รวม 9.24->3.53, ATR/ADX เห็นตรงกันชัดเจน)
+# ETHUSDm/XRPUSDm ยังไม่มีเป้า ATR/ADX จริงจาก TradingView ให้เทียบ — คงค่าเดิมไว้ก่อน
 BAR_OFFSET_H = {
-    "BTCUSDm": 0,
-    "XAUUSDm": 1,
+    "BTCUSDm": 3,
+    "XAUUSDm": 0,
     "ETHUSDm": 2,
     "XRPUSDm": 0,
     "USDJPYm": 1,
-    "US500m":  2,
-    "EURUSDm": 0,
-    "GBPUSDm": 2,
+    "US500m":  3,
+    "EURUSDm": 3,
+    "GBPUSDm": 1,
 }
 
 
@@ -74,10 +84,31 @@ def get_aligned_4h(symbol: str, bars: int, as_of=None) -> pd.DataFrame:
 
     h1 = pd.DataFrame(rates)
     h1["time"] = pd.to_datetime(h1["time"], unit="s")
+
+    # 2026-08-18: กรองแท่ง 4H ที่ประกอบจากแท่งย่อย 1H ไม่ครบ 4 แท่งทิ้ง — เจอตอนเทียบ ATR
+    # ของ USDJPYm กับ TradingView แล้วไม่ตรงไม่ว่า offset ไหน (ต่างจาก BTCUSDm ที่หา offset
+    # ตรงได้ทั้ง ADX/ATR พร้อมกัน) สาเหตุคือ resample("4h", offset=...) ของ pandas ไม่รู้จัก
+    # เวลาตลาดปิด (forex/index หยุดเสาร์-อาทิตย์ ต่างจาก crypto ที่เทรด 24/7) พอเจอ gap จะได้
+    # แท่ง 4H ที่มีแท่งย่อยแค่ 1-3 แท่งแทนที่จะเป็น 4 เต็ม OHLC ของแท่งนั้นเลยไม่ตรงกับที่ MT5/
+    # TradingView คำนวณจริง (ทั้งคู่รู้จักเวลาตลาดปิด ไม่ตัดแบบ naive) แล้วความบิดเบี้ยวนี้
+    # สะสมต่อใน ATR/ADX ที่เป็น smoothed indicator (มี "ความจำ" ยาวข้ามหลายแท่ง)
+    # วัดจริงกับ USDJPYm 500 แท่ง 1H: เจอแท่ง 4H พร่อง 52/173 แท่ง (30%!)
+    #
+    # ข้อยกเว้น: แท่งตัวสุดท้าย (live ที่ยังไม่ปิด หรือแท่ง ณ as_of ที่ query ระหว่างแท่งกำลังก่อตัว)
+    # มีแท่งย่อยไม่ครบ 4 ได้ "โดยปกติ" ไม่ใช่ gap — ต้องเก็บไว้เสมอ ไม่งั้น caller ที่คาดหวัง
+    # แท่งสุดท้ายเป็นแท่ง live จะพัง (เช่น get_regime ตัด iloc[-1] ออกเองตอนหา closed_idx)
+    #
+    # ยังไม่การันตีตรงกับ MT5/TradingView 100% เพราะ MT5 เองน่าจะมีกฎตัดแท่งช่วง gap ที่ไม่
+    # เหมือน pandas เป๊ะ แค่ลดความบิดเบี้ยวจากแท่งพร่องที่ชัดเจนที่สุดออกไปก่อน
     g = (h1.set_index("time")
            .resample("4h", offset=f"{offset}h")
-           .agg({"open": "first", "high": "max", "low": "min",
-                 "close": "last", "tick_volume": "sum"})
-           .dropna()
-           .reset_index())
+           .agg(open=("open", "first"), high=("high", "max"), low=("low", "min"),
+                close=("close", "last"), tick_volume=("tick_volume", "sum"),
+                n_sub_bars=("open", "count"))
+           .dropna())
+    live_bar = g.iloc[[-1]]                    # เก็บแท่งสุดท้ายไว้ก่อนกรอง (ป้องกันไม่ครบ 4 โดยชอบธรรม)
+    g = g[g["n_sub_bars"] == 4]
+    if live_bar.index[0] not in g.index:
+        g = pd.concat([g, live_bar])
+    g = g.drop(columns="n_sub_bars").sort_index().reset_index()
     return g.iloc[-bars:].reset_index(drop=True)
