@@ -8,14 +8,32 @@ import pandas as pd
 
 
 def calc_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|)"""
+    """True Range = max(High-Low, |High-PrevClose|, |Low-PrevClose|)
+
+    2026-08-19: เปลี่ยนจาก ewm(span=period) เป็น ewm(alpha=1/period) — Wilder's RMA ตัวจริง
+    (alpha=1/14≈0.071) แทน EMA มาตรฐาน (alpha=2/15≈0.133, ไวกว่า RMA เกือบ 2 เท่า) ที่ใช้มา
+    ก่อนหน้านี้ — เดิม trend_flip.py เขียนเตือนตัวเองไว้ล่วงหน้าแล้วว่าต่างจาก TradingView
+    default ประมาณนี้ (ดู comment เดิมของไฟล์นั้น) แต่ไม่เคยมีใครวัดจริงว่ากระทบขนาดไหน
+
+    วัดจริง 2026-08-19 (ATR(14) บน 1D เทียบ TradingView, สูตรเดิม vs RMA):
+      BTCUSDm  -8.16% -> +2.02%   ETHUSDm -14.26% -> +1.74%   XRPUSDm -15.79% -> -1.57%
+      (crypto ตรงเกือบเป๊ะทันทีหลังแก้ — ยืนยันว่าสูตรคือสาเหตุหลัก ไม่ใช่ feed/gap)
+    XAUUSDm/USDJPYm/US500m/EURUSDm/GBPUSDm ยังเหลือ residual ~12-16% หลังแก้สูตรแล้ว — ตรวจ
+    แล้วไม่ใช่ day-boundary offset (ทดสอบ 0-22 ชม. ไม่มีผล) และผู้ใช้ยืนยันจอ TradingView ตั้ง
+    Smoothing=RMA ถูกต้องอยู่แล้ว เหลือคำอธิบายเดียวคือ feed คนละเจ้า (Exness vs ที่ TradingView
+    ใช้) ซึ่งแก้ด้วยโค้ดไม่ได้
+
+    ⚠️ กระทบทุกจุดที่ใช้ ATR ทั้งระบบพร้อมกัน (จุดเดียวจริงตามที่ตั้งใจไว้แต่แรก): SL buffer,
+    swing tolerance, structure break buffer, trend_flip bias (k×ATR), ATR trailing SL,
+    รายงาน exit_monitor — ดู bars.BAR_OFFSET_H ที่ sweep ใหม่ตามสูตรนี้ด้วย (US500m/EURUSDm
+    offset เปลี่ยนเพราะ sweep เดิมใช้สูตร ATR ผิดตัดสินใจ)"""
     prev_close = df["close"].shift(1)
     tr = pd.concat([
         df["high"] - df["low"],
         (df["high"] - prev_close).abs(),
         (df["low"]  - prev_close).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(span=period, adjust=False).mean()
+    return tr.ewm(alpha=1 / period, adjust=False).mean()
 
 
 def calc_di(df: pd.DataFrame, period: int = 20) -> tuple[pd.Series, pd.Series]:

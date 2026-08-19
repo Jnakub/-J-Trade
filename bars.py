@@ -51,14 +51,23 @@ from config import MT5_TIMEFRAMES
 # ที่ TradingView ใช้) OHLC แต่ละแท่งไม่เท่ากันเป๊ะอยู่แล้ว — ยืนยันตั้งแต่เคส US500m ADX ครั้งแรก
 # (offset ถูกแล้วยังห่าง 2%) USDJPYm ที่ ATR ห่าง 6.6% เป็นตัวที่แย่สุด อาจต้องยอมรับหรือหา
 # วิธีอื่น (เช่น เทียบ feed ที่ TradingView ใช้ว่าเป็นเจ้าไหน)
+#
+# 2026-08-19: **re-sweep รอบ 2 — รอบก่อนหน้าใช้ ATR ผิดสูตรตัดสินใจ** เจอว่า indicators.calc_atr()
+# ใช้ ewm(span=period) (EMA มาตรฐาน) แทน Wilder's RMA (ewm(alpha=1/period)) ที่ TradingView ใช้
+# เป็น default ไวกว่ากันเกือบ 2 เท่า พอแก้สูตรแล้ว sweep ใหม่ด้วย ATR ที่ถูกต้อง ผลเปลี่ยน 2 ตัว
+# (offset ที่เหลือยืนยันว่ายังถูกอยู่แม้จะแก้สูตรแล้ว):
+#   US500m   3 -> 0   (รวมเดิมที่คิดผิดสูตร 4.06 ที่ offset=3 -> จริงๆ offset=0 รวม 6.64 ดีสุด)
+#   EURUSDm  0 -> 3   (สลับกับ US500m พอดี — รวม 3.94 ที่ offset=0(เดิม) -> offset=3 รวม 3.08 ดีกว่า)
+#   BTCUSDm=3, XAUUSDm=2, USDJPYm=1, GBPUSDm=1 ยืนยันว่ายัง optimal เหมือนเดิมด้วยสูตรใหม่
+# ETHUSDm/XRPUSDm ยังไม่มีเป้า ATR/ADX จริงจาก TradingView ให้เทียบ — คงค่าเดิมไว้ก่อน
 BAR_OFFSET_H = {
     "BTCUSDm": 3,
     "XAUUSDm": 2,
     "ETHUSDm": 2,
     "XRPUSDm": 0,
     "USDJPYm": 1,
-    "US500m":  3,
-    "EURUSDm": 0,
+    "US500m":  0,
+    "EURUSDm": 3,
     "GBPUSDm": 1,
 }
 
