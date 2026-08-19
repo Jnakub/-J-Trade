@@ -1,6 +1,40 @@
 import MetaTrader5 as mt5
 
 # ---------------------------------------------------------------------------
+# Asset Class — จุดเดียวทั้งระบบที่จัดกลุ่ม symbol ตามประเภทตลาด
+# ---------------------------------------------------------------------------
+# 2026-08-18: เพิ่มตามคำสั่งผู้ใช้ หลังเจอว่า MIN_SL_DISTANCE_PCT (0.9% เดิม) tune มาจาก
+# BTC/XAU เท่านั้น แล้วบล็อกเกือบทุกไม้ของ Forex เพราะ ATR/ราคา ต่ำกว่ากันโดยธรรมชาติของตลาด
+# — ก่อนหน้านี้ทุกพารามิเตอร์ (vol_multiplier, wick_ratio_min, MIN_SL_DISTANCE_PCT,
+# BAR_OFFSET_H) ต้องเดา/เช็คเองทีละ symbol ว่าควรได้ค่าไหน ทั้งที่คำตอบมักขึ้นกับ "ตลาดแบบไหน"
+# เป็นหลัก ไม่ใช่ symbol เจาะจง — มี ASSET_CLASS กลางแล้ว พารามิเตอร์ที่มีเหตุผลเชิง class
+# ชัดเจน (เช่น MIN_SL_DISTANCE_PCT ที่ผูกกับ ATR% ของตลาด) จะได้ default ตาม class ก่อน แล้ว
+# ค่อย override เฉพาะ symbol ทับได้ถ้ามีข้อมูล backtest/tune จริงรายตัว (ไม่ใช่แทนที่ระบบ tune
+# รายตัวที่มีอยู่แล้ว — symbol เดียวกันใน class เดียวกันยังต่างค่ากันได้ เช่น BTC/ETH wick
+# ต่างกันเล็กน้อยทั้งที่เป็น CRYPTO เหมือนกัน)
+#
+# BAR_OFFSET_H (bars.py) "ไม่ใช้" ระบบนี้ — offset ผูกกับวิธีที่ TradingView ตัดแท่งของ feed
+# นั้นๆ ซึ่งไม่สัมพันธ์กับ asset class เลย (วัดจริง: USDJPYm=1, EURUSDm=0, GBPUSDm=1 อยู่ใน
+# class เดียวกันแต่ offset ไม่ตรงกัน) ต้องวัดเป็นรายตัวเสมอ
+ASSET_CLASS = {
+    "BTCUSDm": "CRYPTO",
+    "ETHUSDm": "CRYPTO",
+    "XRPUSDm": "CRYPTO",
+    "XAUUSDm": "GOLD",
+    "USDJPYm": "FOREX",
+    "EURUSDm": "FOREX",
+    "GBPUSDm": "FOREX",
+    "US500m":  "INDEX",
+}
+
+
+def get_asset_class(symbol: str) -> str | None:
+    """คืน asset class ของ symbol หรือ None ถ้ายังไม่ได้จัดกลุ่ม (symbol ใหม่ที่ยังไม่เพิ่ม
+    ลง ASSET_CLASS ด้านบน) — ผู้เรียกต้อง fallback เป็น default กลางเองถ้าได้ None"""
+    return ASSET_CLASS.get(symbol)
+
+
+# ---------------------------------------------------------------------------
 # Account & Risk Management
 # ---------------------------------------------------------------------------
 # 2026-08-01: เอา ACCOUNT_BALANCE (ค่า hardcode) ออก — ยอดเงินต้องดึงจาก
@@ -42,6 +76,55 @@ MIN_SL_DISTANCE_PCT = 0.9   # 2026-08-03: ระยะ entry->SL ต้องไ
                           # 0.95% ข้างต้น) และตัวเลข risk% เองก็มี noise เล็กน้อยจากการ fetch ข้อมูล
                           # ย้อนหลังคนละรอบ (ไม่ deterministic 100% ข้าม backtest run) ควรเฝ้าดูผล
                           # เทรดจริงต่อเนื่อง ไม่ใช่เชื่อเลข 0.9 นี้ว่าแม่นเป๊ะตลอดไป
+                          #
+                          # ⚠️ backtest ข้างบนทำกับ BTC เท่านั้น (ดู "ไม้ BTC risk=0.95%") ไม่เคย
+                          # ทดสอบกับ Forex/Index เลย — ค่านี้เป็น % ของราคาตรงๆ ไม่ได้ปรับตาม
+                          # ความผันผวนของแต่ละ asset class ปัญหาคือ ATR/ราคา ของ Forex ต่ำกว่า
+                          # crypto/gold มาก (วัดจริง 2026-08-18: BTC 0.65%, XAU 0.74% vs EUR 0.13%,
+                          # GBP 0.14%, USDJPY 0.16%, US500 0.24%) — SL ของ Forex ที่คำนวณจาก
+                          # structure+ATR เดียวกันจะแคบกว่า BTC/XAU โดยธรรมชาติของมันเอง ไม่ใช่
+                          # SL แคบผิดปกติแบบที่กฎนี้ตั้งใจจะกัน ถ้าใช้ 0.9% ตายตัวจะบล็อกเกือบทุกไม้
+                          # ของ Forex (เจอจริง: USDJPYm 0.31%, EURUSDm 0.81%, GBPUSDm 0.28% ผ่านมา
+                          # ไม่ได้สักไม้)
+
+# ค่า override เฉพาะ symbol ของ MIN_SL_DISTANCE_PCT — symbol ที่ไม่มีในนี้ใช้ MIN_SL_DISTANCE_PCT
+# ตัวบน (0.9%) เหมือนเดิม ไม่กระทบ BTC/XAU/ETH/XRP ที่ backtest ยืนยันแล้ว
+#
+# 2026-08-18: เพิ่มให้ Forex/Index ตามคำสั่งผู้ใช้หลังพบว่า 0.9% บล็อกเกือบทุกไม้ — คำนวณจาก
+# สัดส่วน ATR/ราคา จริงของแต่ละ symbol เทียบกับ BTC (ซึ่งเป็นฐานของ backtest เดิม): ใช้ตัวคูณ
+# 0.9/0.65 = 1.38 (0.9% ที่ tune ไว้ / ATR-to-price ของ BTC 0.65% ตอนวัด) คูณ ATR/ราคา ของ
+# symbol นั้นๆ แล้วปัดเป็นเลขกลมๆ — เป็นการ "แปลงสัดส่วน" ไม่ใช่ backtest จริง ยังไม่มีข้อมูล
+# เทรดจริงหรือ sweep ยืนยันว่าตัวเลขเหล่านี้เหมาะสม (ต่างจาก 0.9% ตัวบนที่ผ่าน backtest เต็ม
+# รูปแบบมาแล้ว) ควรเฝ้าดูผลจริงและพร้อม sweep หาค่าที่แม่นกว่านี้เมื่อมีข้อมูลมากพอ:
+#   USDJPYm 0.2%  (ATR/ราคา 0.16% x 1.38 = 0.22 ปัดลง)
+#   US500m  0.3%  (0.24% x 1.38 = 0.33 ปัดลง)
+#   EURUSDm 0.2%  (0.13% x 1.38 = 0.18 ปัดขึ้น)
+#   GBPUSDm 0.2%  (0.14% x 1.38 = 0.19 ปัดขึ้น)
+#
+# 2026-08-18: ย้ายมาเป็น class-default + symbol-override (ดู ASSET_CLASS ด้านบนไฟล์) — CRYPTO/
+# GOLD ไม่ต้องมี default แยกเพราะ MIN_SL_DISTANCE_PCT ตัวบน (0.9%) ผ่าน backtest เต็มรูปแบบ
+# บน BTC/XAU อยู่แล้ว เป็นค่าที่ "ถูก" สำหรับ class นั้นโดยตรง ไม่ใช่แค่ fallback
+MIN_SL_DISTANCE_PCT_BY_CLASS = {
+    "FOREX": 0.2,   # ยังไม่มี backtest ยืนยัน — คำนวณจากสัดส่วน ATR/ราคา เทียบ BTC (ดูด้านบน)
+    "INDEX": 0.3,   # เหมือนกัน
+}
+
+# symbol ที่ tune ค่าเฉพาะไว้แล้ว (ตอนนี้ทั้งหมดยังคำนวณจากสูตรเดียวกับ class default —
+# แยกไว้เป็น dict ต่างหากเผื่ออนาคตมี symbol ไหนต้องปรับเฉพาะตัวออกจาก class default)
+MIN_SL_DISTANCE_PCT_BY_SYMBOL = {}
+
+
+def get_min_sl_distance_pct(symbol: str) -> float:
+    """ลำดับการหา: override เฉพาะ symbol -> default ตาม asset class -> MIN_SL_DISTANCE_PCT
+    กลาง (0.9%, ผ่าน backtest เต็มรูปแบบบน BTC/XAU) — ใช้แทนการอ่าน
+    MIN_SL_DISTANCE_PCT_BY_SYMBOL ตรงๆ ทุกจุดที่เคยทำ (scoring.py, reversal.py)"""
+    if symbol in MIN_SL_DISTANCE_PCT_BY_SYMBOL:
+        return MIN_SL_DISTANCE_PCT_BY_SYMBOL[symbol]
+    cls = ASSET_CLASS.get(symbol)
+    if cls in MIN_SL_DISTANCE_PCT_BY_CLASS:
+        return MIN_SL_DISTANCE_PCT_BY_CLASS[cls]
+    return MIN_SL_DISTANCE_PCT
+
 MAX_TP_DISTANCE_PCT = 20.0  # 2026-08-03: TP ต้องไม่ห่างจาก entry เกินกี่ % ของราคา
                           # ทำงานคนละแกนกับ MAX_RR_HARD_BLOCK: ตัวนี้จับ "เป้าไกลเกินจนราคา
                           # ไปไม่ถึง", ตัวนั้นจับ "SL แคบผิดปกติจน RR พองขึ้น" (เช่น XAU

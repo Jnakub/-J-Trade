@@ -1,6 +1,6 @@
 import pandas as pd
 
-from config import TP_FIB_RATIO
+from config import TP_FIB_RATIO, ASSET_CLASS
 from indicators import calc_atr, calc_di   # re-exported เพื่อไม่ให้ต้องแก้ import ที่อื่น
 
 
@@ -14,96 +14,96 @@ from indicators import calc_atr, calc_di   # re-exported เพื่อไม�
 # ข้อ 2 — Volume Check
 # ---------------------------------------------------------------------------
 
+# ที่มาของแต่ละค่า (ประวัติ — ไม่ย้ายไป config.py เพราะเป็นรายละเอียดเฉพาะของ swing detection):
+#   XAUUSDm 1.5x  (volume ทองแรงน้อยกว่า — ปรับจาก 1.6 เมื่อ 2026-07-24 ยังไม่มี backtest ยืนยัน)
+#   USDJPYm 1.6x  (2026-08-09 — เทียบ swing count ที่ 1.5/1.6/1.9 บน 400 แท่ง 4H: 16/13/11 High,
+#                  17/14/12 Low ตามลำดับ เลือก 1.6 เป็นจุดกึ่งกลาง ยังไม่มีข้อมูลเทรดจริงยืนยัน)
+#   US500m  2.0x  (2026-08-12 — ปรับขึ้นจาก default ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง
+#                  ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ)
+#   EURUSDm 1.8x  (2026-08-17 — ปรับลงจากตามคำสั่งผู้ใช้หลังดูตาราง swing จริง ยังไม่มี backtest)
+#   GBPUSDm 1.8x  (2026-08-18 — ตามคำสั่งผู้ใช้ ค่าเท่ากับ EURUSDm ยังไม่มี backtest)
+#
+# 2026-08-18: ย้ายเป็น symbol-override -> class-default (ตาม config.ASSET_CLASS) -> 1.9 กลาง
+# ตามคำสั่งผู้ใช้ (ดู config.py หัวไฟล์) — ค่า 8 ตัวข้างบนคือของเดิมเป๊ะ ย้ายมาเป็น dict เฉยๆ
+# ไม่เปลี่ยนพฤติกรรม ส่วน *_BY_CLASS เป็น default ใหม่สำหรับ symbol ที่ยังไม่เคย tune เท่านั้น
+VOL_MULTIPLIER_BY_SYMBOL = {
+    "XAUUSDm": 1.5,
+    "USDJPYm": 1.6,
+    "US500m":  2.0,
+    "EURUSDm": 1.8,
+    "GBPUSDm": 1.8,
+}
+VOL_MULTIPLIER_BY_CLASS = {
+    "CRYPTO": 1.9,
+    "GOLD":   1.5,
+    "FOREX":  1.7,   # ค่ากลางระหว่าง USDJPYm(1.6) กับ EUR/GBP(1.8) ที่ tune แยกไว้แล้ว
+    "INDEX":  2.0,
+}
+
+
 def swing_vol_multiplier(symbol: str) -> float:
     """เกณฑ์ volume ของ swing ตาม symbol — จุดเดียวทั้งระบบ ห้าม hardcode ซ้ำที่อื่น
-    XAU/Gold 1.5x (volume ทองแรงน้อยกว่า — ปรับจาก 1.6 เมื่อ 2026-07-24 ยังไม่มี backtest
-    ยืนยันค่าใหม่นี้โดยตรง), USDJPYm 1.6x (2026-08-09 — เทียบ swing count ที่ 1.5/1.6/1.9 บน
-    400 แท่ง 4H แล้ว: 16/13/11 High, 17/14/12 Low ตามลำดับ เลือก 1.6 เป็นจุดกึ่งกลาง ยังไม่มี
-    ข้อมูลเทรดจริงยืนยัน), US500m 2.0x (2026-08-12 — ปรับขึ้นจาก default 1.9 ตามคำสั่งผู้ใช้
-    หลังดูตาราง swing จริง 400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ ควรเฝ้าดูผลจริง),
-    EURUSDm 1.8x (2026-08-17 — ปรับลงจาก default 1.9 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง
-    400 แท่ง 4H ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ), GBPUSDm 1.8x (2026-08-18 — ตามคำสั่ง
-    ผู้ใช้ ค่าเท่ากับ EURUSDm — ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ), อื่นๆ 1.9x"""
-    if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
-        return 1.5
-    if "JPY" in symbol.upper():
-        return 1.6
-    if "US500" in symbol.upper():
-        return 2.0
-    if "EUR" in symbol.upper() or "GBP" in symbol.upper():
-        return 1.8
+    ลำดับ: override เฉพาะ symbol -> default ตาม asset class -> 1.9 กลาง"""
+    if symbol in VOL_MULTIPLIER_BY_SYMBOL:
+        return VOL_MULTIPLIER_BY_SYMBOL[symbol]
+    cls = ASSET_CLASS.get(symbol)
+    if cls in VOL_MULTIPLIER_BY_CLASS:
+        return VOL_MULTIPLIER_BY_CLASS[cls]
     return 1.9
+
+
+# ที่มาของแต่ละค่า (ประวัติ):
+#   XAUUSDm 0.5   (2026-07-21) ไม่มี real volume ให้ merge (COMEX ผ่าน yfinance พังที่ 4H —
+#                  ดู binance.py) wick เป็นสัญญาณอิสระที่ช่วยกู้ swing point ที่ volume มองไม่เห็น
+#                  (backtest 400 แท่ง: vol อย่างเดียวเจอ lows แค่ 9 จุด, เพิ่ม wick OR เจอ 19 จุด)
+#   BTCUSDm 0.5   (2026-08-02) มี real volume จาก Bitstamp อยู่แล้ว แต่ backtest 180 วันพบว่า
+#                  ยังพลาดจุดกลับตัวจริงช่วงราคาวิ่งแรง — เปิด wick OR แล้วดีขึ้น (TotalR
+#                  +6.41->+7.59, Win Rate 50%->66.7%) sample เล็ก (4-6 ไม้)
+#   ETHUSDm 0.52  (2026-08-02 เริ่มที่ 0.5, ปรับ 0.55->0.52 ตามคำสั่งผู้ใช้ 2026-08-11 หลังดู
+#                  รายจุดจริง) backtest ตอนเปิดครั้งแรก: TotalR -2.26->-0.98, Win 16.7%->33.3%
+#   XRPUSDm 0.5   (2026-08-02) backtest พบว่า **แย่ลง** ชัดเจน (TotalR +6.29->-2.86, Win
+#                  33.3%->14.3%) แต่เปิดใช้ตามคำสั่งผู้ใช้ sample เล็ก (3-7 ไม้) ยังไม่สรุป
+#   USDJPYm 0.55  (2026-08-09) Forex OTC ไม่มี real volume ให้ merge ได้จริงทางทฤษฎี (ไม่มี
+#                  exchange กลาง) เปิด wick OR ตั้งแต่เริ่มเลย ปรับ 0.5->0.55 ตามคำสั่งผู้ใช้
+#   US500m  0.6   (2026-08-12) เหตุผลเดียวกับ XAU — index ไม่มีแหล่ง real volume รวมศูนย์
+#                  เริ่มที่ 0.5 แล้วปรับเป็น 0.6 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง
+#   EURUSDm 0.6   (2026-08-17) เหตุผลเดียวกับ USDJPYm ปรับจาก default 0.5 ตามคำสั่งผู้ใช้
+#   GBPUSDm 0.5   (2026-08-18) เท่า default กลาง — ไม่ได้ปรับเฉพาะ
+# ทุกค่าข้างบน "ยังไม่มี backtest/ข้อมูลเทรดจริงยืนยันเต็มรูปแบบ" ยกเว้นที่ระบุ backtest
+# ตัวเลขไว้ชัดเจน (BTC/ETH/XRP) — ควรเฝ้าดูผลจริงต่อเนื่องและพร้อมปรับกลับ
+#
+# 2026-08-18: ย้ายเป็น symbol-override -> class-default (ตาม config.ASSET_CLASS) -> 0.5 กลาง
+# ตามคำสั่งผู้ใช้ (ดู config.py หัวไฟล์) — ค่า 8 ตัวข้างบนคือของเดิมเป๊ะ ย้ายมาเป็น dict เฉยๆ
+# ไม่เปลี่ยนพฤติกรรม (รวม GBPUSDm ที่แม้ตรงกับ default แต่ต้องระบุชัดเจน กัน FOREX class
+# default ด้านล่างที่ตั้งเป็น 0.55 มาแทนที่ค่าเดิม 0.5 ของมันโดยไม่ตั้งใจ)
+WICK_RATIO_MIN_BY_SYMBOL = {
+    "XAUUSDm": 0.5,
+    "BTCUSDm": 0.5,
+    "ETHUSDm": 0.52,
+    "XRPUSDm": 0.5,
+    "USDJPYm": 0.55,
+    "US500m":  0.6,
+    "EURUSDm": 0.6,
+    "GBPUSDm": 0.5,
+}
+WICK_RATIO_MIN_BY_CLASS = {
+    "CRYPTO": 0.5,
+    "GOLD":   0.5,
+    "FOREX":  0.55,  # ตรงกับ USDJPYm — เหตุผล OTC/ไม่มี real volume ใช้ได้กับ Forex ทุกคู่
+    "INDEX":  0.6,
+}
 
 
 def swing_wick_ratio_min(symbol: str) -> float | None:
     """เกณฑ์ wick ratio ขั้นต่ำสำหรับ OR-logic ของ swing — คืน None = ปิด OR-logic (ใช้ volume
     อย่างเดียวเหมือนเดิม), คืนตัวเลข = เปิด OR-logic (ผ่านได้ถ้า volume เข้าเกณฑ์ **หรือ**
-    wick ratio ถึงค่านี้)
-
-    XAU/Gold (2026-07-21, threshold 0.5 ตั้งแต่ 2026-07-24): XAUUSDm ไม่มี real volume ให้
-    merge (COMEX ผ่าน yfinance พังที่ 4H — ดู binance.py) เลยใช้ tick_volume ของโบรกเกอร์เป็น
-    proxy ซึ่งเชื่อถือได้น้อย — wick ratio เป็นสัญญาณอิสระจาก volume ที่ช่วยกู้ swing point จริง
-    ที่ tick_volume มองไม่เห็น (ยืนยันด้วย backtest 400 แท่ง: vol=1.6x เท่านั้น เจอ lows แค่
-    9 จุด, เพิ่ม wick>=0.4 OR เข้าไปเจอเพิ่มเป็น 19 จุด)
-
-    BTC (2026-08-02, threshold 0.5): ต่างจาก XAU ตรงที่ BTC มี real volume จาก Bitstamp
-    เชื่อถือได้อยู่แล้ว แต่ backtest 180 วัน (regime-gated, one-position-at-a-time เหมือน
-    scheduler.py จริง) พบว่า volume อย่างเดียวยังพลาดจุดกลับตัวจริงบางจุดในช่วงที่ราคาวิ่งแรง/
-    ผันผวนสูง (เช่น มี.ค.-เม.ย. ที่ราคาพุ่ง 71,000->82,000 — feed swing high ส่วนใหญ่มาจาก wick
-    ล้วนๆ ไม่ใช่ volume) เปิด wick OR-logic แล้ว: เทรดเพิ่มจาก 4->6 ไม้, Total R +6.41->+7.59,
-    Win Rate 50%->66.7% (ไม้เดิมที่เคยแพ้ 1 ไม้กลับมาชนะเพราะ SL/TP อ้างอิงจุด swing แม่นขึ้น)
-    sample เล็ก (4-6 ไม้) — ควร backtest ซ้ำเมื่อมีข้อมูลเทรดจริงมากพอ
-
-    ETHUSDm (2026-08-02, threshold 0.5 ตอนแรก): backtest 180 วัน (เส้นทาง Scoring/TREND เท่านั้น —
-    ยังไม่ได้ทดสอบผลกับ Reversal path) เทรดเท่าเดิม (6 ไม้) แต่ TotalR ดีขึ้น -2.26->-0.98,
-    Win Rate 16.7%->33.3%
-    2026-08-11: threshold ปรับเป็น 0.55 แล้วปรับอีกรอบเป็น 0.52 ตามคำสั่งผู้ใช้หลังดูรายจุด
-    (vol ratio/wick ratio) จริงของ swing 400 แท่งล่าสุด (High เกิดจาก wick ล้วนๆ 6/19 จุด, Low
-    9/19 จุด) — ยังไม่มี backtest ยืนยันค่าใหม่นี้โดยตรง ควรเฝ้าดูผลจริงและพร้อมปรับกลับถ้าจำเป็น
-
-    XRPUSDm (2026-08-02, threshold 0.5): backtest ชุดเดียวกันพบว่า **แย่ลง** ชัดเจน
-    (3->7 ไม้, TotalR +6.29->-2.86, Win Rate 33.3%->14.3%) — เปิดใช้ตามคำสั่งผู้ใช้แม้ backtest
-    จะแนะนำให้คงเดิม (None) เพราะยังไม่มีข้อมูลเทรดจริงยืนยัน sample เล็กมาก (3-7 ไม้) ควร
-    เฝ้าดูผลจริงและพร้อมปรับกลับถ้าผลออกมาแย่ตามที่ backtest ชี้
-
-    USDJPYm (2026-08-09, threshold 0.55): เหตุผลเดียวกับ XAU เป๊ะ — Forex เป็นตลาด OTC ไม่มี
-    "real volume" ให้ merge ได้จริงในทางทฤษฎี (ไม่มี exchange กลางรวม volume แบบ crypto/futures)
-    ต้องใช้ tick_volume ของโบรกเกอร์เป็น proxy เชื่อถือได้น้อยเหมือน XAU เปิด wick OR-logic ไว้
-    ตั้งแต่เริ่มเลย (ไม่รอ backtest แยกเหมือน ETH/XRP เพราะสถานการณ์เหมือน XAU ตรงๆ ไม่ใช่กรณี
-    "มี real volume อยู่แล้วแต่ยังพลาดบางจุด" แบบ BTC/ETH/XRP) — threshold ปรับจาก 0.5 เป็น 0.55
-    ตามคำสั่งผู้ใช้หลังดูรายจุด (vol ratio/wick ratio) จริงของ swing ที่เจอแล้ว ยังไม่มีข้อมูล
-    เทรดจริงยืนยัน ควรเฝ้าดูผลจริงเหมือน symbol อื่น
-
-    US500m (2026-08-12, threshold 0.6): เหตุผลเดียวกับ XAU เป๊ะ — S&P500 index ไม่มีแหล่ง real
-    volume รวมศูนย์ให้ merge ได้เลย (ไม่อยู่ใน BITSTAMP_MAP/YFINANCE_MAP ของ binance.py และ
-    โดยธรรมชาติ index ซื้อขายกระจายหลาย exchange/futures พร้อมกัน ไม่มีตัวเลข volume "จริง"
-    เดียวที่รวมทุกที่) เปิด wick OR-logic ตั้งแต่เริ่มใช้งานเลยตามคำสั่งผู้ใช้ เริ่มต้นที่ 0.5
-    เท่า XAU ก่อน แล้วปรับขึ้นเป็น 0.6 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง 400 แท่ง 4H —
-    ยังไม่มี backtest/ข้อมูลเทรดจริงยืนยันค่านี้โดยเฉพาะสำหรับ US500m ควรเฝ้าดูผลจริงเหมือน
-    symbol อื่น
-
-    Default (2026-08-12, threshold 0.5): เปลี่ยนจาก None เป็น 0.5 ตามคำสั่งผู้ใช้ตอนเพิ่ม
-    US500m — symbol ใหม่ที่ยังไม่มี branch เฉพาะจะเปิด wick OR-logic ทันทีแทนที่จะปิดไว้ก่อน
-    (พฤติกรรมเดิม) ยังไม่มี backtest ยืนยันว่า 0.5 เหมาะกับทุก asset class ในอนาคต — ควรพิจารณา
-    ปรับเป็นค่าเฉพาะเมื่อมีข้อมูลเทรดจริงของ symbol นั้นๆ
-
-    EURUSDm (2026-08-17, threshold 0.6): เหตุผลเดียวกับ USDJPYm — Forex OTC ไม่มี real volume
-    ให้ merge เลย ปรับขึ้นจาก default 0.5 เป็น 0.6 ตามคำสั่งผู้ใช้หลังดูตาราง swing จริง 400 แท่ง
-    4H (ดู inspect_swings.py) — ยังไม่มี backtest ยืนยันค่านี้โดยเฉพาะ ควรเฝ้าดูผลจริง"""
-    if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
-        return 0.5
-    if "BTC" in symbol.upper():
-        return 0.5
-    if "JPY" in symbol.upper():
-        return 0.55
-    if "ETH" in symbol.upper():
-        return 0.52
-    if "XRP" in symbol.upper():
-        return 0.5
-    if "US500" in symbol.upper():
-        return 0.6
-    if "EUR" in symbol.upper():
-        return 0.6
+    wick ratio ถึงค่านี้) ลำดับ: override เฉพาะ symbol -> default ตาม asset class -> 0.5 กลาง
+    ดูที่มาของแต่ละค่า/ประวัติ backtest ใน comment เหนือ WICK_RATIO_MIN_BY_SYMBOL ด้านบน"""
+    if symbol in WICK_RATIO_MIN_BY_SYMBOL:
+        return WICK_RATIO_MIN_BY_SYMBOL[symbol]
+    cls = ASSET_CLASS.get(symbol)
+    if cls in WICK_RATIO_MIN_BY_CLASS:
+        return WICK_RATIO_MIN_BY_CLASS[cls]
     return 0.5
 
 
