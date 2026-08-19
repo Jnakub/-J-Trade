@@ -42,6 +42,7 @@ from mt5_connect import connect
 from scoring import get_ohlcv, get_ohlcv_real
 from swing import find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
 from indicators import calc_adx
+from bars import BAR_OFFSET_H as ADX_BAR_OFFSET_H, get_aligned_4h
 
 REGIME_TIMEFRAME = MT5_TIMEFRAMES["4H"]
 BARS             = 210
@@ -58,7 +59,7 @@ ADX_GRAY_HIGH    = 22     # 20-22 = เขตเทา รอ ADX เลือ�
 ADX_REVERSAL     = 40     # peak ต้อง >= 40 ถึงเข้าเกณฑ์ Reversal
 
 # ---------------------------------------------------------------------------
-# ⚠️ ADX_BAR_OFFSET_H — ต้องตั้งค่าให้ทุก symbol ใหม่ที่เพิ่มเข้า config.SYMBOLS
+# ⚠️ ADX_BAR_OFFSET_H — ย้ายไปอยู่ที่ bars.BAR_OFFSET_H แล้ว (import เป็น alias ชื่อเดิมด้านบน)
 # ---------------------------------------------------------------------------
 # ปัญหา (เจอ 2026-08-12 ตอนเพิ่ม US500m): MT5 ตัดแท่ง 4H ตามเวลาเซิร์ฟเวอร์โบรก แต่ TradingView
 # ตัดตาม session ของ feed ที่เลือก — ขอบแท่งคนละจุด => OHLC ทุกแท่งต่างกัน => TR/DM ต่างกัน =>
@@ -75,31 +76,20 @@ ADX_REVERSAL     = 40     # peak ต้อง >= 40 ถึงเข้าเก�
 # ค่าอยู่ลึกในเขตเดียวกันหมดเลยยังไม่เห็นผล — แต่เป็นปัญหาแฝงของทุก symbol วันไหนค่าเข้าใกล้
 # เส้น 20 หรือ 22 ก็เจอทันที
 #
-# ค่าใน dict = จำนวนชั่วโมงที่ต้องเลื่อนขอบแท่ง 4H จากของ MT5 เพื่อให้ตรงกับ TradingView
-# (0 = ใช้แท่ง 4H ของ MT5 ตรงๆ ไม่ต้องรวมใหม่) — ผู้ใช้ไล่เทียบกับจอ TradingView เองทีละตัว
-# เมื่อ 2026-08-12 ไม่ได้มาจาก backtest
+# 2026-08-18: **ขยายขอบเขตจาก "เฉพาะ ADX" เป็น "ทุกอย่างที่แตะแท่ง 4H"** ตามคำสั่งผู้ใช้ —
+# เดิมจำกัดไว้แค่ ADX/regime เพราะ vol/wick ที่ tune ไว้ผูกกับแท่ง MT5 ดิบ ตอนนี้ dict นี้ย้าย
+# ไปอยู่ที่ bars.BAR_OFFSET_H และ scoring.get_ohlcv() route แท่ง 4H ทั้งหมดผ่าน bars.py แล้ว
+# (ดู bars.py docstring เต็ม) แปลว่า swing/SL/TP/structure break/key level/divergence ของ
+# symbol ที่ offset != 0 เปลี่ยนไปด้วย — vol_multiplier/wick_ratio_min ที่เคย tune ไว้ก่อนหน้า
+# (XAU/ETH/USDJPY/US500/GBP) ควรเช็คตาราง swing ซ้ำด้วย inspect_swings.py
 #
-# 🔴 เพิ่ม symbol ใหม่ต้องมาเช็คตรงนี้ทุกครั้ง: เปิดกราฟ 4H ของ symbol นั้นบน TradingView
-#    ตั้ง ADX เป็น 20/20 แล้วเทียบค่ากับที่ระบบคำนวณ ลอง offset 0-3 หาว่าอันไหนตรงที่สุด
+# 🔴 เพิ่ม symbol ใหม่ต้องมาเช็คตรงนี้ทุกครั้ง: เปิดกราฟ 4H บน TradingView ตั้ง ADX เป็น 20/20
+#    เทียบกับที่ระบบคำนวณ ลอง offset 0-3 หาว่าอันไหนตรงที่สุด (แก้ที่ bars.BAR_OFFSET_H)
 #    symbol ที่ไม่มีในนี้จะ default = 0 (ใช้แท่ง MT5 ตรงๆ) ซึ่งอาจไม่ตรงกับ TradingView
 #
 # หมายเหตุข้อจำกัด: ต่อให้ offset ตรงแล้วค่าก็ยังไม่เท่า TradingView เป๊ะ 100% เพราะ feed ราคา
 # คนละเจ้ากัน (Exness vs feed ที่ TradingView ใช้) เช่น US500m offset=2 ได้ 25.93 แต่จอได้
 # 25.44 — alignment อธิบายช่องว่างได้ ~90% ที่เหลือแก้ไม่ได้เพราะไม่มีข้อมูลของเขา
-#
-# ขอบเขตที่แก้: เฉพาะ ADX/regime เท่านั้น — swing/SL/TP/Key Level/Divergence ยังใช้แท่ง 4H
-# ของ MT5 ตามเดิม (ค่า wick/vol ที่ tune ไว้ผูกกับแท่งชุดนั้น ถ้าเปลี่ยนด้วยต้อง sweep ใหม่หมด)
-ADX_BAR_OFFSET_H = {
-    "BTCUSDm": 0,
-    "XAUUSDm": 1,
-    "ETHUSDm": 2,
-    "XRPUSDm": 0,
-    "USDJPYm": 1,
-    "US500m":  2,
-    "EURUSDm": 0,   # 2026-08-17: ผู้ใช้เทียบกับ TradingView แล้ว — ทั้งคู่ยังอยู่ในเขต TREND
-    "GBPUSDm": 2,   # ไม่ว่า offset ไหน (ไม่คร่อมเส้น ADX_GRAY_HIGH เหมือน US500m) ยังตั้งตาม
-                    # ที่เทียบมาให้ตรงเผื่อวันหน้า ADX ขยับมาใกล้เขตเทา
-}
 
 # ค่าเดิมจาก backtest 400 แท่ง 1D (BTC/XAU): 5 แท่งนิ่งกว่า 3 แท่งชัดเจน (ทิศสลับ ~52 vs
 # ~76 ครั้ง) — แต่ backtest นั้นทำบน 1D ทั้งที่ตัวจริงรันบน 4H (คนละ scale เวลา) เลยรัน
@@ -178,26 +168,13 @@ GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
 
 
 def get_adx_bars(symbol: str, bars: int = BARS) -> pd.DataFrame:
-    """ดึงแท่ง 4H สำหรับคำนวณ ADX โดยเลื่อนขอบแท่งตาม ADX_BAR_OFFSET_H ให้ตรงกับ TradingView
-    (ดูคำอธิบายเต็มที่ ADX_BAR_OFFSET_H ด้านบน) — offset=0 ใช้แท่ง 4H ของ MT5 ตรงๆ เหมือนเดิม
-    ทุกประการ ไม่มี resample มาเกี่ยวเลย, offset!=0 ดึง 1H มารวมเป็น 4H เองด้วย offset นั้น
+    """ดึงแท่ง 4H สำหรับคำนวณ ADX โดยเลื่อนขอบแท่งตาม bars.BAR_OFFSET_H ให้ตรงกับ TradingView
+    (ดูคำอธิบายเต็มที่ bars.py) — คืน DataFrame คอลัมน์เดียวกับ get_ohlcv ใช้กับ calc_adx ได้ตรงๆ
 
-    คืน DataFrame ที่มีคอลัมน์เดียวกับ get_ohlcv (time/open/high/low/close/tick_volume)
-    ใช้กับ calc_adx ได้ตรงๆ (calc_adx แตะแค่ high/low/close ไม่พึ่ง volume)"""
-    offset = ADX_BAR_OFFSET_H.get(symbol, 0)
-    if offset == 0:
-        return get_ohlcv(symbol, REGIME_TIMEFRAME, bars=bars)
-
-    # เผื่อแท่ง 1H ให้พอ: 4 แท่ง/1 แท่ง 4H + เผื่อ gap ช่วงตลาดปิด (index/forex ไม่ได้เทรด 24/7)
-    # และเผื่อแท่งหัว-ท้ายที่ resample แล้วไม่เต็ม 4 ชม.
-    h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=bars * 4 + 50)
-    g = (h1.set_index("time")
-           .resample("4h", offset=f"{offset}h")
-           .agg({"open": "first", "high": "max", "low": "min",
-                 "close": "last", "tick_volume": "sum"})
-           .dropna()
-           .reset_index())
-    return g.iloc[-bars:].reset_index(drop=True)
+    2026-08-18: get_ohlcv() เองก็ apply offset นี้ให้ทุก timeframe="4H" อยู่แล้ว (ดู scoring.py)
+    ฟังก์ชันนี้เลยเหลือแค่ wrapper บาง ๆ ไว้เผื่อโค้ดเก่าที่เรียกชื่อนี้อยู่ ไม่ต้องมี logic
+    resample ซ้ำสองที่แล้ว"""
+    return get_ohlcv(symbol, REGIME_TIMEFRAME, bars=bars)
 
 # ---------------------------------------------------------------------------
 # ข้อ 2 — ทิศของเส้น ADX (ขึ้น/ทรง/ลง เทียบ ADX_DIR_BARS แท่งล่าสุด)

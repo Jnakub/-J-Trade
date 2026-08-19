@@ -23,6 +23,7 @@ from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirm
                    calc_di)
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
+from bars import BAR_OFFSET_H, get_aligned_4h
 
 # k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
 # <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
@@ -69,7 +70,15 @@ TREND_FLIP_K = {
 def get_ohlcv(symbol: str, timeframe, bars: int = 100, as_of: datetime = None) -> pd.DataFrame:
     """as_of=None (ปกติ) = ดึง bars ล่าสุดจากปัจจุบัน — as_of=datetime = ดึง bars ที่ปิดก่อน
     เวลานั้น (ใช้ backtest_score.py จำลอง compute_score ณ เวลาในอดีตแบบเป๊ะ ไม่ต้อง copy
-    logic มาเขียนซ้ำ)"""
+    logic มาเขียนซ้ำ)
+
+    2026-08-18: timeframe 4H ของ symbol ที่มี bars.BAR_OFFSET_H != 0 จะถูกเลื่อนขอบแท่งให้ตรงกับ
+    TradingView แทนแท่ง MT5 ดิบ (ดู bars.py) — จุดเดียวนี้ครอบคลุมทุกที่ที่เรียก get_ohlcv/
+    get_ohlcv_real ด้วย "4H" ทั้งระบบ (compute_score, structure break, key level, divergence,
+    ATR trailing anchor ฯลฯ) ไม่ต้องแก้ทีละจุด — timeframe อื่น (1D/1H) ไม่กระทบเลย"""
+    if timeframe == MT5_TIMEFRAMES["4H"] and BAR_OFFSET_H.get(symbol, 0) != 0:
+        return get_aligned_4h(symbol, bars, as_of)
+
     if as_of is None:
         rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
     else:

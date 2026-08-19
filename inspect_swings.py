@@ -20,6 +20,7 @@ from config import MT5_TIMEFRAMES
 from mt5_connect import connect
 from swing import (swing_vol_multiplier, swing_wick_ratio_min, find_swing_highs,
                     find_swing_lows, collapse_swing_runs, _wick_ratio)
+from bars import BAR_OFFSET_H, get_aligned_4h
 
 STRUCT_LEFT_RIGHT = 4
 STRUCT_TOLERANCE_ATR = 0.22
@@ -27,6 +28,13 @@ VOL_LOOKBACK = 5
 
 
 def get_hist(symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
+    # 2026-08-18: แท่ง 4H ต้องผ่าน bars.get_aligned_4h เหมือนที่ scoring.get_ohlcv() ใช้จริง
+    # ไม่งั้นตารางที่โชว์ที่นี่จะไม่ตรงกับแท่งที่ระบบใช้จริงสำหรับ symbol ที่มี offset != 0
+    # (XAU/ETH/USDJPY/US500/GBP ณ ตอนที่เขียน) — timeframe อื่น (1D/1H) ไม่มี offset ยังใช้
+    # mt5.copy_rates_from_pos ตรงๆ เหมือนเดิม
+    if timeframe == "4H" and BAR_OFFSET_H.get(symbol, 0) != 0:
+        return get_aligned_4h(symbol, bars)
+
     rates = mt5.copy_rates_from_pos(symbol, MT5_TIMEFRAMES[timeframe], 0, bars)
     if rates is None or len(rates) == 0:
         raise RuntimeError(f"ดึงข้อมูล {symbol} {timeframe} ไม่ได้ (เช็คว่าเปิด MT5 terminal "
