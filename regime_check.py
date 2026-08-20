@@ -41,7 +41,7 @@ from config import MT5_TIMEFRAMES, SYMBOLS
 from mt5_connect import connect
 from scoring import get_ohlcv, get_ohlcv_real
 from swing import find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
-from indicators import calc_adx
+from indicators import calc_adx, calc_rsi as _calc_rsi
 from bars import BAR_OFFSET_H as ADX_BAR_OFFSET_H, get_aligned_4h
 
 REGIME_TIMEFRAME = MT5_TIMEFRAMES["4H"]
@@ -360,14 +360,9 @@ def check_key_level(symbol: str, current_price: float, df: pd.DataFrame = None,
     }
 
 
+# calc_rsi ย้ายไป indicators.py แล้ว (2026-08-19) — ดู comment ที่ exit_monitor.calc_rsi
 def calc_rsi(series: pd.Series, period: int = DIV_RSI_PERIOD) -> pd.Series:
-    delta = series.diff()
-    gain  = delta.clip(lower=0)
-    loss  = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, 1e-12)
-    return 100 - (100 / (1 + rs))
+    return _calc_rsi(series, period)
 
 
 def _find_spacing_partner(points: list[int]) -> int | None:

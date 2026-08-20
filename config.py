@@ -214,9 +214,21 @@ MIN_SCORE       = 7.0     # คะแนนขั้นต่ำจาก TOTAL_
 # — Reversal path (is_climax_bar) ไม่กระทบจากการตัดนี้เลย
 # 2026-08-01: check_vsa/check_vsa_trend ใน vsa.py ถูกลบทิ้งแล้ว (ไม่มีใครเรียกใช้อีก) —
 # ตอนนี้ Scoring ไม่แตะ VSA เลย
+# 2026-08-19: ช่อง 4H เปลี่ยนจาก Trend 4H (close vs EMA50) -> RSI 4H (RSI(14,RMA) vs 50)
+# ตามคำสั่งผู้ใช้ — น้ำหนักเท่าเดิม 1.0 TOTAL_WEIGHT/MIN_SCORE ไม่เปลี่ยน (แทนที่ ไม่ใช่เพิ่ม)
+#
+# ข้อมูลที่วัดก่อนตัดสินใจ (3000 แท่ง 4H, 6 symbol — BTC/XAU/USDJPY/EUR/GBP/US500):
+#   redundancy: RSI>50 กับ Trend 4H เห็นตรงกัน 89-92% (baseline ถ้าอิสระกัน ~50-54%)
+#     => สองตัวนี้แทบเป็นสัญญาณเดียวกัน การสลับจึงเปลี่ยนผลจริงแค่ ~10% ของเวลา
+#   predictive power (ทายทิศราคา 6 แท่งข้างหน้าถูกกี่ %):
+#     Trend 4H เฉลี่ย 48.69%  |  RSI>50 เฉลี่ย 49.39%  (RSI ชนะ 5/6 symbol แต่ BTC แพ้)
+#     => RSI ดีกว่าเล็กน้อย แต่ทั้งคู่ต่ำกว่า 50% (แย่กว่าโยนเหรียญ) เมื่อใช้เดี่ยวๆ ส่วนต่าง
+#        0.7% เล็กพอที่จะเป็น noise ได้ — ยังไม่ได้ backtest เต็มรูปแบบ (TotalR/win rate ผ่าน
+#        scorecard จริง) ว่าการสลับนี้ทำให้ผลเทรดดีขึ้นจริงไหม เปลี่ยนตามการตัดสินใจของผู้ใช้
+#        ควรเฝ้าดูผลเทรดจริงและพร้อมสลับกลับถ้าแย่ลง
 WEIGHT_TREND_1D      = 2.0
 WEIGHT_OBV_1D        = 1.0
-WEIGHT_TREND_4H      = 1.0
+WEIGHT_RSI_4H        = 1.0   # เดิมคือ WEIGHT_TREND_4H (close vs EMA50) — ดู comment ด้านบน
 WEIGHT_OBV_4H        = 1.0
 WEIGHT_TREND_1H      = 1.0
 WEIGHT_DI_1H         = 1.0
@@ -225,11 +237,14 @@ WEIGHT_RR            = 1.0
 
 TOTAL_WEIGHT = (
     WEIGHT_TREND_1D + WEIGHT_OBV_1D +
-    WEIGHT_TREND_4H + WEIGHT_OBV_4H +
+    WEIGHT_RSI_4H + WEIGHT_OBV_4H +
     WEIGHT_TREND_1H + WEIGHT_DI_1H +
     WEIGHT_MACD +
     WEIGHT_RR
 )
+
+RSI_SCORE_PERIOD = 14   # period ของ RSI ที่ใช้ในสกอร์การ์ด (Wilder RMA — ดู indicators.calc_rsi)
+RSI_SCORE_MID    = 50   # เส้นกลาง: Long ต้อง RSI > ค่านี้, Short ต้อง RSI < ค่านี้
 
 # ---------------------------------------------------------------------------
 # Symbols ที่ trade

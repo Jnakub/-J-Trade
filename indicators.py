@@ -1,10 +1,27 @@
 """
-indicators.py — ATR/DI/ADX ที่ swing.py, regime_check.py และ backtest_exit_compare.py
-ใช้ร่วมกัน แยกมาไว้ที่นี่เพราะ regime_check.py import จาก scoring.py/swing.py อยู่แล้ว ทำให้
-swing.py import กลับจาก regime_check.py ไม่ได้ (circular) — ไฟล์นี้ไม่ import โมดูลอื่นใน
-โปรเจกต์เลย (มีแค่ pandas) เพื่อให้ทุกไฟล์ import ได้อิสระโดยไม่ชนกัน
+indicators.py — ATR/DI/ADX/RSI ที่ swing.py, scoring.py, regime_check.py, exit_monitor.py และ
+backtest_exit_compare.py ใช้ร่วมกัน แยกมาไว้ที่นี่เพราะ regime_check.py/exit_monitor.py import
+จาก scoring.py/swing.py อยู่แล้ว ทำให้ import กลับไม่ได้ (circular) — ไฟล์นี้ไม่ import โมดูลอื่น
+ในโปรเจกต์เลย (มีแค่ pandas) เพื่อให้ทุกไฟล์ import ได้อิสระโดยไม่ชนกัน
 """
 import pandas as pd
+
+
+def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    """RSI (Wilder) — ใช้ RMA (alpha=1/period) ตามสูตรดั้งเดิมของ Wilder ตรงกับ default ของ
+    TradingView (ไม่ใช่ SMA/EMA มาตรฐาน)
+
+    2026-08-19: ย้ายมาไว้ที่นี่ตอนที่ scoring.py ต้องใช้ RSI ด้วย — เดิมมีสำเนาเหมือนกันเป๊ะ
+    อยู่ 2 ที่ (exit_monitor.py, regime_check.py) scoring.py import จากทั้งสองไฟล์นั้นไม่ได้
+    (circular: ทั้งคู่ import จาก scoring.py อยู่แล้ว) ถ้าไม่ย้ายจะกลายเป็นสำเนาที่ 3 —
+    เหมือนเคสที่ calc_atr/calc_di/calc_adx เคยถูกย้ายมาที่นี่ด้วยเหตุผลเดียวกัน"""
+    delta = series.diff()
+    gain  = delta.clip(lower=0)
+    loss  = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, 1e-12)
+    return 100 - (100 / (1 + rs))
 
 
 def calc_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:

@@ -27,6 +27,7 @@ from config import MT5_TIMEFRAMES
 from mt5_connect import connect, get_tick_or_raise, is_demo_account
 from scoring import get_ohlcv, get_ohlcv_real, ema
 from swing import calc_atr, find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
+from indicators import calc_rsi as _calc_rsi
 from vsa import _volume_class, _spread_class, _close_position, _price_position, detect_vsa_pattern
 from order import close_order, partial_close_order, modify_sltp, clamp_lot
 import journal
@@ -122,14 +123,10 @@ def _b(s): return f"{BOLD}{s}{RESET}"
 # Indicators (RSI, Bollinger Bands) — ATR ใช้ swing.calc_atr ที่มีอยู่แล้ว
 # ---------------------------------------------------------------------------
 
+# calc_rsi ย้ายไป indicators.py แล้ว (2026-08-19) — เดิมเป็นสำเนาเหมือนกันเป๊ะกับใน
+# regime_check.py พอ scoring.py ต้องใช้ด้วยเลยย้ายไปไว้ที่เดียว (ดู indicators.py)
 def calc_rsi(series: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
-    delta = series.diff()
-    gain  = delta.clip(lower=0)
-    loss  = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, 1e-12)
-    return 100 - (100 / (1 + rs))
+    return _calc_rsi(series, period)
 
 
 def calc_bollinger(series: pd.Series, period: int = BB_PERIOD, std_mult: float = BB_STD):
