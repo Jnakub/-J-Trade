@@ -9,6 +9,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from config import RISK_PER_TRADE
 from mt5_connect import connect, get_account_balance, get_tick_or_raise, get_position_or_raise, is_demo_account
+import journal
 import notify
 
 MAGIC_NUMBER = 234000
@@ -259,7 +260,13 @@ def partial_close_order(ticket: int, close_volume: float, comment: str = "partia
     print(f"  Volume ปิด  : {close_volume}  (เหลือ {pos.volume - close_volume})")
     print(f"  Close Price : {result.price}")
 
-    keep_pct = round((pos.volume - close_volume) / pos.volume * 100, 1)
+    # 2026-08-20: เดิมคิด % จาก pos.volume (lot ก่อนปิดรอบนี้) ทำให้ % ที่ Telegram โชว์ไม่ตรงกับ
+    # % ที่ exit_monitor ใช้ตัดสินใจจริง (ซึ่งอิงจาก original_lot เสมอ — ดู exit_monitor.py
+    # execute_decision) เช่น lot เดิม 0.3 -> ปิดเหลือ 0.22 -> ปิดอีก 0.07 เหลือ 0.15 (ถูกต้องคือ
+    # 50% ของ 0.3) แต่ของเดิมคำนวณ (0.22-0.07)/0.22=68.2% ทำให้ดูเหมือนเหลือเยอะกว่าจริง
+    original_lot = journal.get_original_lot(ticket)
+    lot_basis    = original_lot if original_lot is not None else pos.volume
+    keep_pct = round((pos.volume - close_volume) / lot_basis * 100, 1)
     notify.notify_partial_close(symbol, ticket, close_volume, keep_pct, is_demo=is_demo_account())
 
 

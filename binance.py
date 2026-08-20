@@ -1,6 +1,8 @@
 import requests
 import pandas as pd
 
+from bars import BAR_OFFSET_H
+
 BITSTAMP_URL = "https://www.bitstamp.net/api/v2/ohlc/{pair}/"
 
 # MT5 symbols → Bitstamp pairs (crypto)
@@ -33,23 +35,66 @@ YFINANCE_INTERVAL_MAP = {
 # Bitstamp — สำหรับ Crypto (BTC, ETH, XRP)
 # ---------------------------------------------------------------------------
 
+def _fetch_bitstamp_ohlc_paged(pair: str, step: int, need: int) -> pd.DataFrame:
+    """ดึงแท่งดิบจาก Bitstamp ให้ครบ `need` แท่ง โดย page ย้อนหลังด้วย `end`
+    (Bitstamp limit สูงสุด 1000 แท่ง/request) — ใช้ตอนต้อง resample เอง (4H offset != 0)
+    ที่ต้องใช้แท่ง 1H จำนวนมากกว่า limit เดียวรองรับไหว"""
+    url    = BITSTAMP_URL.format(pair=pair)
+    frames = []
+    end_ts = None
+    remaining = need
+    while remaining > 0:
+        limit  = min(remaining, 1000)
+        params = {"step": step, "limit": limit}
+        if end_ts is not None:
+            params["end"] = end_ts
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json().get("data", {}).get("ohlc", [])
+        if not data:
+            break
+        frames.append(pd.DataFrame(data))
+        oldest_ts = int(data[0]["timestamp"])
+        end_ts    = oldest_ts - 1
+        remaining -= len(data)
+        if len(data) < limit:   # ไม่มีข้อมูลเก่ากว่านี้แล้ว
+            break
+
+    if not frames:
+        raise RuntimeError("Bitstamp ไม่มีข้อมูล")
+
+    df = pd.concat(frames, ignore_index=True)
+    df = df.drop_duplicates(subset="timestamp").sort_values("timestamp").reset_index(drop=True)
+    return df
+
+
 def fetch_bitstamp_volume(mt5_symbol: str, timeframe: str = "1D",
-                          bars: int = 210) -> pd.DataFrame:
-    """ดึง Volume จริงจาก Bitstamp — คืน DataFrame [date, volume]"""
+                          bars: int = 210, offset_h: int = 0) -> pd.DataFrame:
+    """ดึง Volume จริงจาก Bitstamp — คืน DataFrame [date, volume] (1D) หรือ [time, volume] (อื่นๆ)
+
+    offset_h != 0 (เฉพาะ timeframe="4H"): symbol นี้ใน bars.BAR_OFFSET_H เลื่อนขอบแท่ง 4H จาก
+    MT5 ไปแล้ว (ประกอบจากแท่ง 1H ด้วย resample("4h", offset=f"{offset_h}h") — ดู bars.py) ถ้ายัง
+    ขอ Bitstamp step=14400 แบบเดิม (ขอบเวลายึด UTC เป๊ะ 00/04/08...) จะไม่มีวันตรงกับขอบแท่งที่
+    เลื่อนแล้วเลยสักแท่ง (merge ได้ 0/N ทุกครั้ง) ต้องดึง Bitstamp เป็นแท่ง 1H แล้ว resample ด้วย
+    offset เดียวกันก่อน ให้ขอบแท่งทั้งสองฝั่งตรงกัน"""
     pair = BITSTAMP_MAP.get(mt5_symbol)
     if pair is None:
         raise ValueError(f"ไม่มี symbol '{mt5_symbol}' ใน Bitstamp")
 
+    if timeframe == "4H" and offset_h:
+        h1_need = bars * 4 + 40   # เผื่อ headroom สำหรับ resample ตัดแท่งขอบ
+        raw = _fetch_bitstamp_ohlc_paged(pair, STEP_MAP["1H"], h1_need)
+        raw["time"]   = pd.to_datetime(raw["timestamp"].astype(int), unit="s", utc=True)
+        raw["volume"] = raw["volume"].astype(float)
+        g = (raw.set_index("time")["volume"]
+                .resample("4h", offset=f"{offset_h}h")
+                .sum()
+                .reset_index())
+        return g.tail(bars).reset_index(drop=True)
+
     step   = STEP_MAP.get(timeframe, 86400)
-    url    = BITSTAMP_URL.format(pair=pair)
-    resp   = requests.get(url, params={"step": step, "limit": bars}, timeout=10)
-    resp.raise_for_status()
+    df = _fetch_bitstamp_ohlc_paged(pair, step, bars)
 
-    data = resp.json().get("data", {}).get("ohlc", [])
-    if not data:
-        raise RuntimeError(f"Bitstamp ไม่มีข้อมูล {mt5_symbol}")
-
-    df = pd.DataFrame(data)
     df["time"]   = pd.to_datetime(df["timestamp"].astype(int), unit="s", utc=True)
     df["date"]   = df["time"].dt.date
     df["volume"] = df["volume"].astype(float)
@@ -127,7 +172,9 @@ def merge_real_volume(df_mt5: pd.DataFrame, mt5_symbol: str,
 
     try:
         if mt5_symbol in BITSTAMP_MAP:
-            df_vol = fetch_bitstamp_volume(mt5_symbol, timeframe, bars=len(df) + 10)
+            offset_h = BAR_OFFSET_H.get(mt5_symbol, 0) if timeframe == "4H" else 0
+            df_vol = fetch_bitstamp_volume(mt5_symbol, timeframe, bars=len(df) + 10,
+                                           offset_h=offset_h)
             source = "Bitstamp"
         elif mt5_symbol in YFINANCE_MAP:
             df_vol = fetch_comex_volume(mt5_symbol, timeframe, bars=len(df) + 10)

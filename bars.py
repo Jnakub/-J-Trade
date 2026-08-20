@@ -60,10 +60,13 @@ from config import MT5_TIMEFRAMES
 #   EURUSDm  0 -> 3   (สลับกับ US500m พอดี — รวม 3.94 ที่ offset=0(เดิม) -> offset=3 รวม 3.08 ดีกว่า)
 #   BTCUSDm=3, XAUUSDm=2, USDJPYm=1, GBPUSDm=1 ยืนยันว่ายัง optimal เหมือนเดิมด้วยสูตรใหม่
 # ETHUSDm/XRPUSDm ยังไม่มีเป้า ATR/ADX จริงจาก TradingView ให้เทียบ — คงค่าเดิมไว้ก่อน
+#
+# 2026-08-20: BTCUSDm/ETHUSDm ตั้งกลับเป็น 0 ตามคำสั่งผู้ใช้ (ใช้แท่ง MT5 ดิบ ไม่ resample)
+# — ยังไม่ได้เทียบ ATR/ADX กับ TradingView ยืนยัน แค่ override ตามที่ขอ
 BAR_OFFSET_H = {
-    "BTCUSDm": 3,
+    "BTCUSDm": 0,
     "XAUUSDm": 2,
-    "ETHUSDm": 2,
+    "ETHUSDm": 0,
     "XRPUSDm": 0,
     "USDJPYm": 1,
     "US500m":  0,

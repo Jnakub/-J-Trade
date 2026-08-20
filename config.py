@@ -244,7 +244,10 @@ TOTAL_WEIGHT = (
 )
 
 RSI_SCORE_PERIOD = 14   # period ของ RSI ที่ใช้ในสกอร์การ์ด (Wilder RMA — ดู indicators.calc_rsi)
-RSI_SCORE_MID    = 50   # เส้นกลาง: Long ต้อง RSI > ค่านี้, Short ต้อง RSI < ค่านี้
+RSI_SCORE_MID    = 50   # เส้นกลาง: Long ต้อง RSI > (MID + BUFFER), Short ต้อง RSI < (MID - BUFFER)
+# 2026-08-20: เพิ่ม buffer zone รอบเส้น 50 — กัน noise ตอน RSI แกว่งใกล้เส้นกลางในตลาด sideway
+# ไม่งั้นคะแนนช่องนี้จะ flip ไป-มาบ่อยตอนราคาแกว่งรอบ 50 พอดี ทั้งที่ทิศทางจริงยังไม่ชัด
+RSI_SCORE_BUFFER = 5    # โซนกลาง 45-55 = ไม่ได้คะแนนทั้งสองฝั่ง (ต้อง backtest หาค่าที่เหมาะสม)
 
 # ---------------------------------------------------------------------------
 # Symbols ที่ trade

@@ -11,7 +11,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from config import (
     WEIGHT_TREND_1D, WEIGHT_OBV_1D,
-    WEIGHT_RSI_4H, WEIGHT_OBV_4H,
+    WEIGHT_RSI_4H, WEIGHT_OBV_4H, RSI_SCORE_BUFFER,
     WEIGHT_TREND_1H, WEIGHT_DI_1H,
     WEIGHT_MACD, WEIGHT_RR,
     RSI_SCORE_PERIOD, RSI_SCORE_MID,
@@ -287,8 +287,9 @@ def compute_score(symbol: str, direction: str, entry: float,
         ("OBV 1D",       obv_rising(obv_1d),                                    WEIGHT_OBV_1D),
         # 2026-08-19: ช่องนี้เดิมคือ Trend 4H (close vs EMA50) เปลี่ยนเป็น RSI 4H ตามคำสั่งผู้ใช้
         # (ดูตัวเลข redundancy/predictive power ที่วัดไว้ใน config.py เหนือ WEIGHT_RSI_4H)
-        ("RSI 4H",       (rsi_4h.iloc[-1] > RSI_SCORE_MID) if is_long
-                         else (rsi_4h.iloc[-1] < RSI_SCORE_MID),                WEIGHT_RSI_4H),
+        # 2026-08-20: เพิ่ม buffer zone (RSI_SCORE_BUFFER) รอบเส้น 50 กัน noise ตอนแกว่งใกล้กลาง
+        ("RSI 4H",       (rsi_4h.iloc[-1] > RSI_SCORE_MID + RSI_SCORE_BUFFER) if is_long
+                         else (rsi_4h.iloc[-1] < RSI_SCORE_MID - RSI_SCORE_BUFFER),  WEIGHT_RSI_4H),
         ("OBV 4H",       obv_rising(obv_4h),                                    WEIGHT_OBV_4H),
         ("Trend 1H",     (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
         ("DI 1H",        di_1h_ok,                                              WEIGHT_DI_1H),
