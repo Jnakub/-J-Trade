@@ -125,12 +125,14 @@ KEY_LEVEL_MIN_TOUCHES  = 2      # ต้องโดนแตะอย่าง�
 # swing สำหรับ divergence "ปิด volume filter" — จากทดสอบ ถ้ากรอง volume XAU ตรวจไม่เจอเลย (0%)
 # เพราะ divergence ดูรูปร่างราคา vs โมเมนตัม ไม่เกี่ยวกับแรง volume ยืนยัน
 # DIV_MAX_AGE: swing จุดใหม่ต้องเพิ่งยืนยันภายใน N แท่ง — ตัด divergence ค้างเก่า
-# (backtest: ไม่จำกัดเจอ 39-46% ของเวลา = ไร้ความหมาย, จำกัด 10 แท่งเหลือ 14-18% = เลือกสรรจริง)
+# (backtest ที่ 10 แท่ง: ไม่จำกัดเจอ 39-46% ของเวลา = ไร้ความหมาย, จำกัด 10 แท่งเหลือ 14-18% =
+# เลือกสรรจริง — 2026-08-20: ปรับเป็น 14 ตามคำสั่งผู้ใช้ ยังไม่มี backtest ยืนยันค่าใหม่นี้
+# โดยเฉพาะ ควรเฝ้าดูผลจริง/รัน backtest ซ้ำถ้ามีเวลา)
 # DIV_ZONE: จุดแรกของ swing ต้องเคยอยู่ในโซน overbought/oversold มาก่อน (นิยาม divergence คลาสสิก)
 # backtest 800 แท่ง (BTC/XAU): เพิ่ม zone req -> ความแม่นขึ้นจาก 77/88% เป็น 82/93%
 # (สัญญาณลดจาก 13/16 เหลือ 11/14 ครั้ง — ยังพอมี sample ไม่เสี่ยง overfit เท่า min_diff)
 DIV_RSI_PERIOD   = 14
-DIV_MAX_AGE_BARS = 10
+DIV_MAX_AGE_BARS = 14
 DIV_ZONE_OVERBOUGHT = 55
 DIV_ZONE_OVERSOLD   = 45
 
