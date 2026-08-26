@@ -245,7 +245,7 @@ def compute_score(symbol: str, direction: str, entry: float,
                   df_1d: pd.DataFrame = None) -> tuple[float, list, bool, dict]:
     """Return (total_score, criteria_list, passed, sl_info).
     ถ้าไม่ส่ง sl จะหาจาก swing structure อัตโนมัติ
-    ถ้าไม่ส่ง tp จะคำนวณจาก SL × MIN_RR อัตโนมัติ
+    ถ้าไม่ส่ง tp จะหาจาก Fibonacci อัตโนมัติ (หาไม่ได้ถึงตกไปใช้ SL × MIN_RR_HARD_BLOCK)
 
     as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ (ราคาจาก live tick, bars ล่าสุด)
     as_of=datetime    = จำลองเช็ค ณ เวลานั้นในอดีต (ราคา = close 1H ล่าสุดก่อนเวลานั้น,
@@ -308,8 +308,16 @@ def compute_score(symbol: str, direction: str, entry: float,
         if fib_info.get("passed"):
             tp = fib_info["tp"]   # อัตราส่วนมาจาก config.TP_FIB_RATIO (ดูที่มา/เหตุผลที่นั่น)
         else:
+            # 2026-08-26: อิง MIN_RR_HARD_BLOCK ไม่ใช่ MIN_RR — เดิมสองค่านี้เท่ากัน (1.5) จึงไม่
+            # ต่างกัน แต่ตอนที่ MIN_RR ถูกขึ้นเป็น 2.0 เพื่อให้เกณฑ์ R:R ในสกอร์การ์ดกรองได้จริง
+            # (ดู config.MIN_RR) สูตรนี้พลอยยืด TP ของไม้ fallback ตามไปด้วยทั้งที่ไม่ได้ตั้งใจ
+            # — แยกให้ขาดกัน: MIN_RR = "เกณฑ์ให้คะแนน", MIN_RR_HARD_BLOCK = "ขั้นต่ำที่ยอมเทรด"
+            # ซึ่งเป็นความหมายที่ตรงกับ TP ขั้นต่ำที่ยอมรับได้มากกว่า (ไม้ fallback ไม่ได้แต้ม R:R
+            # อยู่แล้วเพราะ used_fallback_tp — ค่านี้จึงไม่กระทบคะแนน กระทบแค่ TP จริง)
             used_fallback_tp = True
-            tp = (entry + abs(entry - sl) * MIN_RR) if is_long else (entry - abs(entry - sl) * MIN_RR)
+            fallback_rr = MIN_RR_HARD_BLOCK
+            tp = (entry + abs(entry - sl) * fallback_rr) if is_long else \
+                 (entry - abs(entry - sl) * fallback_rr)
 
     # Confirmation — ราคาทะลุ Swing Low/High บน 4H
     # 2026-07-26: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
@@ -346,9 +354,12 @@ def compute_score(symbol: str, direction: str, entry: float,
         ("DI 1H",        di_1h_ok,                                              WEIGHT_DI_1H),
         ("MACD 4H",      macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
         # 2026-07-26: ถ้า TP มาจากสูตร fallback (Fibonacci หาไม่ได้) จะไม่ให้แต้มนี้ —
-        # สูตร fallback คำนวณ TP จาก MIN_RR เอง ทำให้ R:R ออกมาเท่ากับ MIN_RR พอดีเสมอ
-        # เกณฑ์ rr >= MIN_RR จึงผ่าน 100% โดยอัตโนมัติ = แต้มฟรีที่ไม่ได้กรองอะไรจริง
-        # (เช็คตัวเองกับตัวเอง) ต้องมี TP เชิงโครงสร้างจาก Fibonacci ถึงจะนับว่า "R:R ดีจริง"
+        # ตอนนั้นสูตร fallback อิง MIN_RR ทำให้ R:R ออกมาเท่ากับ MIN_RR พอดีเสมอ เกณฑ์
+        # rr >= MIN_RR จึงผ่าน 100% โดยอัตโนมัติ = แต้มฟรี (เช็คตัวเองกับตัวเอง)
+        # 2026-08-26: fallback ย้ายไปอิง MIN_RR_HARD_BLOCK (1.5) ซึ่งต่ำกว่า MIN_RR (2.0) แล้ว
+        # ไม้ fallback จึงตกเกณฑ์ rr >= MIN_RR ด้วยตัวเลขเองอยู่แล้ว — คงเงื่อนไขนี้ไว้เป็นเกราะ
+        # กันกรณีที่ใครตั้งสองค่าให้เท่ากันอีกในอนาคต (และเพื่อรักษาเจตนาเดิม: ต้องมี TP เชิง
+        # โครงสร้างจาก Fibonacci ถึงจะนับว่า "R:R ดีจริง")
         # ผลกระทบ ณ วันที่แก้ = ศูนย์: backtest 403 วัน Fibonacci สำเร็จ 100% ทั้ง BTC (148/148,
         # real volume) และ XAU (386/386) — fallback ไม่เคยถูกใช้เลย เป็นเกราะกันไว้ล่วงหน้า
         # TP ที่ผู้ใช้กรอกเองมา (tp is not None) ไม่ถือเป็น fallback — ยังได้แต้มตามปกติ
