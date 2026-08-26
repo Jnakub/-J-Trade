@@ -232,7 +232,10 @@ WEIGHT_RSI_4H        = 1.0   # เดิมคือ WEIGHT_TREND_4H (close vs E
 WEIGHT_OBV_4H        = 1.0
 WEIGHT_TREND_1H      = 1.0
 WEIGHT_DI_1H         = 1.0
-WEIGHT_MACD          = 1.0
+WEIGHT_MACD          = 1.0   # 2026-08-26: น้ำหนักเท่าเดิม แต่ "นิยาม" ของช่องนี้เปลี่ยนไปแล้ว —
+                             # จากเดิมตัดสินด้วย Histogram (โมเมนตัมเร่งไหม) เป็นตำแหน่งเทียบเส้น 0
+                             # (MACD+Signal อยู่ฝั่งเดียวกับไม้ไหม) ดูตัวเลข backtest + ข้อจำกัดของ
+                             # หลักฐานที่ scoring.macd_ok_for_direction()
 WEIGHT_RR            = 1.0
 
 TOTAL_WEIGHT = (

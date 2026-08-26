@@ -116,33 +116,36 @@ def calc_macd(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
 
 def macd_ok_for_direction(macd_line: pd.Series, signal_line: pd.Series,
                           histogram: pd.Series, direction: str) -> bool:
-    """
-    Short:
-      เส้น MACD + Signal อยู่ใต้ 0 → ดู Histogram ลดลง (momentum อ่อน) → PASS
-      เส้น MACD + Signal อยู่เหนือ 0 → Histogram < 0 → PASS
+    """PASS เมื่อเส้น MACD และ Signal อยู่ฝั่งเดียวกับไม้ (Long: ทั้งคู่เหนือ 0, Short: ทั้งคู่
+    ใต้ 0) — ไม่ใช้ Histogram ตัดสินเลย (รับ argument ไว้เพื่อความเข้ากันได้ของผู้เรียกเดิม)
 
-    Long:
-      เส้น MACD + Signal อยู่เหนือ 0 → ดู Histogram เพิ่มขึ้น (momentum แรง) → PASS
-      เส้น MACD + Signal อยู่ใต้ 0 → Histogram > 0 → PASS
-    """
-    is_short    = direction.capitalize() == "Short"
-    macd_val    = macd_line.iloc[-1]
-    signal_val  = signal_line.iloc[-1]
-    hist_now    = histogram.iloc[-2]   # แท่งที่ปิดแล้ว
-    hist_prev   = histogram.iloc[-3]   # แท่งก่อนหน้าที่ปิดแล้ว
+    2026-08-26: เปลี่ยนจากนิยามเดิมที่ใช้ตำแหน่งเทียบเส้น 0 แค่ "เลือกสาขา" แล้วตัดสินด้วย
+    Histogram (Long: เหนือ 0 -> ต้อง hist[-2] > hist[-3] / ใต้ 0 -> ต้อง hist[-2] > 0, Short
+    กลับด้าน) — backtest BTCUSDm 730 วัน (backtest_criteria.py, 1250 setup, จำลอง compute_score
+    ทีละแท่ง 4H ด้วย as_of หลังแก้บั๊ก lookahead) พบว่านิยามเดิม **ให้ผลติดลบ** ทั้งสองสาขา:
+      สาขา "MACD อยู่ฝั่ง trend แล้ว" : PASS AvgR -0.23R vs FAIL -0.01R  (n=281/339)
+      สาขา "MACD ยังอยู่ฝั่งตรงข้าม"  : PASS Win 19.1%  vs FAIL 23.0%   (n=299/331)
+    เพราะทั้งสองสาขาถามว่า "โมเมนตัมวิ่งไปทางเดียวกับไม้แล้วหรือยัง" = เข้าไม้หลังการเคลื่อนไหว
+    เริ่มไปแล้ว ขณะที่ระบบวาง TP ไกลถึง Fibonacci 1.618 จึงต้องการ "ระยะที่เหลือ" เป็นหลัก
+
+    ตัวเลขเทียบสองนิยาม (ΔWR = Win Rate ตอน PASS ลบตอน FAIL):
+      เดิม : ชุดเต็ม -2.4  | bootstrap 400 ชุด non-overlap เฉลี่ย -5.9  (เป็นบวก 0% ของชุด)
+      ใหม่ : ชุดเต็ม +8.7  | bootstrap เฉลี่ย +8.7 ช่วง 5-95% = +5.7..+12.3 (เป็นบวก 100%)
+    ผลสุทธิต่อไม้ที่ผ่าน MIN_SCORE: เดิม 443 ไม้ Win 29.8% Total -55.8R -> ใหม่ 457 ไม้
+    Win 33.0% Total -15.1R (ตัวเลข R ยังติดลบเพราะการจำลองปิดที่ SL/TP เป๊ะ ไม่มี trailing/
+    partial ของ exit_monitor.py ใช้เทียบสองนิยามกันเองได้ แต่ไม่ใช่ผลตอบแทนจริงของระบบ)
+
+    ⚠️ ข้อจำกัดของหลักฐาน (ตัดสินใจโดยรู้ตัว): วัดจาก BTCUSDm ช่วงเดียว 2 ปีเท่านั้น ยังไม่ได้
+    ยืนยันกับ ETHUSDm/XAUUSDm และผลเกือบทั้งหมดมาจากฝั่ง Short (Short+MACD ใต้ 0: Win 33.1%
+    AvgR +0.17R n=242 / ฝั่ง Long แทบไม่ต่าง 27.8% vs 25.5%) ซึ่งอาจเป็นลักษณะเฉพาะของช่วงที่
+    BTC ลงแรง — ควรรัน backtest_criteria.py กับ symbol อื่นยืนยัน และเฝ้าดูผลเทรดจริง"""
+    is_short   = direction.capitalize() == "Short"
+    macd_val   = macd_line.iloc[-1]
+    signal_val = signal_line.iloc[-1]
 
     if is_short:
-        both_below_zero = macd_val < 0 and signal_val < 0
-        if both_below_zero:
-            return hist_now < hist_prev   # Histogram ลดลง = momentum อ่อนลง
-        else:
-            return hist_now < 0           # อยู่เหนือ 0 → แค่ Histogram ติดลบ
-    else:
-        both_above_zero = macd_val > 0 and signal_val > 0
-        if both_above_zero:
-            return hist_now > hist_prev   # Histogram เพิ่มขึ้น = momentum แรงขึ้น
-        else:
-            return hist_now > 0           # อยู่ใต้ 0 → แค่ Histogram ติดบวก
+        return macd_val < 0 and signal_val < 0
+    return macd_val > 0 and signal_val > 0
 
 
 def check_rsi_double_rebound(rsi: pd.Series, is_long: bool,
