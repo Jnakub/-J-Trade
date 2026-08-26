@@ -75,6 +75,99 @@ BAR_OFFSET_H = {
 }
 
 
+# วินาทีต่อแท่งของแต่ละ timeframe — ใช้คำนวณ "เวลาปิดแท่ง" (time + TF_SECONDS) ใน as_of mode
+TF_SECONDS = {"1D": 86400, "4H": 14400, "1H": 3600, "M15": 900}
+
+# TF ย่อยที่ใช้ประกอบ "แท่งที่ยังไม่ปิด" ณ as_of (ดู _partial_bar) — 1D/4H ประกอบจาก 1H,
+# 1H ประกอบจาก M15 (ละเอียดกว่านี้ไม่คุ้ม MT5 call ที่เพิ่ม)
+PARTIAL_SRC = {"1D": "1H", "4H": "1H", "1H": "M15"}
+
+
+def _copy_rates(symbol: str, tf_name: str, bars: int, as_of=None) -> pd.DataFrame:
+    """ดึงแท่งดิบจาก MT5 (รองรับ M15 ที่ไม่มีใน config.MT5_TIMEFRAMES ด้วย)"""
+    import MetaTrader5 as mt5
+
+    tf = MT5_TIMEFRAMES.get(tf_name) or {"M15": mt5.TIMEFRAME_M15}[tf_name]
+    if as_of is None:
+        rates = mt5.copy_rates_from_pos(symbol, tf, 0, bars)
+    else:
+        rates = mt5.copy_rates_from(symbol, tf, as_of, bars)
+    if rates is None or len(rates) == 0:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"ดึงข้อมูล {symbol} {tf_name} ไม่ได้  [{code}] {msg}")
+    df = pd.DataFrame(rates)
+    df["time"] = pd.to_datetime(df["time"], unit="s")
+    return df
+
+
+def _partial_bar(symbol: str, tf_name: str, bar_start, as_of) -> dict | None:
+    """ประกอบแท่งที่ "กำลังก่อตัว" ณ as_of จากแท่ง TF ย่อยที่ปิดแล้วเท่านั้น
+    คืน None ถ้ายังไม่มีแท่งย่อยปิดเลย (as_of อยู่ตรงขอบแท่งพอดี) หรือดึง TF ย่อยไม่ได้"""
+    src = PARTIAL_SRC.get(tf_name)
+    if src is None:
+        return None
+    sub_dur = pd.Timedelta(seconds=TF_SECONDS[src])
+    need    = int(TF_SECONDS[tf_name] / TF_SECONDS[src]) + 4
+    try:
+        sub = _copy_rates(symbol, src, need, as_of)
+    except RuntimeError:
+        return None
+    sub = sub[(sub["time"] >= bar_start) & (sub["time"] + sub_dur <= as_of)]
+    if sub.empty:
+        return None
+    return {"time": bar_start, "open": sub["open"].iloc[0], "high": sub["high"].max(),
+            "low": sub["low"].min(), "close": sub["close"].iloc[-1],
+            "tick_volume": float(sub["tick_volume"].sum())}
+
+
+def get_bars(symbol: str, tf_name: str, bars: int = 100, as_of=None) -> pd.DataFrame:
+    """จุดเดียวทั้งระบบสำหรับดึงแท่งราคา — scoring.get_ohlcv() เป็นแค่ wrapper ของตัวนี้
+
+    as_of=None (รันสด) = เหมือนเดิมทุกประการ: แท่งล่าสุดจาก MT5 โดยแท่งท้ายสุดคือแท่งที่ยัง
+    ไม่ปิด (live)
+
+    as_of=datetime (backtest) = **คืนเฉพาะข้อมูลที่มีอยู่จริง ณ วินาทีนั้น** คือแท่งที่ปิดแล้ว
+    (time + TF_SECONDS <= as_of) บวกแท่งที่กำลังก่อตัวซึ่งประกอบขึ้นใหม่จาก TF ย่อยที่ปิดแล้ว
+    (ดู _partial_bar) ให้หน้าตาเหมือนที่ MT5 คืนตอนรันสดเป๊ะ
+
+    🔴 2026-08-26 นี่คือจุดที่แก้บั๊ก lookahead ที่กระทบ backtest ทุกตัวในระบบ: mt5.copy_rates_from
+    (สิ่งที่ฟังก์ชันนี้เคยเรียกตรงๆ) คืนแท่งที่ "ครอบ" as_of มาให้แบบ **ปิดสมบูรณ์แล้ว** ทำให้
+    backtest เห็นอนาคตของแท่งนั้นทั้งแท่ง — 4 ชม.บนกราฟ 4H และเต็มวันบนกราฟ 1D (ราคาปิดของ
+    วันตัวเองก่อนตัดสินใจ! กระทบ Trend 1D / OBV 1D / EMA50 1D ตรงๆ) ยืนยันด้วยการทดสอบจริงกับ
+    MT5 เครื่องนี้: copy_rates_from(as_of=16:00) คืนแท่ง 4H ของ 16:00 มาทั้งแท่ง และ 1H ของ
+    16:00 มาทั้งแท่ง ผลคือ entry price ใน backtest = ราคาในอนาคตอีก 1 ชม.
+    ตัวเลข backtest ทั้งหมดที่รันก่อนวันนี้จึงเทียบกับหลังวันนี้ไม่ได้ (ของเก่าดีเกินจริง)"""
+    if as_of is None:
+        return (get_aligned_4h(symbol, bars, None) if tf_name == "4H"
+                else _copy_rates(symbol, tf_name, bars, None))
+
+    as_of = pd.Timestamp(as_of)
+    dur   = pd.Timedelta(seconds=TF_SECONDS[tf_name])
+    raw   = (get_aligned_4h(symbol, bars + 2, as_of) if tf_name == "4H"
+             else _copy_rates(symbol, tf_name, bars + 2, as_of))
+
+    out     = raw[raw["time"] + dur <= as_of].tail(bars).reset_index(drop=True)
+    forming = raw[(raw["time"] <= as_of) & (raw["time"] + dur > as_of)]
+    if forming.empty or out.empty:
+        return out
+
+    bar_start = forming["time"].iloc[0]
+    part = _partial_bar(symbol, tf_name, bar_start, as_of)
+    if part is None:
+        # as_of ตรงขอบแท่งพอดี (ยังไม่มีแท่งย่อยปิดเลย) — ใส่แท่งความกว้างศูนย์ที่ราคาล่าสุด
+        # แทน ให้รูปร่างเฟรมเหมือนตอนรันสดเสมอ (โค้ดหลายที่ตัด iloc[-1] ทิ้งเองเพราะถือว่า
+        # แท่งท้ายคือแท่ง live เช่น regime_check.get_regime / get_trend_bias)
+        last = out["close"].iloc[-1]
+        part = {"time": bar_start, "open": last, "high": last, "low": last,
+                "close": last, "tick_volume": 0.0}
+
+    row = pd.DataFrame([part])
+    for col in out.columns:            # spread/real_volume ฯลฯ ที่ MT5 แถมมา — ยกค่าล่าสุดมาใส่
+        if col not in row.columns:
+            row[col] = out[col].iloc[-1]
+    return pd.concat([out, row[out.columns]], ignore_index=True).tail(bars).reset_index(drop=True)
+
+
 def get_aligned_4h(symbol: str, bars: int, as_of=None) -> pd.DataFrame:
     """คืนแท่ง 4H เลื่อนขอบตาม BAR_OFFSET_H[symbol] — offset=0 ใช้แท่ง 4H ของ MT5 ตรงๆ
     (เหมือนเดิมทุกประการ ไม่มี resample มาเกี่ยวเลย) offset!=0 ดึง 1H มารวมเป็น 4H เองด้วย

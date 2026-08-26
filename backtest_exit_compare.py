@@ -17,7 +17,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from mt5_connect import connect
 from config import MT5_TIMEFRAMES
-from scoring import compute_score, get_trend_bias, calc_rr
+from scoring import compute_score, get_trend_bias, calc_rr, get_ohlcv
 from swing import calc_atr, find_swing_lows, find_swing_highs
 from indicators import calc_adx
 from binance import merge_real_volume
@@ -42,12 +42,13 @@ COOLDOWN_BARS   = 6        # เข้าได้อีกทีหลังไ
 
 
 def get_hist(symbol, tf, dt, bars):
-    rates = mt5.copy_rates_from(symbol, tf, dt, bars)
-    if rates is None or len(rates) == 0:
+    """2026-08-26: เดิมเรียก mt5.copy_rates_from() ตรงๆ ซึ่งคืนแท่งที่ครอบ dt มาแบบปิดแล้ว
+    = มองอนาคต (1D เห็นราคาปิดของวันตัวเอง!) — เปลี่ยนมาใช้ scoring.get_ohlcv ที่ route ผ่าน
+    bars.get_bars() แล้ว ตัดแท่งอนาคตออกให้จุดเดียวทั้งระบบ (ดู bars.get_bars docstring)"""
+    try:
+        return get_ohlcv(symbol, tf, bars=bars, as_of=dt)
+    except RuntimeError:
         return None
-    df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s")
-    return df
 
 
 def score_entry(symbol, snap_dt):
@@ -58,7 +59,7 @@ def score_entry(symbol, snap_dt):
     df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)   # 800 บาร์ให้ trend_flip มีประวัติพอ
     if df_1d is None or len(df_1d) < 205:
         return None
-    df_1d = merge_real_volume(df_1d, symbol, "1D")
+    df_1d = merge_real_volume(df_1d, symbol, "1D", as_of=snap_dt)
     direction, _ = get_trend_bias(symbol, df_1d)
     if direction is None:
         return None   # trend_flip ไม่มี k หรือ bootstrap ยังไม่พร้อม — ข้ามจุดนี้

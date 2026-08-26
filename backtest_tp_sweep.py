@@ -38,7 +38,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from mt5_connect import connect
 from config import MT5_TIMEFRAMES, MAX_TP_DISTANCE_PCT
 import swing   # แก้ swing.TP_FIB_RATIO ตรงๆ ตอน sweep — ดู docstring ด้านบน
-from scoring import compute_score, get_trend_bias, calc_rr
+from scoring import compute_score, get_trend_bias, calc_rr, get_ohlcv
 from binance import merge_real_volume
 
 SCAN_STEP_H   = 4     # สแกนหา entry ทุกกี่ชม. (เหมือน backtest_exit_compare.py — ลด MT5 calls
@@ -51,12 +51,13 @@ DEFAULT_RATIOS = [1.0, 1.272, 1.414, 1.618, 2.0]
 
 
 def get_hist(symbol, tf, dt, bars):
-    rates = mt5.copy_rates_from(symbol, tf, dt, bars)
-    if rates is None or len(rates) == 0:
+    """2026-08-26: เดิมเรียก mt5.copy_rates_from() ตรงๆ ซึ่งคืนแท่งที่ครอบ dt มาแบบปิดแล้ว
+    = มองอนาคต (1D เห็นราคาปิดของวันตัวเอง!) — เปลี่ยนมาใช้ scoring.get_ohlcv ที่ route ผ่าน
+    bars.get_bars() แล้ว ตัดแท่งอนาคตออกให้จุดเดียวทั้งระบบ (ดู bars.get_bars docstring)"""
+    try:
+        return get_ohlcv(symbol, tf, bars=bars, as_of=dt)
+    except RuntimeError:
         return None
-    df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s")
-    return df
 
 
 def score_entry(symbol: str, snap_dt: datetime, ratio: float):
@@ -66,7 +67,7 @@ def score_entry(symbol: str, snap_dt: datetime, ratio: float):
     df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)
     if df_1d is None or len(df_1d) < 205:
         return None
-    df_1d = merge_real_volume(df_1d, symbol, "1D")
+    df_1d = merge_real_volume(df_1d, symbol, "1D", as_of=snap_dt)
     direction, _ = get_trend_bias(symbol, df_1d)
     if direction is None:
         return None

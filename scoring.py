@@ -26,7 +26,7 @@ from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirm
 from indicators import calc_rsi
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
-from bars import BAR_OFFSET_H, get_aligned_4h
+from bars import BAR_OFFSET_H, get_aligned_4h, get_bars
 
 # k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
 # <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
@@ -70,28 +70,23 @@ TREND_FLIP_K = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+TF_NAME = {v: k for k, v in MT5_TIMEFRAMES.items()}   # mt5.TIMEFRAME_* -> "1D"/"4H"/"1H"
+
+
 def get_ohlcv(symbol: str, timeframe, bars: int = 100, as_of: datetime = None) -> pd.DataFrame:
-    """as_of=None (ปกติ) = ดึง bars ล่าสุดจากปัจจุบัน — as_of=datetime = ดึง bars ที่ปิดก่อน
-    เวลานั้น (ใช้ backtest_score.py จำลอง compute_score ณ เวลาในอดีตแบบเป๊ะ ไม่ต้อง copy
-    logic มาเขียนซ้ำ)
+    """as_of=None (ปกติ) = ดึง bars ล่าสุดจากปัจจุบัน — as_of=datetime = ดึงข้อมูลเท่าที่ "มีจริง
+    ณ วินาทีนั้น" (ใช้ backtest จำลอง compute_score ณ เวลาในอดีตแบบเป๊ะ ไม่ต้อง copy logic
+    มาเขียนซ้ำ)
 
     2026-08-18: timeframe 4H ของ symbol ที่มี bars.BAR_OFFSET_H != 0 จะถูกเลื่อนขอบแท่งให้ตรงกับ
     TradingView แทนแท่ง MT5 ดิบ (ดู bars.py) — จุดเดียวนี้ครอบคลุมทุกที่ที่เรียก get_ohlcv/
     get_ohlcv_real ด้วย "4H" ทั้งระบบ (compute_score, structure break, key level, divergence,
-    ATR trailing anchor ฯลฯ) ไม่ต้องแก้ทีละจุด — timeframe อื่น (1D/1H) ไม่กระทบเลย"""
-    if timeframe == MT5_TIMEFRAMES["4H"] and BAR_OFFSET_H.get(symbol, 0) != 0:
-        return get_aligned_4h(symbol, bars, as_of)
+    ATR trailing anchor ฯลฯ) ไม่ต้องแก้ทีละจุด — timeframe อื่น (1D/1H) ไม่กระทบเลย
 
-    if as_of is None:
-        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
-    else:
-        rates = mt5.copy_rates_from(symbol, timeframe, as_of, bars)
-    if rates is None or len(rates) == 0:
-        code, msg = mt5.last_error()
-        raise RuntimeError(f"ดึงข้อมูล {symbol} ไม่ได้  [{code}] {msg}")
-    df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s")
-    return df
+    2026-08-26: ย้ายตัวดึงแท่งทั้งหมดไปที่ bars.get_bars() — พร้อมกับแก้บั๊ก lookahead ของ
+    as_of mode ที่กระทบ backtest ทุกตัว (อ่านรายละเอียดที่ bars.get_bars) path รันสด
+    (as_of=None) ไม่เปลี่ยนพฤติกรรมเลย"""
+    return get_bars(symbol, TF_NAME[timeframe], bars=bars, as_of=as_of)
 
 
 def get_ohlcv_real(symbol: str, tf_name: str, bars: int = 100, as_of: datetime = None) -> pd.DataFrame:
@@ -99,7 +94,7 @@ def get_ohlcv_real(symbol: str, tf_name: str, bars: int = 100, as_of: datetime =
     ใช้ตัวนี้เสมอถ้า logic ปลายทางแตะ volume (swing filter, VSA ฯลฯ) — ไม่งั้น BTC จะได้
     tick_volume ของโบรกเกอร์ซึ่งไม่ตรงกับที่ระบบใช้หา SL จริง"""
     df = get_ohlcv(symbol, MT5_TIMEFRAMES[tf_name], bars=bars, as_of=as_of)
-    return merge_real_volume(df, symbol, tf_name)
+    return merge_real_volume(df, symbol, tf_name, as_of=as_of)
 
 
 def ema(series: pd.Series, period: int) -> pd.Series:
@@ -263,12 +258,12 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     if df_1d is None:
         df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800, as_of=as_of)
-        df_1d = merge_real_volume(df_1d, symbol, "1D")
+        df_1d = merge_real_volume(df_1d, symbol, "1D", as_of=as_of)
     df_4h = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=200, as_of=as_of)
-    df_4h = merge_real_volume(df_4h, symbol, "4H")
+    df_4h = merge_real_volume(df_4h, symbol, "4H", as_of=as_of)
     df_1h = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], as_of=as_of)
-    df_1h = merge_real_volume(df_1h, symbol, "1H")   # 2026-07-27: เดิมไม่เคย merge เลย (ต่างจาก
-                                                     # 1D/4H) ทำให้ OBV 1H เป็น tick_volume แม้แต่ BTC
+    df_1h = merge_real_volume(df_1h, symbol, "1H", as_of=as_of)   # 2026-07-27: เดิมไม่เคย merge เลย
+                                                     # (ต่างจาก 1D/4H) ทำให้ OBV 1H เป็น tick_volume แม้แต่ BTC
 
     price = df_1h["close"].iloc[-1] if as_of is not None else get_tick_or_raise(symbol).bid
 

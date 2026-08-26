@@ -160,28 +160,67 @@ def fetch_comex_volume(mt5_symbol: str, timeframe: str = "1D",
 # merge_real_volume — router หลัก
 # ---------------------------------------------------------------------------
 
+# cache ของ volume series สำหรับ backtest (as_of != None) เท่านั้น — key = (symbol, tf, offset_h)
+# เก็บชุดที่ "ยาวที่สุดที่เคยดึง" ไว้ใช้ซ้ำ ไม่ต้องยิง API ใหม่ทุกแท่งที่สแกน
+# path รันสด (as_of=None) ไม่แตะ cache นี้เลย — ต้องได้ volume สดใหม่ทุกครั้งเสมอ
+_VOL_CACHE: dict = {}
+
+
+def _volume_series(mt5_symbol: str, timeframe: str, need: int, offset_h: int,
+                   as_of=None) -> tuple[pd.DataFrame, str]:
+    if mt5_symbol in BITSTAMP_MAP:
+        source  = "Bitstamp"
+        fetcher = lambda n: fetch_bitstamp_volume(mt5_symbol, timeframe, bars=n, offset_h=offset_h)
+    elif mt5_symbol in YFINANCE_MAP:
+        source  = f"COMEX ({YFINANCE_MAP[mt5_symbol]})"
+        fetcher = lambda n: fetch_comex_volume(mt5_symbol, timeframe, bars=n)
+    else:
+        raise ValueError(f"ไม่รู้จัก '{mt5_symbol}'")
+
+    if as_of is None:
+        return fetcher(need), source
+
+    key    = (mt5_symbol, timeframe, offset_h)
+    cached = _VOL_CACHE.get(key)
+    if cached is None or len(cached) < need:
+        cached = fetcher(need)
+        _VOL_CACHE[key] = cached
+    return cached, source
+
+
 def merge_real_volume(df_mt5: pd.DataFrame, mt5_symbol: str,
-                      timeframe: str = "1D") -> pd.DataFrame:
+                      timeframe: str = "1D", as_of=None) -> pd.DataFrame:
     """
     แทนที่ tick_volume ด้วย real volume จากแหล่งที่เหมาะสม:
       - Crypto (BTC/ETH/XRP) → Bitstamp
       - Gold/Silver      → COMEX Futures ผ่าน yfinance
     ถ้าดึงไม่ได้ → คง tick_volume เดิมไว้
+
+    as_of (backtest) แก้สองอย่างที่เคยทำให้ backtest ไม่ตรงกับระบบจริงแบบเงียบๆ:
+      1) แหล่งข้อมูลคืนแต่แท่ง "ล่าสุด" เสมอ — เดิมขอแค่ len(df)+10 แท่ง (4H = ~210 แท่ง
+         ≈ 35 วัน) พอ backtest ย้อนไกลกว่านั้น merge ไม่ติดสักแท่งแล้วตกกลับไปใช้ tick_volume
+         ของโบรกเกอร์ทั้งชุด (คนละตัวเลขกับที่ระบบจริงใช้หา SL/OBV) — ตอนนี้ขอเผื่อระยะจาก
+         as_of ถึงปัจจุบันด้วย แล้ว cache ไว้ใช้ซ้ำทั้งการสแกน
+      2) แท่งท้ายสุดของเฟรมใน as_of mode คือแท่งที่ "ยังไม่ปิด" (bars.get_bars ประกอบให้)
+         แต่แหล่งข้อมูลมีแท่งนั้นแบบจบแล้ว — merge ตรงๆ = ได้ volume ทั้งแท่งของอนาคตมาใส่
+         จึงข้ามแท่งที่ยังไม่ปิด ปล่อยให้ใช้ tick_volume ที่ประกอบมาถูกต้องแล้วแทน
     """
     df = df_mt5.copy()
 
+    offset_h = BAR_OFFSET_H.get(mt5_symbol, 0) if timeframe == "4H" else 0
+    need     = len(df) + 10
+    if as_of is not None:
+        # เผื่อระยะจาก as_of ถึง "ตอนนี้" เพราะแหล่งข้อมูลนับถอยหลังจากแท่งล่าสุดเสมอ
+        step  = STEP_MAP.get(timeframe, 86400)
+        gap_s = max((pd.Timestamp.utcnow().tz_localize(None) - pd.Timestamp(as_of)).total_seconds(), 0)
+        need += int(gap_s // step)
+
     try:
-        if mt5_symbol in BITSTAMP_MAP:
-            offset_h = BAR_OFFSET_H.get(mt5_symbol, 0) if timeframe == "4H" else 0
-            df_vol = fetch_bitstamp_volume(mt5_symbol, timeframe, bars=len(df) + 10,
-                                           offset_h=offset_h)
-            source = "Bitstamp"
-        elif mt5_symbol in YFINANCE_MAP:
-            df_vol = fetch_comex_volume(mt5_symbol, timeframe, bars=len(df) + 10)
-            source = f"COMEX ({YFINANCE_MAP[mt5_symbol]})"
-        else:
-            print(f"  [Volume] ไม่รู้จัก '{mt5_symbol}' — ใช้ tick_volume")
-            return df
+        df_vol, source = _volume_series(mt5_symbol, timeframe, need, offset_h, as_of=as_of)
+        df_vol = df_vol.copy()
+    except ValueError as exc:
+        print(f"  [Volume] {exc} — ใช้ tick_volume")
+        return df
     except Exception as exc:
         print(f"  [Volume] ดึงไม่ได้ ใช้ tick_volume แทน — {exc}")
         return df
@@ -203,12 +242,18 @@ def merge_real_volume(df_mt5: pd.DataFrame, mt5_symbol: str,
 
     df["tick_volume"] = df["tick_volume"].astype(float)
     matched = df["volume"].notna()
+    if as_of is not None:
+        # ข้ามแท่งที่ยังไม่ปิด ณ as_of — แหล่งข้อมูลมีแท่งนั้นแบบจบแล้ว เอามาใส่ = volume อนาคต
+        step_td = pd.Timedelta(seconds=STEP_MAP.get(timeframe, 86400))
+        matched &= (pd.to_datetime(df["time"]) + step_td <= pd.Timestamp(as_of))
     df.loc[matched, "tick_volume"] = df.loc[matched, "volume"]
 
     total     = len(df)
     unmatched = int((~matched).sum())
     matched_n = total - unmatched
-    if matched_n == 0:
+    if as_of is not None:
+        pass          # backtest สแกนหลายพันแท่ง — ไม่ต้องพิมพ์บรรทัดนี้ซ้ำทุกครั้ง
+    elif matched_n == 0:
         print(f"  [{source}] merge ไม่ได้เลย — ใช้ tick_volume ทั้งหมด")
     elif unmatched > 0:
         print(f"  [{source}] real volume โหลดสำเร็จ ✅  ({matched_n}/{total} แท่ง, {unmatched} แท่งไม่ตรง→tick_volume)")
