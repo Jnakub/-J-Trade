@@ -15,6 +15,7 @@ from config import (
     WEIGHT_TREND_1H, WEIGHT_DI_1H,
     WEIGHT_MACD, WEIGHT_RR,
     RSI_SCORE_PERIOD, RSI_SCORE_MID,
+    RSI_REBOUND_LOOKBACK_BARS, RSI_REBOUND_MIN_TOUCHES,
     TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK,
     get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT, MIN_SCORE,
 )
@@ -147,6 +148,57 @@ def macd_ok_for_direction(macd_line: pd.Series, signal_line: pd.Series,
             return hist_now > hist_prev   # Histogram เพิ่มขึ้น = momentum แรงขึ้น
         else:
             return hist_now > 0           # อยู่ใต้ 0 → แค่ Histogram ติดบวก
+
+
+def check_rsi_double_rebound(rsi: pd.Series, is_long: bool,
+                             lookback: int = RSI_REBOUND_LOOKBACK_BARS,
+                             min_touches: int = RSI_REBOUND_MIN_TOUCHES) -> bool:
+    """RSI Double Rebound — สัญญาณต่อ trend (continuation) ต่างจาก Divergence ที่เป็นสัญญาณ
+    กลับตัว: ใน trend ที่แข็งแรง RSI มักย่อมาแตะโซนกลาง (RSI_SCORE_MID ± RSI_SCORE_BUFFER)
+    ระหว่างพักตัว แล้วเด้งกลับออกไปฝั่ง trend โดยไม่หลุดลึกไป oversold/overbought จริง — ยิ่งเด้ง
+    ซ้ำได้หลายครั้งในช่วงเวลาสั้นๆ ยิ่งแปลว่า trend แข็งแรง (ดูรูปตัวอย่างที่ผู้ใช้ส่งมา 2026-08-20)
+
+    นิยาม "แตะแล้วเด้ง" ในโค้ดนี้ = RSI ไขว้จากในโซน (Long: <=MID+BUFFER, Short: >=MID-BUFFER)
+    ออกไปฝั่ง trend ในแท่งถัดไป — นับเป็น 1 ครั้ง ต้องมีอย่างน้อย min_touches ครั้งใน lookback
+    แท่งล่าสุด และ RSI ปัจจุบันต้องยังอยู่ฝั่ง trend (ยืนยันว่าเด้งครั้งล่าสุดยังไม่หลุดกลับเข้าโซน)
+
+    2026-08-20: เพิ่มเงื่อนไข "จุดต่ำสุด" ของแต่ละครั้งที่แตะต้องขยับตามทิศ trend เทียบกับครั้งแรก
+    (ตามคำสั่งผู้ใช้) — Long: จุดต่ำสุดของการแตะครั้งหลังๆ ต้อง "สูงกว่า" ครั้งแรก (higher low บน
+    RSI, ย่อตื้นขึ้นเรื่อยๆ = แรงขายอ่อนลง) Short: ต้อง "ต่ำกว่า" ครั้งแรก (lower high, แรงซื้อ
+    อ่อนลง) กันเคสที่แตะซ้ำแต่ย่อลึกขึ้นเรื่อยๆ (สัญญาณอ่อนแรงจริง ไม่ใช่ trend แข็งแรง) ทั้งที่
+    เข้าเกณฑ์จำนวนครั้งพอ — ยังไม่มี backtest ยืนยัน ตามคำสั่งผู้ใช้
+
+    แทนที่เกณฑ์ "RSI 4H" เดิม (threshold เดี่ยว ณ แท่งปัจจุบัน) — ยังไม่มี backtest ยืนยัน ตาม
+    คำสั่งผู้ใช้ ควร backtest เทียบกับเกณฑ์เดิมก่อนใช้ตัดสินใจเทรดจริง"""
+    if len(rsi) < lookback + 1:
+        return False
+
+    window  = rsi.iloc[-(lookback + 1):]
+    zone_hi = RSI_SCORE_MID + RSI_SCORE_BUFFER
+    zone_lo = RSI_SCORE_MID - RSI_SCORE_BUFFER
+    in_zone = (window <= zone_hi) if is_long else (window >= zone_lo)
+    on_trend_side = (window.iloc[-1] > zone_hi) if is_long else (window.iloc[-1] < zone_lo)
+
+    # ไล่หาแต่ละ "ครั้งที่แตะ" (ช่วงต่อเนื่องที่ in_zone=True) แล้วเก็บจุดต่ำสุด(Long)/สูงสุด(Short)
+    # ของแต่ละครั้งไว้เทียบกัน — ครั้งที่ยัง "ค้าง" ท้าย window (ยังไม่ทันเด้งออก) ไม่นับ
+    touch_extremes = []
+    in_run, run_extreme = False, None
+    for val, flag in zip(window, in_zone):
+        if flag:
+            run_extreme = val if run_extreme is None else (min(run_extreme, val) if is_long
+                                                            else max(run_extreme, val))
+            in_run = True
+        elif in_run:
+            touch_extremes.append(run_extreme)
+            in_run, run_extreme = False, None
+
+    touches = len(touch_extremes)
+    if touches < min_touches or not on_trend_side:
+        return False
+
+    progressing = all(v > touch_extremes[0] for v in touch_extremes[1:]) if is_long \
+                 else all(v < touch_extremes[0] for v in touch_extremes[1:])
+    return progressing
 
 
 def calc_rr(entry: float, sl: float, tp: float, direction: str) -> float:
@@ -287,9 +339,10 @@ def compute_score(symbol: str, direction: str, entry: float,
         ("OBV 1D",       obv_rising(obv_1d),                                    WEIGHT_OBV_1D),
         # 2026-08-19: ช่องนี้เดิมคือ Trend 4H (close vs EMA50) เปลี่ยนเป็น RSI 4H ตามคำสั่งผู้ใช้
         # (ดูตัวเลข redundancy/predictive power ที่วัดไว้ใน config.py เหนือ WEIGHT_RSI_4H)
-        # 2026-08-20: เพิ่ม buffer zone (RSI_SCORE_BUFFER) รอบเส้น 50 กัน noise ตอนแกว่งใกล้กลาง
-        ("RSI 4H",       (rsi_4h.iloc[-1] > RSI_SCORE_MID + RSI_SCORE_BUFFER) if is_long
-                         else (rsi_4h.iloc[-1] < RSI_SCORE_MID - RSI_SCORE_BUFFER),  WEIGHT_RSI_4H),
+        # 2026-08-20: เปลี่ยนจาก threshold เดี่ยว (RSI > 50+buffer) เป็น RSI Double Rebound —
+        # ต้องเคยย่อแตะโซนกลางแล้วเด้งกลับฝั่ง trend อย่างน้อย 2 ครั้ง ไม่ใช่แค่ค่าปัจจุบันผ่าน
+        # เฉยๆ (ดู check_rsi_double_rebound ด้านบน) ตามคำสั่งผู้ใช้ ยังไม่มี backtest ยืนยัน
+        ("RSI 4H Rebound", check_rsi_double_rebound(rsi_4h, is_long),           WEIGHT_RSI_4H),
         ("OBV 4H",       obv_rising(obv_4h),                                    WEIGHT_OBV_4H),
         ("Trend 1H",     (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
         ("DI 1H",        di_1h_ok,                                              WEIGHT_DI_1H),
