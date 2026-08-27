@@ -62,15 +62,42 @@ NEWS_IMMINENT_KEEP = 50       # ออกก่อนข่าว 1 ชม. -> �
 NEWS_POST_H       = 6         # ข่าวผ่านไปกี่ชั่วโมงถือว่า "สงบ" แล้ว
 
 # Position Sizing Rules — "ถ้า trigger ควรเหลือกี่ %"
-RULE_2R_TRIGGER      = 2.0
-RULE_2R_KEEP         = 50
+#
+# 2026-08-27: เพิ่มกฎ "ถึง 1R" — คู่กับ checklist ข้อ 5 ที่เลื่อน SL ไป breakeven ที่ 1R อยู่แล้ว
+# แต่เดิม "ไม่มีการปิดบางส่วนที่ 1R" (กฎปิดบางส่วนที่ใกล้ที่สุดคือ 2R) ซึ่งจำลองแล้วพบว่าการ
+# เลื่อน BE เดี่ยวๆ เป็นตัวเลือกที่แย่ที่สุด: มันตัดไม้ที่แตะ 1R แล้วย่อกลับให้จบที่ 0R ทั้งที่
+# หลายตัวจะไปถึง TP ได้ โดยไม่ได้อะไรคืนเป็น R เลย
+#
+# จำลองบนไม้ชุดเดียวกัน 434 ไม้ (BTCUSDm 730 วัน, ไม้ที่ผ่าน MIN_SCORE จริง, เดินแท่ง 4H
+# ไปข้างหน้าจาก entry — ไม่กรองไม้เพิ่มแม้แต่ตัวเดียว เปลี่ยนแค่วิธีออก):
+#   SL/TP เป๊ะ ไม่ทำอะไร        Win 32.7%  AvgR -0.03R  แพ้เต็ม -1R 61.8%
+#   เลื่อน SL ทุนที่ 1R เฉยๆ     Win 19.6%  AvgR -0.03R  แพ้เต็ม -1R 45.9%  <- ของเดิม
+#   ปิดครึ่งที่ 1R + เลื่อน BE   Win 50.0%  AvgR -0.01R  แพ้เต็ม -1R 45.9%  <- ของใหม่
+#
+# ⚠️ ข้อจำกัด: วัดจาก BTCUSDm ช่วงเดียว 2 ปี in-sample, จำลองว่าปิดได้เป๊ะที่ราคา 1R (ของจริง
+# monitor รันเป็นรอบทุก INTERVAL_SECONDS ไม่ใช่ทุก tick จึงช้ากว่านี้เสมอ) และ "ชนะ" ในตัวเลข
+# ข้างบนนับ +0.5R เป็นชนะ — กำไรเฉลี่ยต่อไม้เล็กลงตาม Total R ดีขึ้นแค่เล็กน้อย (-14.2R -> -3.9R)
+# ผลหลักคือ win rate และการลดไม้ที่แพ้เต็มจำนวน ไม่ใช่กำไรรวมที่เพิ่มขึ้นมาก
+#
+# 🔴 ถ้าแก้ RULE_1R_KEEP ให้สูงกว่า 50 (หรือลบกฎ 1R ทิ้ง) ต้องกลับมาอ่านตรงนี้: พร้อมกับการ
+# เพิ่มกฎ 1R มีกฎอีก 2 ข้อถูก "ลบทิ้ง" เพราะพิสูจน์ได้ว่ามันไม่มีทางมีผลอีกแล้ว (ไม่ใช่แค่
+# เกิดยาก) — ถ้า 1R ไม่ตรึงที่ 50% เมื่อไหร่ ทั้งสองข้อจะกลับมามีความหมายทันที:
+#   "ถึง 2R" (trigger R>=2, keep 50) — R>=2 ย่อมแปลว่า R>=1 เสมอ และ keep เท่ากันเป๊ะ
+#       min() จึงได้ 50 เท่าเดิมทุกกรณี ไม่มีทางตัดเพิ่มได้เลย
+#   "ใกล้ TP (<=0.5%)" (trigger ระยะถึง TP <= 0.5%, keep 50) — ไม้ทุกตัวผ่าน hard block
+#       R:R >= MIN_RR_HARD_BLOCK (1.5) มาแล้ว การที่ราคาเข้าใกล้ TP ระดับ 0.5% จึงแปลว่า
+#       R เดินมาเกือบเต็ม R:R ของไม้ = อย่างน้อย ~1.4R ซึ่งเลย 1R ไปแล้วเสมอ (r_multiple
+#       คิดจาก initial_sl ที่ตรึงไว้ ไม่ใช่ SL ปัจจุบัน จึงไม่แกว่งตาม trailing)
+# กฎที่เหลือยังมีผลจริงเฉพาะช่วง R < 1 เท่านั้น (พอ R >= 1 กฎ 1R ตรึง 50% ซึ่งต่ำกว่าหรือ
+# เท่ากับทุกข้อ): Indicator ร้อน (75), เดินทาง >=50% ไป TP (60 — เข้าได้ก่อน 1R เฉพาะไม้ที่
+# R:R < 2), Climax (50), ใกล้ข่าว (50)
+RULE_1R_TRIGGER      = 1.0
+RULE_1R_KEEP         = 50
 RSI_OVERBOUGHT       = 70
 RSI_OVERSOLD         = 30
 RULE_HOT_KEEP        = 75
 RULE_HALFWAY_TRIGGER = 50    # TP progress %
 RULE_HALFWAY_KEEP    = 60
-RULE_NEARTP_TRIGGER  = 0.5   # ระยะห่างจาก TP %
-RULE_NEARTP_KEEP     = 50
 RULE_CLIMAX_KEEP     = 50
 
 INTERVAL_SECONDS  = 3600
@@ -574,26 +601,26 @@ def analyze_position(pos) -> dict:
         position_rules   = []          # ข้าม — Final ฟันธงออก 100% แล้ว ไม่ต้องคิดต่อ
         stage_keep_pct   = None
     else:
-        rule_2r_trigger = r_multiple is not None and r_multiple >= RULE_2R_TRIGGER
+        rule_1r_trigger = r_multiple is not None and r_multiple >= RULE_1R_TRIGGER
         if direction == "Long":
             hot_trigger = rsi_now >= RSI_OVERBOUGHT or current_price >= bb_up_now
         else:
             hot_trigger = rsi_now <= RSI_OVERSOLD or current_price <= bb_lo_now
         halfway_trigger = tp_progress is not None and tp_progress >= RULE_HALFWAY_TRIGGER
-        neartp_trigger  = dist_tp_pct is not None and dist_tp_pct <= RULE_NEARTP_TRIGGER
 
+        # ทุกข้อที่เหลือ keep >= 50 = มีผลจริงเฉพาะช่วง R < 1 (พอ R >= 1 กฎ 1R ตรึงที่ 50%)
+        # — กฎ "ถึง 2R" กับ "ใกล้ TP" ถูกลบทิ้งแล้วเพราะเป็นไปไม่ได้ที่จะมีผล ดู comment ที่
+        # RULE_1R_KEEP ด้านบนไฟล์ (สำคัญตอนจะแก้ค่านั้น)
         position_rules = [
-            {"no": 1, "name": "ถึง 2R",               "trigger": rule_2r_trigger,       "keep_pct": RULE_2R_KEEP,
-             "cond": "R-multiple >= 2.0"},
+            {"no": 1, "name": "ถึง 1R",               "trigger": rule_1r_trigger,       "keep_pct": RULE_1R_KEEP,
+             "cond": "R-multiple >= 1.0 (ล็อกกำไรครึ่งหนึ่ง คู่กับ SL ที่ขยับไป breakeven)"},
             {"no": 2, "name": "Indicator ร้อน",        "trigger": hot_trigger,           "keep_pct": RULE_HOT_KEEP,
              "cond": "RSI ชนขอบ / ราคาชน Bollinger ฝั่งกำไร"},
             {"no": 3, "name": "เดินทาง >=50% ไป TP",   "trigger": halfway_trigger,       "keep_pct": RULE_HALFWAY_KEEP,
              "cond": "TP Progress >= 50%"},
-            {"no": 4, "name": "ใกล้ TP (<=0.5%)",      "trigger": neartp_trigger,        "keep_pct": RULE_NEARTP_KEEP,
-             "cond": "ระยะห่างจาก TP <= 0.5%"},
-            {"no": 5, "name": "แท่ง Climax",           "trigger": climax,                "keep_pct": RULE_CLIMAX_KEEP,
+            {"no": 4, "name": "แท่ง Climax",           "trigger": climax,                "keep_pct": RULE_CLIMAX_KEEP,
              "cond": "volume สุดขั้ว + range ใหญ่"},
-            {"no": 6, "name": "ใกล้ข่าว High Impact",  "trigger": news_imminent,          "keep_pct": NEWS_IMMINENT_KEEP,
+            {"no": 5, "name": "ใกล้ข่าว High Impact",  "trigger": news_imminent,          "keep_pct": NEWS_IMMINENT_KEEP,
              "cond": f"ข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ภายใน {NEWS_IMMINENT_H} ชม. — {news_detail if news_imminent else ''}"},
         ]
         triggered_keeps = [r["keep_pct"] for r in position_rules if r["trigger"]]
