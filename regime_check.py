@@ -169,14 +169,16 @@ GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
 # เพราะติด circular import (ดู indicators.py docstring)
 
 
-def get_adx_bars(symbol: str, bars: int = BARS) -> pd.DataFrame:
+def get_adx_bars(symbol: str, bars: int = BARS, as_of=None) -> pd.DataFrame:
     """ดึงแท่ง 4H สำหรับคำนวณ ADX โดยเลื่อนขอบแท่งตาม bars.BAR_OFFSET_H ให้ตรงกับ TradingView
     (ดูคำอธิบายเต็มที่ bars.py) — คืน DataFrame คอลัมน์เดียวกับ get_ohlcv ใช้กับ calc_adx ได้ตรงๆ
 
     2026-08-18: get_ohlcv() เองก็ apply offset นี้ให้ทุก timeframe="4H" อยู่แล้ว (ดู scoring.py)
     ฟังก์ชันนี้เลยเหลือแค่ wrapper บาง ๆ ไว้เผื่อโค้ดเก่าที่เรียกชื่อนี้อยู่ ไม่ต้องมี logic
-    resample ซ้ำสองที่แล้ว"""
-    return get_ohlcv(symbol, REGIME_TIMEFRAME, bars=bars)
+    resample ซ้ำสองที่แล้ว
+
+    2026-08-27: รับ as_of เพื่อให้ backtest เรียก get_regime ย้อนหลังได้ (ดู get_regime)"""
+    return get_ohlcv(symbol, REGIME_TIMEFRAME, bars=bars, as_of=as_of)
 
 # ---------------------------------------------------------------------------
 # ข้อ 2 — ทิศของเส้น ADX (ขึ้น/ทรง/ลง เทียบ ADX_DIR_BARS แท่งล่าสุด)
@@ -515,11 +517,17 @@ def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
     return ("เขตเทา", "เงื่อนไขไม่ครบ (ADX ลง หรือ structure ไม่ intact) — รอความชัดเจน", YELLOW)
 
 
-def get_regime(symbol: str) -> dict:
+def get_regime(symbol: str, as_of=None) -> dict:
     """เก็บ logic การเก็บข้อมูล+ตัดสินใจ Regime ทั้งหมดไว้ที่เดียว — ใช้ทั้งจาก CLI (run_check)
-    และจากที่อื่น (เช่น scheduler.py) โดยไม่ต้อง print รายงานเต็ม"""
+    และจากที่อื่น (เช่น scheduler.py) โดยไม่ต้อง print รายงานเต็ม
+
+    as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ — as_of=datetime = จำลอง regime ณ เวลานั้นในอดีต
+    (ผ่าน bars.get_bars ที่ตัดแท่งอนาคตออกให้แล้ว) เพิ่ม 2026-08-27 เพราะ scheduler.py กรอง
+    ไม่ให้เปิดไม้เลยถ้า regime อยู่ใน REGIME_NO_TRADE (CHOPPY/เขตเทา/REVERSAL-WATCH) แต่
+    backtest ที่ผ่านมาทั้งหมดไม่เคยใส่ตัวกรองนี้ — วัดคุณภาพสัญญาณบนชุดไม้ที่ระบบจริงไม่ได้
+    เทรดด้วยซ้ำ ทำให้ตัวเลขที่ได้ไม่ใช่ของระบบจริง"""
     # 4H — ADX ไม่ต้องพึ่ง volume | ขอบแท่งเลื่อนตาม ADX_BAR_OFFSET_H ให้ตรง TradingView
-    df = get_adx_bars(symbol, bars=BARS)
+    df = get_adx_bars(symbol, bars=BARS, as_of=as_of)
     adx = calc_adx(df, ADX_PERIOD)
     closed_idx = len(df) - 2                 # แท่ง 4H ปิดล่าสุด
 
@@ -534,7 +542,7 @@ def get_regime(symbol: str) -> dict:
     # โครงสร้าง trend + Key Level ดูจาก 4H เดียวกัน — ดึงครั้งเดียวที่ขนาดใหญ่สุดที่ต้องใช้ (KEY_LEVEL_BARS)
     # แล้ว reuse ทั้ง Structure (ตัดมาแค่ BARS แท่งท้าย) และ Key Level (ใช้เต็ม) — กันดึง/merge real
     # volume ซ้ำสองรอบต่อ symbol ต่อรอบสแกน (เดิมดึงแยก 210 แท่งสำหรับ structure + 400 แท่งสำหรับ key level)
-    df_4h_full = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS)
+    df_4h_full = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS, as_of=as_of)
     df_4h = df_4h_full.iloc[-BARS:].reset_index(drop=True)
     structure = check_structure(df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True),
                                 vol_multiplier=swing_vol_multiplier(symbol),

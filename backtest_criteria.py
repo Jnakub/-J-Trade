@@ -26,11 +26,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from mt5_connect import connect
-from config import MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT
-from scoring import compute_score, get_trend_bias, get_ohlcv, ema, TREND_FLIP_K
+from config import (MT5_TIMEFRAMES, MIN_SCORE, TOTAL_WEIGHT, MIN_RR_HARD_BLOCK,
+                    MAX_RR_HARD_BLOCK, MAX_TP_DISTANCE_PCT, get_min_sl_distance_pct)
+from scoring import compute_score, get_trend_bias, get_ohlcv, ema, TREND_FLIP_K, calc_rr
 from binance import merge_real_volume
 from swing import calc_atr
 from trend_flip import compute_trend_regime
+from regime_check import get_regime
+
+# ต้องตรงกับ scheduler.REGIME_NO_TRADE — regime พวกนี้ scheduler จะ SKIP ไม่เปิด scorecard เลย
+REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH")
 
 symbol = sys.argv[1] if len(sys.argv) > 1 else "BTCUSDm"
 days   = int(sys.argv[2]) if len(sys.argv) > 2 else 730
@@ -108,12 +113,22 @@ for n, i in enumerate(scan_idx):
 
     df_1d_cache, bias = day_ctx["df_1d"], day_ctx["bias"]
 
+    # regime gate — ระบบจริงเช็คก่อนทุกครั้ง (scheduler.py) แต่ backtest ก่อนหน้านี้ไม่เคยใส่
+    try:
+        regime = get_regime(symbol, as_of=t)["regime"]
+    except Exception:
+        regime = "ERROR"
+    regime_ok = regime not in REGIME_NO_TRADE
+
+    # force=True ข้าม hard block ทั้งหมด แล้วมาตรวจเองว่า "ถ้าไม่ force จะโดนบล็อกด้วยข้อไหน"
+    # — เก็บไม้ที่ถูกบล็อกไว้วัดผลด้วย ตอบคำถามว่า hard block แต่ละข้อกันไม้แย่ได้จริงไหม
+    # หรือกันไม้ดีทิ้งไปเปล่าๆ (ไม้พวกนี้ไม่เคยปรากฏในสถิติมาก่อนเลย เพราะ raise ทิ้งไปก่อน)
     try:
         entry = float(get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=2, as_of=t)["close"].iloc[-1])
         total, criteria, passed, sl_info = compute_score(symbol, bias, entry, as_of=t,
-                                                         df_1d=df_1d_cache)
+                                                         df_1d=df_1d_cache, force=True)
     except ValueError as exc:
-        note_skip(str(exc))
+        note_skip(str(exc))     # เหลือแค่ bias ไม่ตรง / หา SL ไม่ได้ ซึ่ง force ก็ช่วยไม่ได้
         continue
     except Exception as exc:
         note_skip(f"ERROR {type(exc).__name__}")
@@ -121,6 +136,19 @@ for n, i in enumerate(scan_idx):
 
     sl, tp = sl_info["sl"], sl_info["tp"]
     risk   = abs(entry - sl)
+    rr     = calc_rr(entry, sl, tp, bias)
+
+    blocks = []
+    if abs(entry - sl) / entry * 100 < get_min_sl_distance_pct(symbol) - 1e-9:
+        blocks.append("SL แคบ")
+    if rr < MIN_RR_HARD_BLOCK - 1e-9:
+        blocks.append("R:R ต่ำ")
+    if rr > MAX_RR_HARD_BLOCK + 1e-9:
+        blocks.append("R:R สูง")
+    if abs(tp - entry) / entry * 100 > MAX_TP_DISTANCE_PCT + 1e-9:
+        blocks.append("TP ไกล")
+    for b in blocks:
+        note_skip(f"[hard block] {b}")
 
     # จำลองผลไปข้างหน้าจากแท่ง i (แท่งที่เพิ่งเปิดที่เวลา t)
     outcome, exit_price, exit_time = None, None, None
@@ -145,7 +173,9 @@ for n, i in enumerate(scan_idx):
     gap    = (entry - day_ctx["ema50"]) * (1 if bias == "Long" else -1)
     samples.append({"time": t, "direction": bias, "score": total, "passed": passed,
                     "outcome": outcome, "r": r_mult, "exit_time": exit_time,
-                    "rr": abs(tp - entry) / risk if risk else 0.0,   # R:R ของไม้นี้ (ไว้ sweep MIN_RR)
+                    "entry": entry, "sl": sl, "tp": tp, "rr": rr,
+                    "blocked": ";".join(blocks), "tradeable": not blocks,
+                    "regime": regime, "regime_ok": regime_ok,
                     "ema_gap_pct": gap / entry * 100,
                     "ema_gap_atr": gap / day_ctx["atr"] if day_ctx["atr"] else 0.0,
                     "regime_age": day_ctx["regime_age"],
@@ -203,6 +233,28 @@ if skipped:
 if not samples:
     print(f"{'=' * 78}")
     sys.exit(0)
+
+all_rows     = list(samples)          # เก็บไว้เขียน CSV (รวมไม้ที่ hard block กันไว้ด้วย)
+blocked_rows = [s for s in samples if not s["tradeable"]]
+samples      = [s for s in samples if s["tradeable"]]
+print(f"  {'-' * 74}")
+print(f"  ไม้ที่ hard block กันไว้ (เก็บใน CSV เพื่อวิเคราะห์ต่อ): {len(blocked_rows)} ครั้ง")
+for b in ("R:R ต่ำ", "SL แคบ", "TP ไกล", "R:R สูง"):
+    rows = [s for s in blocked_rows if b in s["blocked"]]
+    if rows:
+        n, wr, r = stats(rows)
+        print(f"    {b:<10} n={n:<5} Win {wr:>5.1f}%  Avg {r:+.2f}R")
+
+print(f"  {'-' * 74}")
+print("  regime ตอนเข้าไม้ (ระบบจริงเทรดเฉพาะที่ไม่อยู่ใน REGIME_NO_TRADE):")
+for rg in sorted({s["regime"] for s in samples}):
+    rows = [s for s in samples if s["regime"] == rg]
+    n, wr, r = stats(rows)
+    mark = "" if rg not in REGIME_NO_TRADE else "   <- ระบบจริง SKIP"
+    print(f"    {rg:<16} n={n:<5} Win {wr:>5.1f}%  Avg {r:+.2f}R{mark}")
+ok = [s for s in samples if s["regime_ok"]]
+n_ok, wr_ok, r_ok = stats(ok)
+print(f"    {'รวมที่เทรดได้':<16} n={n_ok:<5} Win {wr_ok:>5.1f}%  Avg {r_ok:+.2f}R")
 
 n_all, wr_all, r_all = stats(samples)
 print(f"  {'-' * 74}")
@@ -271,9 +323,13 @@ print(f"{'=' * 78}")
 #     แบบต่างๆ กับ sample ชุดเดียวกันเป๊ะ) ---
 csv_path = f"criteria_samples_{symbol}.csv"
 pd.DataFrame([{"time": s["time"], "direction": s["direction"], "score": s["score"],
-               "passed": s["passed"], "outcome": s["outcome"], "r": s["r"], "rr": s["rr"],
+               "passed": s["passed"], "outcome": s["outcome"], "r": s["r"],
+               "entry": s["entry"], "sl": s["sl"], "tp": s["tp"], "rr": s["rr"],
+               "blocked": s["blocked"], "tradeable": s["tradeable"],
+               "regime": s["regime"], "regime_ok": s["regime_ok"], "rr": s["rr"],
                "ema_gap_pct": s["ema_gap_pct"], "ema_gap_atr": s["ema_gap_atr"],
                "regime_age": s["regime_age"], "exit_time": s["exit_time"],
-               **{f"c_{k}": v for k, v in s["crit"].items()}} for s in samples]
+               **{f"c_{k}": v for k, v in s["crit"].items()}} for s in all_rows]
             ).to_csv(csv_path, index=False)
-print(f"\n  เขียน {len(samples)} setup ลง {csv_path} แล้ว")
+print(f"\n  เขียน {len(all_rows)} setup ลง {csv_path} แล้ว "
+      f"(เข้าเทรดได้จริง {len(samples)} + hard block กันไว้ {len(blocked_rows)})")

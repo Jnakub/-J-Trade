@@ -18,3 +18,4 @@ __pycache__/
 
 # ผลลัพธ์ backtest (สร้างใหม่ได้จาก backtest_criteria.py)
 criteria_samples_*.csv
+replay_trades_*.csv
