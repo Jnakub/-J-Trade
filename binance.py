@@ -219,7 +219,10 @@ def merge_real_volume(df_mt5: pd.DataFrame, mt5_symbol: str,
         df_vol, source = _volume_series(mt5_symbol, timeframe, need, offset_h, as_of=as_of)
         df_vol = df_vol.copy()
     except ValueError as exc:
-        print(f"  [Volume] {exc} — ใช้ tick_volume")
+        # as_of = โหมด backtest ที่เรียกซ้ำหลายพันครั้ง — ไม่พิมพ์ทุกรอบ (XAUUSDm ไม่มีแหล่ง
+        # real volume โดยตั้งใจ ใช้ tick_volume ของโบรกเหมือนที่ระบบจริงใช้ ดู YFINANCE_MAP)
+        if as_of is None:
+            print(f"  [Volume] {exc} — ใช้ tick_volume")
         return df
     except Exception as exc:
         print(f"  [Volume] ดึงไม่ได้ ใช้ tick_volume แทน — {exc}")

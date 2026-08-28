@@ -20,10 +20,11 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
 ซึ่งทำให้พลาดจังหวะที่ระบบจริงเข้าได้ 3 ใน 4 ของโอกาส)
 
 ⚠️ สิ่งที่ยังต่างจากของจริง — อ่านก่อนเชื่อตัวเลข:
-  1. **Exit ยังเป็นแบบย่อ** ไม่ใช่ exit_monitor.py ตัวจริง — จำลองแค่ SL/TP, ปิดครึ่งที่ 1R,
-     เลื่อน SL ไป breakeven ที่ 1R และ time exit ตาม MAX_HOLD_BARS ยังไม่มี ATR trailing,
-     structure break, climax, RSI/BB ร้อน, slow-trade 3 วัน, TP trailing
-     -> exit_monitor.analyze_position() ยังไม่รองรับ as_of จึงเรียกย้อนหลังไม่ได้ (งานขั้นต่อไป)
+  1. **Exit ใช้ exit_monitor.analyze_position(as_of=...) ตัวจริง** (2026-08-27) — ได้ ATR
+     trailing SL, structure break, trend invalidation, climax, RSI/BB ร้อน, slow-trade 3 วัน,
+     TP trailing, การคูณ keep% เป็นทอด ครบตามระบบจริง เรียกทุก 1 ชม.ตรงกับ INTERVAL_SECONDS
+     สิ่งที่ยังต่าง: broker fill SL/TP ถือว่าได้ราคาเป๊ะ และ execute_decision() ตัวจริงจะปิด
+     บางส่วนตาม lot ที่ปัดแล้ว (clamp_lot) ส่วนที่นี่คิดเป็นสัดส่วนล้วน
   2. **News guard จำลองไม่ได้** — check_upcoming_news() ยิง ForexFactory แบบ real-time
      ไม่มีข้อมูลย้อนหลัง ผลคือ backtest จะ "เข้าไม้ก่อนข่าว" ในจังหวะที่ระบบจริงหลบ
   3. ราคาที่ใช้เป็น close ของแท่ง 1H ที่ปิดพอดี ณ เวลานั้น (ของจริงคือ tick.bid ระหว่างชั่วโมง)
@@ -31,7 +32,13 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
   5. ไม่ได้จำลอง broker trade_mode, balance จริง, lot rounding — R-multiple ไม่ขึ้นกับ lot อยู่แล้ว
      แต่ daily loss guard ที่คิดจาก R จึงเป็นค่าประมาณ (MAX_DAILY_LOSS / RISK_PER_TRADE = กี่ R)
 
-ใช้: py backtest_replay.py BTCUSDm [days=730] [--no-cost]
+ใช้: py backtest_replay.py BTCUSDm [days=730] [--no-cost] [--min-sl=X]
+     --min-sl=X  ทับค่า MIN_SL_DISTANCE_PCT ของ symbol นี้ (ไว้เทียบว่าเกณฑ์ไหนดีกว่าบนไม้จริง)
+     --no-widen  ห้าม SL ขยับออกไปไกลกว่า SL ตอนเข้า (ยังขยับเข้าหาราคาได้ตามปกติ) — ไว้ตอบว่า
+                 การที่ ATR trailing สั่ง SL แรกกว้างกว่า SL ตอนเข้า เป็นตัวทำให้ขาดทุนเกิน 1R
+                 หรือมันช่วยให้ไม้รอดจากการย่อจนไปต่อได้ (ทดลองใน backtest เท่านั้น ไม่แตะระบบจริง)
+     --legacy-sl ใช้ SL โครงสร้างเป็น SL ที่ส่ง broker แบบเดิม (ก่อน 2026-08-27) — ไว้เทียบผล
+                 ของการส่ง SL แรกไปที่จุดเดียวกับ ATR trailing ตามที่ scheduler.py ทำตอนนี้
 """
 import sys
 from datetime import timedelta
@@ -43,24 +50,44 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from mt5_connect import connect
+import config
 from config import (MT5_TIMEFRAMES, MAX_DAILY_LOSS, RISK_PER_TRADE,
-                    COOLDOWN_HOURS_BY_SYMBOL)
-from scoring import compute_score, get_trend_bias, get_ohlcv, calc_rr
+                    COOLDOWN_HOURS_BY_SYMBOL, get_min_sl_distance_pct)
+from scoring import compute_score, get_trend_bias, get_ohlcv, get_ohlcv_real, calc_rr
 from binance import merge_real_volume
 from regime_check import get_regime
+import exit_monitor as em
 import reversal
 
 REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH")   # ตรงกับ scheduler.py
 REGIME_TREND    = ("TREND", "TREND แรงจัด")
 REGIME_REVERSAL = ("REVERSAL-READY",)
 
-MAX_HOLD_BARS   = 60      # แท่ง 4H (=10 วัน) — เพดานของ backtest เอง ระบบจริงไม่มีเพดานเวลา
-PARTIAL_AT_R    = 1.0     # ปิดครึ่งที่ 1R + เลื่อน SL ไปทุน (exit_monitor กฎ "ถึง 1R" + checklist ข้อ 5)
-PARTIAL_FRAC    = 0.5
+# เพดานถือไม้ของ backtest เอง — ระบบจริงไม่มีเพดานเวลา (กฎ slow-trade ตัดแค่ 50%) ตั้งไว้กัน
+# ไม้ค้างกินเวลารันเท่านั้น ถ้ามีไม้ชนเพดานบ่อยแปลว่าต้องขยาย
+MAX_HOLD_DAYS   = 30
+
+
+class SimPos:
+    """แทน position object ของ MT5 ให้ analyze_position() อ่านได้ — ไม้จำลองไม่มีใน MT5/journal"""
+    def __init__(self, symbol, direction, entry, sl, tp, lot, t):
+        self.symbol, self.price_open, self.sl, self.tp = symbol, entry, sl, tp
+        self.volume, self.ticket = lot, 0
+        self.time = int(pd.Timestamp(t).timestamp())
+        self.type = mt5.POSITION_TYPE_BUY if direction == "Long" else mt5.POSITION_TYPE_SELL
 
 symbol   = sys.argv[1] if len(sys.argv) > 1 else "BTCUSDm"
 days     = int(sys.argv[2]) if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else 730
-use_cost = "--no-cost" not in sys.argv
+use_cost  = "--no-cost" not in sys.argv
+no_widen  = "--no-widen" in sys.argv
+legacy_sl = "--legacy-sl" in sys.argv
+
+# --min-sl=X : ทับเกณฑ์ระยะ SL ขั้นต่ำของ symbol นี้ — get_min_sl_distance_pct() อ่าน dict
+# ตอนถูกเรียกทุกครั้ง การแก้ตรงนี้จึงมีผลกับ compute_score/reversal ทันทีโดยไม่ต้องแก้ config.py
+_min_sl_arg = next((a for a in sys.argv if a.startswith("--min-sl=")), None)
+if _min_sl_arg:
+    config.MIN_SL_DISTANCE_PCT_BY_SYMBOL = dict(config.MIN_SL_DISTANCE_PCT_BY_SYMBOL)
+    config.MIN_SL_DISTANCE_PCT_BY_SYMBOL[symbol] = float(_min_sl_arg.split("=")[1])
 
 connect()
 
@@ -84,7 +111,9 @@ print(f"  สแกนทุก 1 ชม. ({len(clock)} รอบ)   spread ป�
       f"({cost_pct:.4f}% ของราคา){'  [คิดต้นทุน]' if use_cost else '  [--no-cost]'}")
 print(f"  Daily loss guard {MAX_DAILY_LOSS*100:.0f}% / risk {RISK_PER_TRADE*100:.0f}% ต่อไม้ "
       f"= หยุดหาไม้ใหม่เมื่อวันนั้นขาดทุนรวมถึง {max_daily_loss_r:.1f}R")
-print(f"  Cooldown {COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)} ชม.\n")
+print(f"  Cooldown {COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)} ชม.   "
+      f"MIN_SL {get_min_sl_distance_pct(symbol)}%{'  [--no-widen]' if no_widen else ''}"
+      f"{'  [ทับด้วย --min-sl]' if _min_sl_arg else ''}\n")
 
 pos = None
 trades, skips = [], {}
@@ -119,31 +148,52 @@ def note(reason):
 
 
 def step_position(t, bar):
-    """เดินไม้ที่ถืออยู่ไป 1 ชั่วโมง — คืน dict ถ้าปิดแล้ว"""
+    """เดินไม้ที่ถืออยู่ไป 1 ชั่วโมง — broker เช็ค SL/TP ก่อน แล้ว exit_monitor ตัวจริงทำงาน
+    ที่ปลายชั่วโมง (ตรงกับ INTERVAL_SECONDS=3600 ของระบบจริง)"""
     global pos
     long_ = pos["direction"] == "Long"
-    risk = abs(pos["entry"] - pos["sl0"])
+    risk = abs(pos["entry"] - pos["sl0"])      # ระยะเสี่ยงตอนเข้า = ฐาน 1R ของบัญชี
 
-    hit_sl = (bar["low"] <= pos["sl"]) if long_ else (bar["high"] >= pos["sl"])
-    if hit_sl:
+    # 1) broker: SL/TP ทำงานระหว่างแท่งเสมอ ไม่ต้องรอ monitor
+    if (bar["low"] <= pos["sl"]) if long_ else (bar["high"] >= pos["sl"]):
         r = ((pos["sl"] - pos["entry"]) if long_ else (pos["entry"] - pos["sl"])) / risk
-        return close_pos(t, pos["booked"] + pos["rem"] * r, "SL" if pos["sl"] != pos["entry"] else "BE")
-
-    if pos["rem"] == 1.0:
-        part = pos["entry"] + risk * PARTIAL_AT_R * (1 if long_ else -1)
-        if (bar["high"] >= part) if long_ else (bar["low"] <= part):
-            pos["booked"] += PARTIAL_FRAC * PARTIAL_AT_R
-            pos["rem"] = 1.0 - PARTIAL_FRAC
-            pos["sl"] = pos["entry"]          # breakeven (checklist ข้อ 5)
-
-    hit_tp = (bar["high"] >= pos["tp"]) if long_ else (bar["low"] <= pos["tp"])
-    if hit_tp:
+        how = "BE" if abs(pos["sl"] - pos["entry"]) < 1e-9 else "SL"
+        return close_pos(t, pos["booked"] + pos["rem"] * r, how)
+    if (bar["high"] >= pos["tp"]) if long_ else (bar["low"] <= pos["tp"]):
         r = ((pos["tp"] - pos["entry"]) if long_ else (pos["entry"] - pos["tp"])) / risk
         return close_pos(t, pos["booked"] + pos["rem"] * r, "TP")
 
-    if (t - pos["time"]) >= timedelta(hours=MAX_HOLD_BARS * 4):
+    # 2) exit_monitor ตัวจริง — เรียกด้วย as_of + ctx (ไม้จำลองไม่มีใน journal)
+    sim = SimPos(symbol, pos["direction"], pos["entry"], pos["sl"], pos["tp"], pos["rem"], pos["time"])
+    try:
+        m = em.analyze_position(sim, as_of=t, ctx={
+            "pinned_swing": pos["pinned_swing"], "pinned_atr_entry": pos["pinned_atr_entry"],
+            "strategy": pos["strategy"], "original_lot": 1.0, "original_tp": pos["tp0"]})
+    except Exception:
+        return None                            # ข้อมูลไม่พอรอบนี้ — ถือต่อ
+
+    price = m["current_price"]
+    keep = m["recommended_keep_pct"] / 100
+    if keep < pos["rem"] - 1e-9:               # ปิดบางส่วน/ทั้งหมดตามที่ระบบสั่ง
+        cut = pos["rem"] - keep
+        r_now = ((price - pos["entry"]) if long_ else (pos["entry"] - price)) / risk
+        pos["booked"] += cut * r_now
+        pos["rem"] = keep
+        pos["cuts"] += 1
+        if pos["rem"] <= 1e-9:
+            return close_pos(t, pos["booked"], m["final_decision"][0][:24])
+
+    if m["desired_sl"] is not None:            # ATR trailing / breakeven
+        new_sl = m["desired_sl"]
+        if no_widen:                           # ห้ามถอย SL ออกไกลกว่าตอนเข้า
+            new_sl = max(new_sl, pos["sl0"]) if long_ else min(new_sl, pos["sl0"])
+        pos["sl"] = new_sl
+    if m["desired_tp"] is not None:            # TP trailing
+        pos["tp"] = m["desired_tp"]
+
+    if (t - pos["time"]) >= timedelta(days=MAX_HOLD_DAYS):
         r = ((bar["close"] - pos["entry"]) if long_ else (pos["entry"] - bar["close"])) / risk
-        return close_pos(t, pos["booked"] + pos["rem"] * r, "TIME")
+        return close_pos(t, pos["booked"] + pos["rem"] * r, "HOLD-CAP")
     return None
 
 
@@ -218,8 +268,25 @@ for n, row in enumerate(clock.to_dict("records")):
         note(f"ไม่ผ่านสกอร์การ์ด ({strategy})")
         continue
 
-    pos = {"time": t, "direction": direction, "entry": entry, "sl": sl, "sl0": sl, "tp": tp,
-           "score": score, "strategy": strategy, "regime": regime, "booked": 0.0, "rem": 1.0}
+    # เหมือน scheduler.py: ส่ง SL แรกไปที่จุดเดียวกับที่ ATR trailing จะเลื่อนไปในรอบแรก
+    # (pinned_swing ยังเป็น sl โครงสร้างเท่าเดิม สูตร trailing จึงไม่เปลี่ยน)
+    atr_entry = None
+    if not legacy_sl:
+        try:
+            _tr = em.calc_atr_trailing_sl(get_ohlcv_real(symbol, "4H", bars=210, as_of=t),
+                                          symbol, t, direction, as_of=t)
+            if _tr:
+                atr_entry = _tr["atr_entry"]
+                sl = (sl - 2 * atr_entry) if direction == "Long" else (sl + 2 * atr_entry)
+        except Exception:
+            pass
+
+    pos = {"time": t, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
+           "tp": tp, "tp0": tp, "score": score, "strategy": strategy, "regime": regime,
+           "booked": 0.0, "rem": 1.0, "cuts": 0,
+           "pinned_swing": sl + 2 * atr_entry if (atr_entry and direction == "Long")
+                           else (sl - 2 * atr_entry if atr_entry else sl),
+           "pinned_atr_entry": atr_entry}
 
     if n % 2000 == 0:
         print(f"  ... {t}  ({n}/{len(clock)})  ปิดไปแล้ว {len(trades)} ไม้", flush=True)

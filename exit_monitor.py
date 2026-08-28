@@ -222,7 +222,8 @@ def extreme_price_since_entry(df: pd.DataFrame, entry_time: pd.Timestamp, direct
 
 def calc_atr_trailing_sl(df_swing: pd.DataFrame, symbol: str,
                          entry_time: pd.Timestamp, direction: str,
-                         pinned_swing: float = None, pinned_atr_entry: float = None) -> dict | None:
+                         pinned_swing: float = None, pinned_atr_entry: float = None,
+                         as_of=None) -> dict | None:
     """df_swing = ข้อมูล 4H สำหรับหา Swing ฐาน (เฉพาะ fallback path ที่ไม่มี pinned_swing ส่งมา)
     — ATR ดึง 1H ภายในฟังก์ชันเอง คืน {swing, atr_entry, atr_latest, pinned_base, initial_sl, new_sl}
     หรือ None ถ้าข้อมูลย้อนหลังไม่พอ (เช่น position เก่ากว่าจำนวนแท่งที่ดึงมา)
@@ -235,7 +236,7 @@ def calc_atr_trailing_sl(df_swing: pd.DataFrame, symbol: str,
     ถ้าไม่ส่งมา (position เก่าก่อนมีฟีเจอร์นี้ หรือบันทึกฐานตรึงไม่สำเร็จตอนเข้า) จะ fallback ไป
     คำนวณ Swing ดิบใหม่จาก rolling window แบบเดิม (ไม่ใช้ SL ข้อ 1 buffer — เคสนี้พบยาก)"""
     # ── ATR(14) จาก 1H — atr_latest คำนวณสดเสมอ ──
-    df_1h = get_ohlcv(symbol, TRAIL_TIMEFRAME, bars=TRAIL_BARS)
+    df_1h = get_ohlcv(symbol, TRAIL_TIMEFRAME, bars=TRAIL_BARS, as_of=as_of)
     atr_1h = calc_atr(df_1h, TRAIL_ATR_PERIOD)
     atr_latest = atr_1h.iloc[len(df_1h) - 2]
 
@@ -313,7 +314,7 @@ TREND_CHECK_MAX_CONSEC     = max(TREND_CHECK_KEEP_BY_CONSEC)
 
 
 def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timestamp,
-                             strategy: str = "Scoring") -> dict:
+                             strategy: str = "Scoring", as_of=None) -> dict:
     """คืน {"active", "consec_break", "keep_pct", "reason"} — keep_pct = % lot ที่ควรเหลือ
     (100 = ปกติ, 75/50 = เตือนภัยบางส่วน, 0 = invalidated เต็มรูปแบบ)
     strategy == 'Reversal' -> ข้าม check นี้ทั้งหมด (active=False เสมอ ไม่มีทาง invalidate)"""
@@ -321,7 +322,7 @@ def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timesta
         return {"active": False, "consec_break": 0, "keep_pct": 100,
                 "reason": "ข้าม — ไม้ Reversal เข้าสวน trend โดยดีไซน์อยู่แล้ว"}
 
-    df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=210)
+    df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=210, as_of=as_of)
     close = df_1d["close"]
     ema50 = ema(close, 50)
     is_long = direction == "Long"
@@ -364,8 +365,8 @@ def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timesta
 # เดียวกับ "still_valid" ใน swing.find_sl_from_structure (ATR × STRUCTURE_TOLERANCE) ไม่เพิ่ม
 # magic number ใหม่ — ต้องปิดทะลุเกิน ATR×0.22 ถึงนับว่า broken จริง
 
-def check_structure_break(symbol: str, direction: str) -> bool:
-    df_4h = get_ohlcv_real(symbol, "4H", bars=210)
+def check_structure_break(symbol: str, direction: str, as_of=None) -> bool:
+    df_4h = get_ohlcv_real(symbol, "4H", bars=210, as_of=as_of)
     vol_mult = swing_vol_multiplier(symbol)
     wick_min = swing_wick_ratio_min(symbol)
     close_price = df_4h["close"].iloc[-2]
@@ -472,7 +473,23 @@ def check_recent_news(entry_time: pd.Timestamp, hours_back: int = NEWS_POST_H) -
 # วิเคราะห์ 1 position
 # ---------------------------------------------------------------------------
 
-def analyze_position(pos) -> dict:
+def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
+    """as_of=None (ปกติ) = วิเคราะห์ไม้ ณ ตอนนี้ด้วยข้อมูลสด
+
+    as_of=datetime (backtest) = วิเคราะห์ราวกับว่าตอนนี้คือเวลานั้น — ทุกเฟรมราคาถูกตัดที่
+    as_of ผ่าน bars.get_bars() และ "ราคาปัจจุบัน" ใช้ close ของแท่ง 1H ที่ปิดล่าสุดแทน live tick
+    เพิ่ม 2026-08-27 เพื่อให้ backtest_replay.py จำลอง exit ด้วย logic ตัวจริงตัวนี้ ไม่ใช่เขียน
+    SL/TP + partial แบบย่อขึ้นมาเอง ซึ่งขาด ATR trailing / structure break / climax /
+    slow-trade / TP trailing ไปทั้งหมด
+
+    ctx (คู่กับ as_of) = แทนที่การอ่าน journal ด้วยค่าที่ backtest ถืออยู่แล้ว:
+      pinned_swing, pinned_atr_entry, strategy, original_lot, original_tp
+    ไม้จำลองไม่มีอยู่ใน journal.csv จึงต้องส่งเข้ามาเอง
+
+    ⚠️ News guard ถูกปิดอัตโนมัติเมื่อมี as_of — check_upcoming_news()/check_recent_news()
+    ยิง ForexFactory แบบ real-time ไม่มีข้อมูลย้อนหลัง จึงจำลองไม่ได้ ผลคือ backtest จะไม่เคย
+    ออกไม้เพราะข่าวเลย ต่างจากของจริง (คืน news_simulated=False ไว้ให้ผู้เรียกรู้ตัว)"""
+    ctx = ctx or {}
     symbol     = pos.symbol
     direction  = "Long" if pos.type == mt5.POSITION_TYPE_BUY else "Short"
     entry      = pos.price_open
@@ -482,7 +499,7 @@ def analyze_position(pos) -> dict:
     entry_time = pd.to_datetime(pos.time, unit="s")
 
     # ใช้ real volume (Bitstamp/COMEX) — swing filter และ VSA climax แตะ volume ทั้งคู่
-    df = get_ohlcv_real(symbol, "4H", bars=BARS)
+    df = get_ohlcv_real(symbol, "4H", bars=BARS, as_of=as_of)
 
     atr_series = calc_atr(df, ATR_PERIOD)
     rsi_series = calc_rsi(df["close"], RSI_PERIOD)
@@ -495,17 +512,26 @@ def analyze_position(pos) -> dict:
     bb_lo_now  = bb_lower.iloc[closed_idx]
     climax, climax_pattern = is_climax_bar(df, closed_idx)
 
-    tick = get_tick_or_raise(symbol)
-    current_price = tick.bid if direction == "Long" else tick.ask
+    if as_of is None:
+        tick = get_tick_or_raise(symbol)
+        current_price = tick.bid if direction == "Long" else tick.ask
+    else:
+        # ราคา "ตอนนี้" ในโหมด backtest = close ของแท่ง 1H ที่ปิดล่าสุด ณ as_of
+        current_price = float(get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=2,
+                                        as_of=as_of)["close"].iloc[-1])
 
     extreme = extreme_price_since_entry(df, entry_time, direction)
 
     # ── ATR Trailing SL ──
     #   initial_sl  = SL เริ่มต้นตามสูตร (ฐานตรึง ± ATR ตอนเข้า) → ใช้เป็นระยะ 1R คงที่
     #   trailing_sl = SL ใหม่รอบนี้ (ฐานตรึง ± ATR ล่าสุด)       → ใช้ขยับ SL จริง + วัดระยะห่าง
-    pinned_swing, pinned_atr_entry = journal.get_pinned_anchor(pos.ticket)
+    if ctx:
+        pinned_swing, pinned_atr_entry = ctx.get("pinned_swing"), ctx.get("pinned_atr_entry")
+    else:
+        pinned_swing, pinned_atr_entry = journal.get_pinned_anchor(pos.ticket)
     trail       = calc_atr_trailing_sl(df, symbol, entry_time, direction,
-                                       pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
+                                       pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
+                                       as_of=as_of)
     initial_sl  = trail["initial_sl"] if trail else (sl if sl else None)
     trailing_sl = trail["new_sl"] if trail else None
     effective_sl = trailing_sl if trailing_sl is not None else (sl if sl else None)
@@ -525,19 +551,24 @@ def analyze_position(pos) -> dict:
         dist_sl_pct = (effective_sl - current_price) / effective_sl * 100 if effective_sl else None
         dist_tp_pct = (current_price - tp) / tp * 100 if tp else None
 
-    now = datetime.now()
+    now = datetime.now() if as_of is None else pd.Timestamp(as_of).to_pydatetime()
     time_held_days = (now - entry_time).total_seconds() / 86400
 
     # ── 2) รัน Exit Decision Checklist โดยใช้ r_multiple/time_held ข้างบน (ก่อนคิด Chandelier) ──
-    strategy       = journal.get_trade_strategy(pos.ticket)
-    trend_info     = check_trend_invalidation(symbol, direction, entry_time, strategy)
+    strategy       = ctx.get("strategy") if ctx else journal.get_trade_strategy(pos.ticket)
+    trend_info     = check_trend_invalidation(symbol, direction, entry_time, strategy, as_of=as_of)
     trend_keep_pct = trend_info["keep_pct"]
     trend_broken_full    = trend_keep_pct <= 0
     trend_broken_partial = 0 < trend_keep_pct < 100
-    structure_broken = check_structure_break(symbol, direction)
-    has_news, news_detail, news_hours_left = check_upcoming_news()
+    structure_broken = check_structure_break(symbol, direction, as_of=as_of)
+    # News ย้อนหลังไม่ได้ (ForexFactory ให้เฉพาะปฏิทินปัจจุบัน) — โหมด backtest ถือว่าไม่มีข่าว
+    if as_of is None:
+        has_news, news_detail, news_hours_left = check_upcoming_news()
+        has_recent_news, recent_news_detail = check_recent_news(entry_time)
+    else:
+        has_news, news_detail, news_hours_left = False, "", None
+        has_recent_news, recent_news_detail = False, ""
     news_imminent = has_news and news_hours_left is not None and news_hours_left <= NEWS_IMMINENT_H
-    has_recent_news, recent_news_detail = check_recent_news(entry_time)
     post_news_no_profit = has_recent_news and pnl_pct <= 0
     ge1r             = r_multiple is not None and r_multiple >= 1.0
     slow_trade       = time_held_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
@@ -636,7 +667,7 @@ def analyze_position(pos) -> dict:
     # ฐานกับการทำงานจริง พอไม้ถูกปิดบางส่วนไปแล้วจะอ่านขัดกันเอง เช่นไม้เปิด 1.91 ปิดเหลือ
     # 1.43 (75%) แล้วกฎ 75% trigger ซ้ำ จอจะขึ้น "1.43 -> 1.073" เหมือนจะตัดอีกรอบ ทั้งที่
     # ของจริง target = 1.91x0.75 = 1.433 ซึ่งถือครบแล้ว ไม่ตัดอะไรเพิ่ม
-    original_lot  = journal.get_original_lot(pos.ticket)
+    original_lot  = ctx.get("original_lot") if ctx else journal.get_original_lot(pos.ticket)
     lot_basis     = original_lot if original_lot is not None else lot
     remaining_lot = round(lot_basis * recommended_keep_pct / 100, 3)
     held_pct      = round(lot / lot_basis * 100, 1) if lot_basis else 100.0
@@ -699,7 +730,7 @@ def analyze_position(pos) -> dict:
     desired_tp = None
     if (not invalidated and dist_tp_pct is not None and dist_tp_pct <= TRAIL_TP_TRIGGER_PCT
             and trail is not None and tp):
-        original_tp = journal.get_original_tp(pos.ticket)
+        original_tp = ctx.get("original_tp") if ctx else journal.get_original_tp(pos.ticket)
         if original_tp is None:
             original_tp = tp   # ไม้เก่าก่อนมีฟีเจอร์นี้ — fallback ใช้ TP ปัจจุบันแทน
         atr_latest_1h = trail["atr_latest"]
@@ -729,6 +760,8 @@ def analyze_position(pos) -> dict:
         "position_rules": position_rules,
         "base_keep_pct": base_keep_pct, "stage_keep_pct": stage_keep_pct,
         "recommended_keep_pct": recommended_keep_pct,
+        "news_simulated": as_of is None,   # False = โหมด backtest, ไม่มีข่าวมาให้เช็ค
+        "as_of": as_of,
         "remaining_lot": remaining_lot,
         "original_lot": original_lot,   # None = ไม่พบใน journal (ไม้เก่า/เปิดมือ) -> fallback ใช้ lot ปัจจุบัน
         "lot_basis": lot_basis,         # ฐานที่ใช้คิด % — ตัวเดียวกับที่ execute_decision ใช้
