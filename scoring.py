@@ -10,7 +10,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import (
-    WEIGHT_TREND_1D, WEIGHT_OBV_1D,
+    WEIGHT_OBV_1D,
     WEIGHT_RSI_4H, WEIGHT_OBV_4H, RSI_SCORE_BUFFER,
     WEIGHT_TREND_1H, WEIGHT_DI_1H,
     WEIGHT_MACD, WEIGHT_RR,
@@ -270,7 +270,6 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     price = df_1h["close"].iloc[-1] if as_of is not None else get_tick_or_raise(symbol).bid
 
-    ema50_1d  = ema(df_1d["close"], 50).iloc[-1]
     ema50_1h  = ema(df_1h["close"], 50).iloc[-1]
     # ema50_4h ถูกลบ 2026-08-19 — ช่อง 4H เปลี่ยนจาก Trend (EMA50) เป็น RSI แล้ว ไม่มีใครใช้ต่อ
 
@@ -341,7 +340,6 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     # 2026-07-27: ช่อง 1H เปลี่ยนจาก OBV เป็น DI (ดูเหตุผล+ตัวเลข redundancy ใน config.py)
     criteria = [
-        ("Trend 1D",     (price > ema50_1d) if is_long else (price < ema50_1d), WEIGHT_TREND_1D),
         ("OBV 1D",       obv_rising(obv_1d),                                    WEIGHT_OBV_1D),
         # 2026-08-19: ช่องนี้เดิมคือ Trend 4H (close vs EMA50) เปลี่ยนเป็น RSI 4H ตามคำสั่งผู้ใช้
         # (ดูตัวเลข redundancy/predictive power ที่วัดไว้ใน config.py เหนือ WEIGHT_RSI_4H)
