@@ -184,9 +184,6 @@ def scan_symbol(symbol: str) -> None:
             return
 
         # 5. Execute
-        lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
-        lot    = clamp_lot(symbol, lot)
-
         # ── ฐานตรึงของ ATR Trailing SL — คำนวณก่อนส่ง order เพื่อส่งเข้า place_order() รวดเดียว
         # (2026-08-09: ย้าย journal logging เข้าไปอยู่ใน place_order() เอง ไม่แยกเรียกทีหลังอีก —
         # กันเคสไม้จริงหลุดไม่ถูกบันทึก ดู comment เต็มที่ order.place_order()) exit_monitor.py จะ
@@ -199,15 +196,45 @@ def scan_symbol(symbol: str) -> None:
         # ที่ใช้กรองตอนเข้า พอ anchor เดียวกัน ทั้ง R:R ตอนเข้า และ Trailing SL ระหว่างถือ จะไปทาง
         # เดียวกันเสมอ — ยังคง roll ตาม ATR1H รายชั่วโมงเหมือนเดิมทุกอย่าง เปลี่ยนแค่จุดเริ่มต้น
         pinned_swing = pinned_atr_entry = None
+        exec_sl = sl        # SL ที่ส่ง broker จริง — ปกติ = SL โครงสร้าง เว้นแต่คำนวณ trailing ได้
         try:
             df_4h_trail = get_ohlcv_real(symbol, "4H", bars=TRAIL_STRUCTURE_BARS)
             trail = calc_atr_trailing_sl(df_4h_trail, symbol, datetime.now(), direction)
             if trail:
                 pinned_swing, pinned_atr_entry = sl, trail["atr_entry"]
+                # 2026-08-27: ส่ง SL แรกไปที่จุดเดียวกับที่ ATR trailing จะเลื่อนไปอยู่ดีในรอบแรก
+                # (exit_monitor คำนวณ initial_sl = pinned_swing ∓ 2×ATR แล้วสั่งขยับทันทีที่รันรอบ
+                # แรกภายใน 1 ชม.) เดิมส่ง `sl` แคบๆ ไปก่อนแล้วค่อยโดนขยับออก = ระบบคิด lot จาก
+                # ระยะแคบแต่ไปรับความเสี่ยงจริงตามระยะกว้าง
+                #
+                # วัดจาก backtest_replay.py (BTC 730 วัน, exit_monitor ตัวจริง): ไม้ที่จบด้วย SL
+                # 6/6 ไม้มี SL ถูกขยับออกก่อนโดน เฉลี่ยกว้างขึ้น 59% ของ 1R -> ขาดทุนจริงเฉลี่ย
+                # 1.17R แย่สุด 1.59R ทั้งที่ position size คิดไว้ที่ 1R = RISK_PER_TRADE (2%)
+                # = ไม้เดียวเสียได้ถึง ~3% ของพอร์ต
+                #
+                # ผลของการแก้: lot เล็กลงตามสัดส่วน (ระยะเสี่ยงกว้างขึ้น) ขาดทุนสูงสุดกลับมาเป็น
+                # 1R จริง และกฎ exit ทุกข้อที่อิง r_multiple (ปิดครึ่งที่ 1R, breakeven, slow-trade)
+                # ยิงที่ระยะเดียวกับที่คิด lot ไม่ใช่ 1.34-1.6 เท่าเหมือนเดิม
+                #
+                # pinned_swing ยังเป็น `sl` เท่าเดิม -> สูตร trailing ทั้งหมดไม่เปลี่ยนเลย
+                # เปลี่ยนแค่ "จุดเริ่ม" ให้ตรงกับที่มันจะไปอยู่แล้ว
+                #
+                # ⚠️ ยังไม่ได้แตะ MIN_RR_HARD_BLOCK / MIN_RR ซึ่งยังคิด R:R จาก `sl` แคบอยู่ —
+                # แปลว่าด่านคัดเข้ายังใช้ R:R ที่สูงกว่าความเป็นจริงราว 1.3 เท่า (ตั้งใจแยกเป็น
+                # คนละเรื่อง จะได้รู้ว่าการแก้ risk sizing อย่างเดียวให้ผลยังไงก่อน)
+                exec_sl = (sl - 2 * trail["atr_entry"]) if direction == "Long" \
+                          else (sl + 2 * trail["atr_entry"])
         except Exception as exc:
             print(f"  [{symbol}] WARNING — บันทึกฐานตรึงไม่ได้ ({exc}) — exit_monitor จะ fallback คำนวณเองภายหลัง")
 
-        ticket = place_order(symbol, direction, entry, sl, tp, lot,
+        lot, _ = calculate_lot_size(symbol, entry, exec_sl, balance, RISK_PER_TRADE)
+        lot    = clamp_lot(symbol, lot)
+        if exec_sl != sl:
+            rr_exec = calc_rr(entry, exec_sl, tp, direction)
+            print(f"  [{symbol}] SL ที่ส่ง broker = {exec_sl:.2f} (SL โครงสร้าง {sl:.2f} "
+                  f"ขยาย 2xATR ให้ตรงกับ ATR trailing)  R:R จริง = {rr_exec:.2f}")
+
+        ticket = place_order(symbol, direction, entry, exec_sl, tp, lot,
                              score=score, strategy=strategy,
                              pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
