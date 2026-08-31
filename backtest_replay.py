@@ -39,6 +39,12 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  หรือมันช่วยให้ไม้รอดจากการย่อจนไปต่อได้ (ทดลองใน backtest เท่านั้น ไม่แตะระบบจริง)
      --legacy-sl ใช้ SL โครงสร้างเป็น SL ที่ส่ง broker แบบเดิม (ก่อน 2026-08-27) — ไว้เทียบผล
                  ของการส่ง SL แรกไปที่จุดเดียวกับ ATR trailing ตามที่ scheduler.py ทำตอนนี้
+     --drop="OBV 4H"  ตัดเกณฑ์นี้ออกจากสกอร์การ์ด Scoring (คั่นหลายตัวด้วย ,) — ไว้ตอบว่าเกณฑ์
+                 นั้นช่วยหรือถ่วงเมื่อวัดทั้งระบบ ต้องคู่กับ --min-score เสมอเพราะการตัดเกณฑ์
+                 ออกโดยไม่ลดเพดานเท่ากับทำให้ด่านเข้มขึ้นไปด้วย = เปลี่ยนสองอย่างพร้อมกัน
+     --min-score=X   ทับ MIN_SCORE (ปกติ 5 จาก 6 เกณฑ์)
+     --skip-regime="TREND แรงจัด"  เพิ่ม regime เข้า REGIME_NO_TRADE เฉพาะรอบนี้ (คั่นหลายตัว
+                 ด้วย ,) — ไว้ตอบว่า "ถ้าไม่เข้าไม้ตอน regime นี้เลย ผลรวมดีขึ้นไหม"
 """
 import sys
 from datetime import timedelta
@@ -53,14 +59,15 @@ from mt5_connect import connect
 import config
 from config import (MT5_TIMEFRAMES, MAX_DAILY_LOSS, RISK_PER_TRADE,
                     COOLDOWN_HOURS_BY_SYMBOL, get_min_sl_distance_pct)
+import scoring
 from scoring import compute_score, get_trend_bias, get_ohlcv, get_ohlcv_real, calc_rr
 from binance import merge_real_volume
 from regime_check import get_regime
 import exit_monitor as em
 import reversal
 
-REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH")   # ตรงกับ scheduler.py
-REGIME_TREND    = ("TREND", "TREND แรงจัด")
+REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH", "TREND แรงจัด")   # ตรงกับ scheduler.py
+REGIME_TREND    = ("TREND",)   # 2026-08-31: "TREND แรงจัด" ย้ายไป NO_TRADE — ดูเหตุผลใน scheduler.py
 REGIME_REVERSAL = ("REVERSAL-READY",)
 
 # เพดานถือไม้ของ backtest เอง — ระบบจริงไม่มีเพดานเวลา (กฎ slow-trade ตัดแค่ 50%) ตั้งไว้กัน
@@ -89,6 +96,30 @@ if _min_sl_arg:
     config.MIN_SL_DISTANCE_PCT_BY_SYMBOL = dict(config.MIN_SL_DISTANCE_PCT_BY_SYMBOL)
     config.MIN_SL_DISTANCE_PCT_BY_SYMBOL[symbol] = float(_min_sl_arg.split("=")[1])
 
+# --drop / --min-score : ทดลองเปลี่ยนรูปสกอร์การ์ดเฉพาะรอบนี้ — compute_score อ่านสองตัวนี้จาก
+# scoring ตอนถูกเรียกทุกครั้ง การ set ตรงนี้จึงมีผลทันทีโดยไม่ต้องแก้ scoring.py/config.py
+_drop_arg = next((a for a in sys.argv if a.startswith("--drop=")), None)
+if _drop_arg:
+    _dropped = tuple(s.strip() for s in _drop_arg.split("=", 1)[1].split(","))
+    _unknown = [n for n in _dropped if n not in scoring.SCORECARD_CRITERIA_NAMES]
+    if _unknown:
+        sys.exit(f"--drop: ไม่รู้จักเกณฑ์ {_unknown} — มีให้เลือก "
+                 f"{list(scoring.SCORECARD_CRITERIA_NAMES)}")
+    scoring.DISABLED_CRITERIA = _dropped
+_ms_arg = next((a for a in sys.argv if a.startswith("--min-score=")), None)
+if _ms_arg:
+    scoring.MIN_SCORE = float(_ms_arg.split("=")[1])
+
+# --skip-regime : ปิดไม่ให้เข้าไม้ตอน regime ที่ระบุ (เพิ่มเข้า REGIME_NO_TRADE เฉพาะรอบนี้)
+_sr_arg = next((a for a in sys.argv if a.startswith("--skip-regime=")), None)
+if _sr_arg:
+    _skip = tuple(s.strip() for s in _sr_arg.split("=", 1)[1].split(","))
+    _known = REGIME_NO_TRADE + REGIME_TREND + REGIME_REVERSAL
+    _bad = [r for r in _skip if r not in _known]
+    if _bad:
+        sys.exit(f"--skip-regime: ไม่รู้จัก regime {_bad} — มีให้เลือก {list(_known)}")
+    REGIME_NO_TRADE = REGIME_NO_TRADE + tuple(r for r in _skip if r not in REGIME_NO_TRADE)
+
 connect()
 
 info = mt5.symbol_info(symbol)
@@ -113,7 +144,12 @@ print(f"  Daily loss guard {MAX_DAILY_LOSS*100:.0f}% / risk {RISK_PER_TRADE*100:
       f"= หยุดหาไม้ใหม่เมื่อวันนั้นขาดทุนรวมถึง {max_daily_loss_r:.1f}R")
 print(f"  Cooldown {COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)} ชม.   "
       f"MIN_SL {get_min_sl_distance_pct(symbol)}%{'  [--no-widen]' if no_widen else ''}"
-      f"{'  [ทับด้วย --min-sl]' if _min_sl_arg else ''}\n")
+      f"{'  [ทับด้วย --min-sl]' if _min_sl_arg else ''}")
+_kept = [n for n in scoring.SCORECARD_CRITERIA_NAMES if n not in scoring.DISABLED_CRITERIA]
+print(f"  สกอร์การ์ด {len(_kept)} เกณฑ์ ผ่านที่ {scoring.MIN_SCORE:g}"
+      f"{'   ตัดออก: ' + ', '.join(scoring.DISABLED_CRITERIA) if scoring.DISABLED_CRITERIA else ''}")
+print(f"  ไม่เข้าไม้เมื่อ regime = {', '.join(REGIME_NO_TRADE)}"
+      f"{'   [เพิ่มด้วย --skip-regime]' if _sr_arg else ''}\n")
 
 pos = None
 trades, skips = [], {}
@@ -228,8 +264,10 @@ for n, row in enumerate(clock.to_dict("records")):
 
     try:                                                   # ด่าน 4
         rinfo = regime_at(t)
-    except Exception:
-        note("regime error")
+    except Exception as exc:
+        # ใส่ชนิด+ข้อความไว้ด้วย — รอบที่ MT5 หลุดกลางทางเคยขึ้น "regime error" เฉยๆ หลายพัน
+        # รอบแล้วผลออกมาดูเหมือนผลปกติ แยกไม่ออกว่าเป็นผลจริงหรือ run เสีย
+        note(f"regime error: {type(exc).__name__} {str(exc)[:40]}")
         continue
     regime = rinfo["regime"]
     if regime in REGIME_NO_TRADE:
@@ -281,8 +319,13 @@ for n, row in enumerate(clock.to_dict("records")):
         except Exception:
             pass
 
+    # เก็บผลรายเกณฑ์ลงไม้ด้วย — ไม่งั้นต้องมาไล่เรียก compute_score ซ้ำทีหลังเพื่อวิเคราะห์
+    # รายเกณฑ์ ซึ่งได้ค่าจาก scoring.py "ณ วันที่วิเคราะห์" ไม่ใช่ตัวที่กรองไม้นี้จริงตอน replay
+    # (ถ้าสกอร์การ์ดถูกแก้ระหว่างนั้น ตัวเลขจะไม่ตรงกับไม้ที่ได้มาโดยที่ไม่มีอะไรฟ้อง)
+    # ชื่อคอลัมน์ = ชื่อเกณฑ์ตรงๆ ฝั่ง Scoring/Reversal คนละชุด อีกฝั่งจึงเป็นค่าว่าง
     pos = {"time": t, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
            "tp": tp, "tp0": tp, "score": score, "strategy": strategy, "regime": regime,
+           **{name: bool(ok) for name, ok, _ in criteria},
            "booked": 0.0, "rem": 1.0, "cuts": 0,
            "pinned_swing": sl + 2 * atr_entry if (atr_entry and direction == "Long")
                            else (sl - 2 * atr_entry if atr_entry else sl),
@@ -325,5 +368,13 @@ for lbl, g in (("ครึ่งแรก", t[t["time"] < mid]), ("ครึ่�
     if len(g):
         print(f"  {lbl:<22}{len(g):>6}{g['win'].mean()*100:>7.1f}%{g['R'].mean():>+8.2f}{g['R'].sum():>+9.1f}")
 print(f"{'=' * 78}")
-t.to_csv(f"replay_trades_{symbol}.csv", index=False)
-print(f"  เขียนไม้ทั้งหมดลง replay_trades_{symbol}.csv")
+# รอบที่เปลี่ยนรูปสกอร์การ์ดเขียนคนละไฟล์ — ไม่งั้นทับผลรอบปกติที่เอาไว้เทียบ
+_tag = ""
+if scoring.DISABLED_CRITERIA:
+    _tag = "_drop-" + "-".join(n.replace(" ", "") for n in scoring.DISABLED_CRITERIA)
+if _ms_arg:
+    _tag += f"_min{scoring.MIN_SCORE:g}"
+if _sr_arg:
+    _tag += "_skip-" + "-".join(r.replace(" ", "") for r in _skip)
+t.to_csv(f"replay_trades_{symbol}{_tag}.csv", index=False)
+print(f"  เขียนไม้ทั้งหมดลง replay_trades_{symbol}{_tag}.csv")

@@ -37,8 +37,26 @@ log = get_logger("scheduler")
 print = tee_print(log)   # เขียนทุกอย่างที่ print ลง logs/scheduler.log ด้วย (ดู logger_setup.py)
 
 # Regime ที่ "ไม่เปิด" scorecard ใดๆ — รอความชัดเจนก่อน (ตาม Mutual Exclusivity ที่ตั้งไว้)
-REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH")
-REGIME_TREND    = ("TREND", "TREND แรงจัด")
+#
+# 2026-08-31: **เพิ่ม "TREND แรงจัด" เข้าด่านห้ามเข้าไม้** ตามคำสั่งผู้ใช้ (เดิมอยู่ใน
+# REGIME_TREND = เปิด Scoring ตามเทรนด์) เหตุผลเชิงกลไก: ด่านนี้ถูกเขียนไว้เพื่อ "ห้ามสวน"
+# ตอน ADX 40+ ที่ยังพุ่ง (ดู regime_check.py:507) แต่ผลข้างเคียงคือมันกลายเป็นไฟเขียวให้
+# เข้าตามเทรนด์ตอน ADX แรงที่สุด = entry ท้ายขา ซึ่งไม่ใช่เจตนาเดิมของด่าน
+#
+# ⚠️ **หลักฐานบางมาก — เป็นการตัดสินใจของผู้ใช้ ไม่ใช่ข้อสรุปจาก backtest**
+# ไม้ที่เคยเข้าใน regime นี้มีแค่ 4 ไม้ (BTC 3 + XAU 1) แพ้ทั้ง 4 ไม้ รวม -2.35R
+# replay BTCUSDm 730 วัน (สะอาด ไม่มี regime error/volume fallback):
+#   baseline          28 ไม้ +3.43R | Scoring 22 ไม้ Win 50% -0.37R
+#   ปิด regime นี้     26 ไม้ +5.02R | Scoring 20 ไม้ Win 55% +1.23R   (สุทธิ +1.60R)
+#   ตัดออก 3 ไม้ (-2.21R) รับเพิ่ม 1 ไม้ (-0.61R)
+# แต่: P(ดีกว่า) = 61%  bootstrap 95% CI [-9.4, +12.6]R = แยกจาก noise ไม่ได้
+# และกลุ่มนี้ถูกพบจากการไล่ดูข้อมูลหลังเห็นผลแล้ว (post-hoc) ไม่ได้ตั้งสมมติฐานไว้ก่อน —
+# regime มี 4 กลุ่มให้เลือกมอง ปรับ multiple comparison แล้วโอกาสเกิดเองอยู่ราว 16%
+# **ยังไม่ได้ทดสอบ out-of-sample เลย** (XAU/ETH/XRP/US500 ยังไม่ได้รันด้วย --skip-regime)
+# 👉 เฝ้าดูผลจริงใกล้ชิด — ถอยกลับ = ย้าย "TREND แรงจัด" กลับไป REGIME_TREND (แก้ที่นี่
+#    และที่ backtest_replay.py ให้ตรงกัน)
+REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH", "TREND แรงจัด")
+REGIME_TREND    = ("TREND",)
 REGIME_REVERSAL = ("REVERSAL-READY",)
 
 INTERVAL_SECONDS = 3600   # เช็คทุก 1 ชั่วโมง

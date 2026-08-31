@@ -19,7 +19,8 @@ Checklist:
   - Reversal ใช้เกณฑ์ relative peak & decline — ADX ทำจุดสูงสุดใหม่ในรอบที่มองย้อน (10 แท่ง)
     ไม่ว่าตัวเลขจะเป็นเท่าไหร่ (28, 32, 45) แล้วโค้งลงติดกัน 3 แท่ง ถือว่าเข้าเกณฑ์ Reversal
     (ไม่ใช้ threshold ตายตัวอย่าง 40 อีกต่อไป เพราะ "แรงสุดของรอบนั้น" ไม่จำเป็นต้องแตะเลขคงที่)
-    ส่วน ADX>=40 ที่ยังพุ่งไม่หยุด (ยังไม่ peak) = ห้ามสวนเด็ดขาด
+    ส่วน ADX>=40 ที่ยังพุ่งไม่หยุด (ยังไม่ peak) = regime "TREND แรงจัด" ซึ่งตั้งแต่ 2026-08-31
+    ไม่เข้าไม้ทั้งสองทาง (อยู่ใน scheduler.REGIME_NO_TRADE — ดูเหตุผล+ข้อจำกัดของหลักฐานที่นั่น)
   - CHOPPY (ADX<20) = พัก การไม่เทรดคือ position ที่ถูกต้อง
   - Regime ใช้ 2 จังหวะ: ก่อนเข้า → เลือก scorecard | ระหว่างถือ → ADX>=25 ใช้ Structure Stop trail
 
@@ -56,7 +57,15 @@ ADX_GRAY_HIGH    = 22     # 20-22 = เขตเทา รอ ADX เลือ�
                           # ของเวลา vs 25 เดิมที่ 23.4% โดย REVERSAL-READY แทบไม่เปลี่ยน (คอขวดจริง
                           # คือ Key Level+Divergence ไม่ใช่ ADX) — ยังไม่มี full win-rate backtest
                           # ยืนยัน แค่ยืนยันว่าเปิดโอกาสได้บ่อยขึ้น
-ADX_REVERSAL     = 40     # peak ต้อง >= 40 ถึงเข้าเกณฑ์ Reversal
+ADX_STRONG_TREND = 40     # ADX ตั้งแต่ค่านี้ขึ้นไปที่ "ยังไม่ผ่านการโค้งลง" = regime "TREND แรงจัด"
+                          # 🔴 ค่านี้ **ไม่เกี่ยวกับเกณฑ์ Reversal** — Reversal ใช้ relative peak
+                          # ล้วน (peak["declining"]) ไม่มี threshold ตายตัว ดู classify_regime()
+                          # เดิมชื่อ ADX_REVERSAL + comment ว่า "peak ต้อง >= 40 ถึงเข้าเกณฑ์
+                          # Reversal" ซึ่งค้างมาจากดีไซน์เก่าก่อนเปลี่ยนเป็น relative peak —
+                          # เปลี่ยนชื่อ 2026-08-31 เพราะหลังจาก "TREND แรงจัด" ถูกย้ายไปเป็น
+                          # regime ห้ามเข้าไม้ (scheduler.REGIME_NO_TRADE) ค่านี้กลายเป็นตัวคุม
+                          # ว่า "เมื่อไหร่ระบบจะไม่เทรด" ล้วนๆ ลดค่านี้ = หยุดเทรดบ่อยขึ้น
+                          # (ตรงข้ามกับที่ชื่อเดิมชวนให้เข้าใจว่าเป็นการผ่อนเกณฑ์ Reversal)
 
 # ---------------------------------------------------------------------------
 # ⚠️ ADX_BAR_OFFSET_H — ย้ายไปอยู่ที่ bars.BAR_OFFSET_H แล้ว (import เป็น alias ชื่อเดิมด้านบน)
@@ -504,12 +513,17 @@ def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
                 f"ADX peak {peak['peak']:.1f} แล้วโค้งลง {peak['bars_since_peak']} แท่ง "
                 f"-> เฝ้าดู Reversal แต่ยังขาด: {' + '.join(missing)}", CYAN)
 
-    # ADX 40+ ยังพุ่งไม่หยุด (ยังไม่โค้งลง) = ห้ามสวนเด็ดขาด ยิ่งแรงยิ่งต้องระวังไม่สวน
-    if adx_now >= ADX_REVERSAL and direction == "ขึ้น":
-        return ("TREND แรงจัด", "ADX 40+ ที่ยังพุ่ง (ยังไม่ peak) = ห้ามสวน — ใช้ Scoring ตามเทรนด์เท่านั้น"
-                + ("" if structure["intact"] else " (แต่ structure ไม่ intact — ระวัง)"), GREEN)
+    # ADX 40+ ยังพุ่งไม่หยุด (ยังไม่โค้งลง) — 2026-08-31: regime นี้ถูกย้ายไป REGIME_NO_TRADE
+    # แล้ว (ทั้ง scheduler.py และ backtest_replay.py) = ไม่เปิด scorecard ใดๆ ทั้งสิ้น
+    # เดิมข้อความบอกว่า "ใช้ Scoring ตามเทรนด์เท่านั้น" ซึ่งตอนนี้ขัดกับสิ่งที่ระบบทำจริง —
+    # scheduler จะพิมพ์ action นี้แล้วตามด้วย "SKIP" ทันที ถ้าไม่แก้ log จะอ่านแล้วสับสน
+    if adx_now >= ADX_STRONG_TREND and direction == "ขึ้น":
+        return ("TREND แรงจัด", "ADX 40+ ที่ยังพุ่ง (ยังไม่ peak) = ไม่เข้าไม้ทั้งสองทาง "
+                "(ห้ามสวน + ไม่เข้าตามเทรนด์เพราะเป็น entry ท้ายขา)"
+                + ("" if structure["intact"] else " (structure ไม่ intact ด้วย)"), GREEN)
 
-    # TREND ปกติ — ADX >= 25 + ทิศไม่ลง + structure intact
+    # TREND ปกติ — ADX >= ADX_GRAY_HIGH (22) + ทิศไม่ลง + structure intact
+    # (comment เดิมเขียน ">= 25" ค้างมาจากก่อนปรับ ADX_GRAY_HIGH 25 -> 22 เมื่อ 2026-07-22)
     if direction in ("ขึ้น", "ทรง") and structure["intact"]:
         return ("TREND", f"เปิด Scoring scorecard — เทรดตามทิศ {structure['trend']}", GREEN)
 

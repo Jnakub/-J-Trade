@@ -11,7 +11,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from config import (
     WEIGHT_OBV_1D,
-    WEIGHT_RSI_4H, WEIGHT_OBV_4H, RSI_SCORE_BUFFER,
+    WEIGHT_RSI_4H, RSI_SCORE_BUFFER,
     WEIGHT_TREND_1H, WEIGHT_DI_1H,
     WEIGHT_MACD, WEIGHT_RR,
     RSI_SCORE_PERIOD, RSI_SCORE_MID,
@@ -27,6 +27,18 @@ from indicators import calc_rsi
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
 from bars import BAR_OFFSET_H, get_aligned_4h, get_bars
+
+# ชื่อเกณฑ์ในสกอร์การ์ด Scoring ตามลำดับใน compute_score() — มีไว้ให้ backtest ตรวจว่าชื่อที่สั่ง
+# ตัดสะกดถูก (สะกดผิด = ไม่ได้ตัดอะไรเลยแต่รายงานบอกว่าตัดแล้ว) ถ้าแก้ criteria list ต้องแก้ตรงนี้
+# ตามด้วย — คอลัมน์รายเกณฑ์ใน replay_trades_*.csv เป็นตัวเช็คว่าสองที่ยังตรงกันอยู่
+SCORECARD_CRITERIA_NAMES = ("OBV 1D", "RSI 4H Rebound", "Trend 1H",
+                            "DI 1H", "MACD 4H", "R:R")
+
+# ชื่อเกณฑ์ที่ถูก "ปิด" ชั่วคราว — ระบบจริงต้องเป็น () เสมอ มีไว้ให้ backtest ทดลองตัดเกณฑ์ออก
+# แล้ววัดผลทั้งระบบ โดยไม่ต้องแก้ criteria list จริงแล้วลืมแก้กลับ (backtest_replay.py --drop=)
+# ตัวที่ตั้งค่าจะ set scoring.DISABLED_CRITERIA + scoring.MIN_SCORE เอง แล้วพิมพ์ลง header
+# ของรายงานให้เห็นชัด — ผลที่ได้จากรอบที่ไม่ว่างห้ามเอาไปเทียบกับรอบปกติโดยไม่ดูว่าตัดอะไรไป
+DISABLED_CRITERIA: tuple = ()
 
 # k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
 # <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
@@ -324,7 +336,6 @@ def compute_score(symbol: str, direction: str, entry: float,
     conf_result = check_confirmation(price, df_4h, direction, symbol)
 
     obv_1d                          = calc_obv(df_1d)
-    obv_4h                          = calc_obv(df_4h)
     plus_di_1h, minus_di_1h         = calc_di(df_1h)
     macd_line, signal_line, macd_hist = calc_macd(df_4h)
     rsi_4h                          = calc_rsi(df_4h["close"], RSI_SCORE_PERIOD)
@@ -347,7 +358,10 @@ def compute_score(symbol: str, direction: str, entry: float,
         # ต้องเคยย่อแตะโซนกลางแล้วเด้งกลับฝั่ง trend อย่างน้อย 2 ครั้ง ไม่ใช่แค่ค่าปัจจุบันผ่าน
         # เฉยๆ (ดู check_rsi_double_rebound ด้านบน) ตามคำสั่งผู้ใช้ ยังไม่มี backtest ยืนยัน
         ("RSI 4H Rebound", check_rsi_double_rebound(rsi_4h, is_long),           WEIGHT_RSI_4H),
-        ("OBV 4H",       obv_rising(obv_4h),                                    WEIGHT_OBV_4H),
+        # 2026-08-30: ช่อง "OBV 4H" ถูกตัดออกตามคำสั่งผู้ใช้ (TOTAL_WEIGHT 7 -> 6, MIN_SCORE
+        # คงที่ 5 จึงเข้มขึ้นจากยอมตกได้ 2 ข้อเหลือ 1 ข้อ) — ⚠️ A/B บอกว่าผลของการตัดไม่คงเส้น
+        # คงวาข้ามระดับความเข้ม (-0.01R กับ +1.22R) และอยู่ในกรอบ noise ทั้งคู่ ดูตาราง 2x2
+        # เต็ม + วิธีถอยกลับที่ config.py เหนือ WEIGHT_OBV_1D
         ("Trend 1H",     (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
         ("DI 1H",        di_1h_ok,                                              WEIGHT_DI_1H),
         ("MACD 4H",      macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
@@ -402,6 +416,9 @@ def compute_score(symbol: str, direction: str, entry: float,
             f"TP ห่างจาก entry {tp_distance_pct:.1f}% เกินขั้นสูงสุด {MAX_TP_DISTANCE_PCT}% "
             f"— ห้ามเข้า trade"
         )
+
+    if DISABLED_CRITERIA:                 # ปกติว่าง — ดู comment ที่หัวไฟล์
+        criteria = [c for c in criteria if c[0] not in DISABLED_CRITERIA]
 
     total  = sum(w for _, passed, w in criteria if passed)
     passed = total >= MIN_SCORE
