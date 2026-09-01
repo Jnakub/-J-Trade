@@ -11,7 +11,8 @@ Checklist:
   4. โครงสร้าง trend ยัง intact?     — Swing High/Low บน 1D (HH/HL = Long, LL/LH = Short)
   5. ราคาอยู่ที่ Key Level สำคัญ?     — โซนแนวรับ/ต้าน (Swing High+Low แตะซ้ำ >=2 ครั้ง, ห่าง <=1%)
   6. มี Divergence (RSI)?            — ราคาทำ new extreme แต่ RSI(14) ไม่ทำตาม
-                                        (สดภายใน 10 แท่ง + จุดแรกต้องเคย overbought/oversold จริง)
+                                        (สดภายใน DIV_MAX_AGE_BARS แท่ง + จุดแรกต้องเคย
+                                         overbought/oversold จริง)
 
 กฎ Mutual Exclusivity:
   - ห้ามเปิด 2 scorecard กับ setup เดียวกัน (ห้าม scorecard shopping)
@@ -131,17 +132,35 @@ KEY_LEVEL_PROXIMITY    = 0.01   # ±1% รอบศูนย์กลางโ�
 KEY_LEVEL_MIN_TOUCHES  = 2      # ต้องโดนแตะอย่างน้อย 2 ครั้งถึงนับเป็นโซนสำคัญ
 
 # Divergence (RSI) — ราคาทำ new extreme แต่ RSI ไม่ทำตาม (เทียบ swing ราคา 2 จุดล่าสุด)
-# swing สำหรับ divergence "ปิด volume filter" — จากทดสอบ ถ้ากรอง volume XAU ตรวจไม่เจอเลย (0%)
-# เพราะ divergence ดูรูปร่างราคา vs โมเมนตัม ไม่เกี่ยวกับแรง volume ยืนยัน
+# ⚠️ 2026-09-01: comment เดิมตรงนี้เขียนว่า swing ของ divergence "ปิด volume filter" ซึ่ง
+# **ไม่ตรงกับโค้ด** มาตั้งแต่ 2026-07-23 ที่เปิด volume filter ให้ BTC (และ volume OR wick
+# ให้ XAU ตอน 07-25) — ดู check_divergence() ที่เรียก swing_vol_multiplier() ตรงๆ
+# ทดลองปิดจริงด้วย backtest_replay --div-no-volume แล้วผลชี้ว่า **ต้องเปิดไว้สำหรับ BTC**:
+#   BTC ปิด filter -> ไม้ Reversal แพ้ 7/7 ไม้ (WR 0%, -5.63R) พอร์ตรวม +2.74R -> -7.13R
+#   XAU ปิด filter -> ไม้ Reversal 4 ไม้ WR 75% (+0.70R) พอร์ตรวม -1.46R -> +0.30R
+# เข้าเค้ากับที่ BTC มี real volume จริงจาก Bitstamp (ตัวกรอง 1.9x จึงคัดของจริง เหลือ swing
+# 13.3 จุด/209 แท่ง จาก 65.5 จุด) ส่วน XAU ไม่มี real volume ใช้ tick_volume + multiplier 0.3
+# = แทบไม่ได้กรองอะไรอยู่แล้ว — ยังไม่เปลี่ยนค่าให้ XAU เพราะ sample แค่ 4 ไม้/2 ปี
+#
 # DIV_MAX_AGE: swing จุดใหม่ต้องเพิ่งยืนยันภายใน N แท่ง — ตัด divergence ค้างเก่า
 # (backtest ที่ 10 แท่ง: ไม่จำกัดเจอ 39-46% ของเวลา = ไร้ความหมาย, จำกัด 10 แท่งเหลือ 14-18% =
-# เลือกสรรจริง — 2026-08-20: ปรับเป็น 14 ตามคำสั่งผู้ใช้ ยังไม่มี backtest ยืนยันค่าใหม่นี้
-# โดยเฉพาะ ควรเฝ้าดูผลจริง/รัน backtest ซ้ำถ้ามีเวลา)
+# เลือกสรรจริง — 2026-08-20: ปรับเป็น 14 ตามคำสั่งผู้ใช้ ยังไม่มี backtest ยืนยัน)
+# 2026-09-01: 14 -> 20 จาก backtest_replay 730 วัน (--div-max-age) — ครั้งแรกที่ค่านี้ถูกวัด
+# ทั้งระบบจริงๆ ไม่ใช่วัดแค่ความแม่นของสัญญาณ:
+#   BTC  อายุ 14: 26 ไม้ +2.74R (Reversal 6 ไม้ WR 83%)
+#        อายุ 20: 28 ไม้ +3.16R (Reversal 8 ไม้ WR 75%)   <- เลือกค่านี้
+#        อายุ 30: 29 ไม้ +2.42R (Reversal 9 ไม้ WR 67%)
+#   XAU  ไม่ขยับเลยสักไม้ทั้ง 20 และ 30 (สัญญาณเพิ่ม 38% แต่ตายที่ hard block R:R ทั้งหมด)
+# การคลายเพดานเป็น additive ล้วน — ไม้เดิม 6 ไม้ของ BTC ไม่ถูกแตะเลย ที่เพิ่มคือ swing แก่
+# 15-20 แท่ง (+0.85 TP, -0.41) ส่วนช่วง 21-30 แท่งเป็นของเสีย (-0.74 SL) จึงหยุดที่ 20
+# ⚠️ ข้อจำกัดของหลักฐาน: ตัดสินจากไม้ที่เพิ่มมา 3 ไม้ใน 2 ปี และไม้ทั้งคู่ที่ได้มาอยู่ใน
+# ครึ่งแรกของช่วงทดสอบ (2024-10, 2025-03) — 12 เดือนหลังสุดค่านี้ไม่เปลี่ยนอะไรเลย ยังไม่มี
+# out-of-sample ให้ยืนยัน (ข้อมูล BTC 4H ที่ MT5 มีย้อนได้แค่ ~2.2 ปี) ควรเฝ้าดูผลเทรดจริง
 # DIV_ZONE: จุดแรกของ swing ต้องเคยอยู่ในโซน overbought/oversold มาก่อน (นิยาม divergence คลาสสิก)
 # backtest 800 แท่ง (BTC/XAU): เพิ่ม zone req -> ความแม่นขึ้นจาก 77/88% เป็น 82/93%
 # (สัญญาณลดจาก 13/16 เหลือ 11/14 ครั้ง — ยังพอมี sample ไม่เสี่ยง overfit เท่า min_diff)
 DIV_RSI_PERIOD   = 14
-DIV_MAX_AGE_BARS = 14
+DIV_MAX_AGE_BARS = 20
 DIV_ZONE_OVERBOUGHT = 55
 DIV_ZONE_OVERSOLD   = 45
 
@@ -164,6 +183,18 @@ DIV_STALL_THRESHOLD = 5
 # ทีหลังเมื่อมีข้อมูลเทรดจริงมากพอ
 DIV_MIN_SPACING_BARS  = 5
 DIV_MAX_LOOKBACK_BARS = 180
+
+# สวิตช์ทดลองของ divergence (2026-09-01) — ค่า default = พฤติกรรมระบบจริงเป๊ะ ห้ามแก้ค่าที่นี่
+# backtest_replay.py ตั้งให้เฉพาะรอบที่รันด้วย --div-max-age / --div-no-volume
+# ที่มา: วัด funnel 2 ปีแล้วพบว่า Divergence คือด่านที่ตัดโอกาส Reversal ทิ้งมากที่สุด (BTC:
+# แท่งที่ ADX peak ลง + อยู่ Key Level 1450 แท่ง เหลือมี divergence แค่ 205) และเหตุผลที่ไม่ผ่าน
+# คนละข้อกันสอง symbol — BTC ติด "swing เก่าเกิน" 74% (อายุ swing ล่าสุดมัธยฐาน 14 แท่ง = ตกขอบ
+# พอดีเป๊ะกับเพดานตอนนั้นที่ 14 เพราะ volume filter 1.9x ทำให้เหลือ swing แค่ 13.3 จุด/209 แท่ง
+# ขณะที่ไม่กรองเลยได้ 65.5 จุด), XAU ติด "RSI จุดแรกไม่ถึงโซน"/"ราคาไม่ได้ทำ LL-HH" ~57%
+# DIV_SWING_VOL_FILTER=False = หา swing สำหรับ divergence โดยไม่กรอง volume/wick เลย ซึ่งตรงกับ
+# ที่ comment เก่าเหนือ DIV_RSI_PERIOD เขียนไว้ว่าเป็นพฤติกรรมของระบบ (แต่โค้ดจริงกรองมาตั้งแต่
+# 2026-07-23 — comment ตรงนั้นค้างอยู่ ยังไม่ได้แก้เพราะรอผลรอบนี้ก่อนว่าจะเอาแบบไหน)
+DIV_SWING_VOL_FILTER  = True
 
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
@@ -324,15 +355,19 @@ def check_key_level(symbol: str, current_price: float, df: pd.DataFrame = None,
     """df: ส่งข้อมูล 4H (real volume, >= KEY_LEVEL_BARS แท่ง) ที่ดึงมาแล้วมาใช้ซ้ำได้
     (เช่นจาก get_regime() ที่ดึงไปแล้วรอบหนึ่ง) — ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม
 
-    as_of: ส่งมาเมื่อเรียกจาก backtest (เช่น reversal.compute_reversal_score) — ถ้าไม่ส่ง df
-    มาเอง จะ fetch ด้วย as_of นี้แทนดึงสด และ**ไม่ตัดแท่งท้ายซ้ำ** เพราะ get_ohlcv_real(as_of=...)
-    ตัดแท่งฟอร์มมิ่งให้เสร็จแล้วในตัวมันเอง (2026-08-09: เดิมตัดซ้ำแบบไม่มีเงื่อนไขเหมือนบั๊กที่
-    เจอใน reversal.py — reversal.py ส่ง df ที่ bound ด้วย as_of มาแล้วแต่ตัวนี้ตัดทิ้งซ้ำอีกแท่ง)"""
+    as_of: ส่งมาเมื่อเรียกจาก backtest (เช่น reversal.compute_reversal_score) — ใช้ตอนไม่ส่ง df
+    มาเอง จะ fetch ด้วย as_of นี้แทนดึงสด
+
+    2026-09-01: ตัดแท่งท้าย (แท่งฟอร์มมิ่ง) ทิ้งทั้งสองโหมดแล้ว — เดิมตัดเฉพาะโหมดสดตาม
+    ความเข้าใจของ 2026-08-09 ว่า get_ohlcv_real(as_of=...) ตัดให้เองแล้ว ซึ่งหมดอายุตั้งแต่
+    2026-08-26 ที่ bars.get_bars() ต่อแท่งฟอร์มมิ่งกลับเข้ามาให้ทั้งสองโหมด (ดูเหตุผลเต็ม +
+    ตัวเลขผลกระทบที่ reversal.compute_reversal_score ซึ่งเป็นบั๊กเดียวกัน) — จุดนี้ไม่กระทบ
+    get_regime() ที่ส่ง df มาเองพร้อม as_of=None (ตัดอยู่แล้วเหมือนเดิม) แต่กระทบ path ที่
+    reversal.py เรียกเองตอนไม่ได้รับ key_level มา"""
     if df is None:
         df = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS, as_of=as_of)
     df = df.iloc[-KEY_LEVEL_BARS:].reset_index(drop=True)
-    if as_of is None:
-        df = df.iloc[:len(df) - 1].reset_index(drop=True)   # ตัดแท่งยังไม่ปิด (เฉพาะโหมดสด)
+    df = df.iloc[:len(df) - 1].reset_index(drop=True)   # ตัดแท่งยังไม่ปิด
     vol_mult = swing_vol_multiplier(symbol)
     wick_min = swing_wick_ratio_min(symbol)
 
@@ -419,6 +454,8 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     # BTC ยังคงได้ vol_multiplier=1.9x, wick_ratio_min=None เหมือนเดิมทุกกรณี (ไม่แตะ path เดิม)
     vol_multiplier = swing_vol_multiplier(symbol) if symbol else 0.0
     wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and not is_btc) else None
+    if not DIV_SWING_VOL_FILTER:          # โหมดทดลอง — ดู comment ที่ตัวแปรนั้น
+        vol_multiplier, wick_ratio_min = 0.0, None
     rsi = calc_rsi(df["close"])
     highs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
                              tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,

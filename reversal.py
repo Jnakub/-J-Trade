@@ -34,7 +34,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import (MT5_TIMEFRAMES, RISK_PER_TRADE, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK,
-                    get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT)
+                    get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT, TP_FIB_RATIO)
 from mt5_connect import connect, get_account_balance
 from scoring import get_ohlcv, get_ohlcv_real, calc_rr
 from swing import find_sl_from_structure, find_tp_from_fibonacci, swing_vol_multiplier, swing_wick_ratio_min
@@ -60,6 +60,32 @@ MIN_RR_REVERSAL    = 2.0   # เกณฑ์ "R:R ดีจริง" ในส�
 # ทำให้ถ้าแก้ค่าใน config.py แล้วลืมแก้ที่นี่ด้วย จะเพี้ยนกันเงียบๆ ระหว่าง Scoring กับ Reversal
 RSI_OVERBOUGHT     = 70
 RSI_OVERSOLD       = 30
+
+# ── สวิตช์ทดลอง (2026-09-01) — ค่า default = พฤติกรรมระบบจริงเป๊ะ ห้ามแก้ค่าตรงนี้ ────────
+# backtest_replay.py ตั้งค่าให้เฉพาะรอบที่รันด้วย --rev-min-sl / --rev-tp-from-entry
+# (แบบเดียวกับ scoring.DISABLED_CRITERIA / scoring.MIN_SCORE) เพื่อตอบว่าด่านสองตัวที่ตัด
+# โอกาส Reversal ทิ้งมากที่สุดควรปรับไหม โดยไม่ต้องแก้ config.py แล้วเผลอมีผลกับระบบจริง
+#
+# MIN_SL_OVERRIDE: ทับ get_min_sl_distance_pct() เฉพาะทาง Reversal — วัดจากไม้จริง 2 ปี พบว่า
+#   setup ที่ SL แคบกว่า 0.9% (BTC 23 แท่ง) คือกลุ่มที่ R:R ดีที่สุดในกองทั้งหมด (มัธยฐาน 8.8)
+#   เพราะเป็น entry ที่ชิดโครงสร้างที่สุด — ซึ่งเป็นรูปแบบปกติของไม้สวน (SL ชิดเหนือยอดกลับตัว)
+#   ต่างจากฝั่ง Scoring ที่ SL อยู่ที่ swing ของ pullback ซึ่งค่า 0.9% ถูก backtest มาแล้ว
+# TP_FROM_ENTRY: ฉาย Fibonacci extension จาก "ราคาเข้า" แทน swing B — สูตรเดิมฉายจาก B ทำให้
+#   reward หดและ risk โตพร้อมกัน 1:1 ตามระยะที่ราคาห่างจาก B มาแล้ว (TP ไปโผล่หลัง entry
+#   28% ของ setup บน BTC / 22% บน XAU) ตัวนี้ทำให้ TP ไกลกว่าเดิมเสมอ = ผ่อนด่าน R:R
+#   ⚠️ ไม่ใช่การแก้บั๊ก แต่เป็นการผ่อนเกณฑ์ ต้องดู WR ควบคู่กับ Total R เสมอ
+#
+# ผล backtest_replay 730 วัน (2026-09-01) — **ทั้งคู่แย่กว่าของเดิม ยังไม่เอาเข้าระบบจริง**:
+#   ของเดิม            BTC +2.74R (26 ไม้, Reversal 6 WR 83%)   XAU -1.46R (15 ไม้)
+#   --rev-min-sl=0.5   BTC +3.15R (27 ไม้, Reversal 7 WR 86%)   XAU -2.35R (16 ไม้) => รวม -0.48R
+#   --rev-tp-from-entry BTC +2.59R (26 ไม้, Reversal 9 WR 67%)  XAU -1.99R (16 ไม้) => รวม -0.68R
+#   ไม้ที่เพิ่มมามีแค่ 1-3 ไม้/symbol/2 ปี (ยังตัดสินทางสถิติไม่ได้) แต่ทั้งสองทางเอียงไปทางลบเหมือนกัน
+#   ข้อสังเกตที่สำคัญกว่าตัวเลข: ผ่อนด่าน Reversal แล้ว "ไม้ Scoring หายไปแทน" (BTC 20 -> 17 ไม้)
+#   เพราะระบบถือได้ทีละไม้ต่อ symbol — ด่านจริงที่ตัดโอกาส Reversal ทิ้งมากที่สุดคือ "ถือไม้อื่นอยู่"
+#   (195-205 จาก 304 รอบ REVERSAL-READY ของ BTC) ไม่ใช่ตัวกรองเข้าไม้ การผ่อนตัวกรองจึงได้แค่
+#   ย้ายไม้จากทาง Scoring มาทาง Reversal ไม่ได้เพิ่มจำนวนไม้รวม
+MIN_SL_OVERRIDE    = None
+TP_FROM_ENTRY      = False
 
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
@@ -88,14 +114,21 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
 
     if df_4h is None:
         df_4h = get_ohlcv_real(symbol, "4H", bars=210, as_of=as_of)
-    # ตัดแท่งยังไม่ปิดทิ้ง — เฉพาะโหมดสด (as_of=None) เท่านั้น เพราะโหมด backtest (as_of=datetime)
-    # get_ohlcv_real ตัดแท่งฟอร์มมิ่งให้เสร็จแล้วในตัวมันเอง (คืน "close ของแท่งล่าสุดก่อนเวลานั้น"
-    # ดู docstring scoring.get_ohlcv) — 2026-08-09: เดิมตัดซ้ำแบบไม่มีเงื่อนไข ทำให้ backtest มองข้าม
-    # แท่งปิดสนิทแท่งล่าสุดไปเสมอ (พบตอน verify fix ของ is_climax_bar ที่ไม่มีผลตอนเรียกผ่านฟังก์ชัน
-    # นี้จริง ทั้งที่เช็คตรงๆ ผ่าน) กระทบทุก criteria ที่อ้างอิง df_4h ตัวนี้ (Key Level/Divergence/
-    # RSI/VSA Climax/TP Fibonacci) เฉพาะตอนใช้ as_of เท่านั้น โหมดสดไม่กระทบ
-    if as_of is None:
-        df_4h = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)
+    # ตัดแท่งยังไม่ปิดทิ้ง — ทั้งสองโหมด เพราะแท่งท้ายสุดของเฟรมคือแท่งฟอร์มมิ่งเสมอ ไม่ว่า
+    # as_of จะเป็นอะไร (bars.get_bars ประกอบแท่งฟอร์มมิ่งจาก TF ย่อยต่อกลับเข้าไปให้ในโหมด
+    # backtest ด้วย เพื่อให้หน้าตาเฟรมเหมือนตอนรันสดเป๊ะ — ดู docstring bars.get_bars)
+    #
+    # 2026-09-01: เดิมบรรทัดนี้เป็น `if as_of is None:` ตามความเข้าใจของ 2026-08-09 ว่าโหมด
+    # backtest get_ohlcv_real ตัดแท่งฟอร์มมิ่งให้เองแล้ว — จริงตอนนั้น แต่หมดอายุไปตั้งแต่
+    # 2026-08-26 ที่ย้ายตัวดึงแท่งไป bars.get_bars() (ตัวใหม่ต่อแท่งฟอร์มมิ่งกลับเข้ามา) ผลคือ
+    # โหมด backtest มองเห็นแท่งเกินมา 1 แท่งเทียบกับ get_regime() ที่ตัดแท่งท้ายทิ้งเสมอ
+    # (regime_check.get_regime ส่ง df_4h.iloc[:-1] ให้ check_divergence) วัดจริงบน 2 ปี:
+    # divergence ที่สกอร์การ์ดคำนวณเองไม่ตรงกับตอนที่ regime ปลดล็อก REVERSAL-READY
+    # 24/205 แท่ง (BTC) และ 39/379 (XAU) = เสียแต้ม Divergence (3 จาก 10) ฟรีๆ ทั้งที่ regime
+    # เพิ่งยืนยันว่ามี ทำให้ตัวเลข Reversal ใน backtest ต่ำกว่าที่ระบบจริงทำได้
+    # โหมดรันสดไม่เคยโดนบั๊กนี้ (scheduler ส่ง df_4h มาพร้อม as_of=None -> ตัดอยู่แล้ว)
+    # กระทบทุก criteria ที่อ้างอิง df_4h ตัวนี้ (Key Level/Divergence/RSI/VSA Climax/SL/TP)
+    df_4h = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)
     vol_multiplier = swing_vol_multiplier(symbol)
     wick_ratio_min = swing_wick_ratio_min(symbol)
 
@@ -116,6 +149,9 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
             tp = fib_info["tp"]   # อัตราส่วนมาจาก config.TP_FIB_RATIO (ดูที่มา/เหตุผลที่นั่น)
+            if TP_FROM_ENTRY:     # โหมดทดลอง — ระยะเท่าเดิม (move × TP_FIB_RATIO) แต่ตั้งต้นที่ราคาเข้า
+                _proj = fib_info["move"] * TP_FIB_RATIO
+                tp = (entry + _proj) if is_long else (entry - _proj)
         else:
             used_fallback_tp = True
             tp = (entry + abs(entry - sl) * MIN_RR_REVERSAL) if is_long else (entry - abs(entry - sl) * MIN_RR_REVERSAL)
@@ -186,7 +222,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     # ส่วน "R:R ดีจริง" (>= MIN_RR_REVERSAL) ยังต้องผ่านสกอร์การ์ดแยกต่างหากด้านล่าง
     # Hard block: ระยะ entry->SL แคบเกิน — ดู comment ที่ config.MIN_SL_DISTANCE_PCT /
     # config.get_min_sl_distance_pct() (Forex/Index ใช้เกณฑ์ต่ำกว่า — ดู scoring.py comment)
-    min_sl_pct = get_min_sl_distance_pct(symbol)
+    min_sl_pct = MIN_SL_OVERRIDE if MIN_SL_OVERRIDE is not None else get_min_sl_distance_pct(symbol)
     sl_distance_pct = abs(entry - sl) / entry * 100
     if sl_distance_pct < min_sl_pct - 1e-9 and not force:
         raise ValueError(f"ระยะ SL ห่างจาก entry แค่ {sl_distance_pct:.2f}% ต่ำกว่าขั้นต่ำ "
