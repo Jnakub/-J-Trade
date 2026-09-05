@@ -33,16 +33,18 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-from config import (MT5_TIMEFRAMES, RISK_PER_TRADE, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK,
+from config import (MT5_TIMEFRAMES, RISK_PER_TRADE, MAX_RR_HARD_BLOCK,
+                    MIN_RR_HARD_BLOCK_REVERSAL,
                     get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT, TP_FIB_RATIO)
 from mt5_connect import connect, get_account_balance
+import scoring
 from scoring import get_ohlcv, get_ohlcv_real, calc_rr
 from swing import find_sl_from_structure, find_tp_from_fibonacci, swing_vol_multiplier, swing_wick_ratio_min
 from regime_check import (
     calc_adx, adx_peak_info, check_key_level, check_divergence, calc_rsi,
     ADX_PERIOD, REGIME_TIMEFRAME, KEY_LEVEL_BARS,
 )
-from exit_monitor import is_climax_bar
+from exit_monitor import is_climax_bar, calc_atr_trailing_sl, BARS as TRAIL_BARS
 from order import calculate_lot_size, clamp_lot
 
 WEIGHT_KEY_LEVEL   = 2
@@ -86,6 +88,7 @@ RSI_OVERSOLD       = 30
 #   ย้ายไม้จากทาง Scoring มาทาง Reversal ไม่ได้เพิ่มจำนวนไม้รวม
 MIN_SL_OVERRIDE    = None
 TP_FROM_ENTRY      = False
+_MIN_RR_OVERRIDE   = None   # backtest_replay --rev-min-rr ตั้งให้ (None = ใช้ค่าจาก config)
 
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
@@ -141,6 +144,29 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
             raise ValueError(f"หา SL ไม่ได้ — {sl_info.get('reason', 'unknown')}")
         sl = sl_info["sl"]
 
+    # ── SL ที่จะส่ง broker จริง (exec_sl) ────────────────────────────────────────────────
+    # 2026-09-05: ยกวิธีเดียวกับ scoring.compute_score (แก้ไปเมื่อ 2026-08-31) มาใช้กับฝั่ง
+    # Reversal ที่ตอนนั้นไม่ได้แก้ตาม — scheduler/backtest ขยับ SL ออกอีก EXEC_SL_ATR_MULT×ATR
+    # *หลัง* compute_reversal_score จบไปแล้ว ด่าน R:R จึงตรวจด้วยไม้บรรทัดที่แคบกว่าของจริง
+    # วัดจากไม้จริง 8 symbol (123 ไม้): R:R ที่ด่านเห็นเฉลี่ย 4.67 แต่ R:R จริง 2.83 และ
+    # **19 จาก 39 ไม้ Reversal (49%) ผ่านด่าน MIN_RR_HARD_BLOCK=1.5 มาได้ทั้งที่ R:R จริง < 1.5**
+    # (เฉลี่ย 1.17) ฝั่ง Scoring ไม่มีเคสแบบนี้เลยเพราะแก้ไปแล้ว — ความเสียหายกระจุกที่ EURUSDm
+    # (4 ไม้ -2.91R จากทั้ง symbol -3.64R) แต่รวมทุก symbol กลุ่มนี้ยังเป็นบวก (+0.70R) จึงต้อง
+    # วัดผลรวมหลังแก้ ไม่ใช่ถือว่าแก้แล้วดีขึ้นแน่นอน
+    # เกณฑ์ไม่เปลี่ยน เปลี่ยนแค่ไม้บรรทัดที่ใช้วัดให้ตรงกับสิ่งที่ระบบทำจริง
+    atr_entry, exec_sl = None, sl
+    if scoring.EXEC_SL_ATR_MULT:
+        try:
+            _t = as_of if as_of is not None else datetime.now()
+            _tr = calc_atr_trailing_sl(get_ohlcv_real(symbol, "4H", bars=TRAIL_BARS, as_of=as_of),
+                                       symbol, _t, direction.capitalize(), as_of=as_of)
+            if _tr:
+                atr_entry = _tr["atr_entry"]
+                exec_sl = (sl - scoring.EXEC_SL_ATR_MULT * atr_entry) if is_long else \
+                          (sl + scoring.EXEC_SL_ATR_MULT * atr_entry)
+        except Exception:
+            pass
+
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
     used_fallback_tp = False   # TP มาจากสูตร fallback (ไม่ใช่ Fibonacci) — ดูเกณฑ์ R:R ด้านล่าง
@@ -154,9 +180,13 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
                 tp = (entry + _proj) if is_long else (entry - _proj)
         else:
             used_fallback_tp = True
-            tp = (entry + abs(entry - sl) * MIN_RR_REVERSAL) if is_long else (entry - abs(entry - sl) * MIN_RR_REVERSAL)
+            # อิง exec_sl (ระยะเสี่ยงจริง) เหมือน scoring.py — ไม่งั้น TP ที่ตั้งจากสูตร fallback
+            # จะให้ R:R จริงต่ำกว่า MIN_RR_REVERSAL ที่ตั้งใจไว้
+            tp = (entry + abs(entry - exec_sl) * MIN_RR_REVERSAL) if is_long else \
+                 (entry - abs(entry - exec_sl) * MIN_RR_REVERSAL)
 
-    rr = calc_rr(entry, sl, tp, direction)
+    # R:R วัดจาก exec_sl = ระยะเสี่ยงจริงที่จะส่ง broker (ดู comment ที่คำนวณ exec_sl ด้านบน)
+    rr = calc_rr(entry, exec_sl, tp, direction)
 
     # ── ข้อ 1: Key Level ──
     if key_level is None:
@@ -212,6 +242,9 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
 
     info = {
         "sl": sl, "tp": tp, "rr": rr,
+        # SL ที่ต้องส่ง broker จริง — ผู้เรียกใช้ตัวนี้ อย่าคำนวณเองซ้ำ ไม่งั้นสองที่จะได้ ATR
+        # คนละค่าแล้ว R:R เพี้ยนอีก (บทเรียนเดียวกับ scoring.py 2026-08-31)
+        "exec_sl": exec_sl, "atr_entry": atr_entry,
         "sl_info": sl_info, "fib_info": fib_info,
         "key_level": key_level, "divergence": divergence,
         "rsi_now": rsi_now, "climax": climax, "climax_pattern": climax_pattern,
@@ -228,8 +261,10 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
         raise ValueError(f"ระยะ SL ห่างจาก entry แค่ {sl_distance_pct:.2f}% ต่ำกว่าขั้นต่ำ "
                          f"{min_sl_pct}% — ห้ามเข้า trade")
 
-    if rr < MIN_RR_HARD_BLOCK - 1e-9 and not force:
-        raise ValueError(f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_HARD_BLOCK} — ห้ามเข้า trade")
+    # เกณฑ์แยกของ Reversal (ไม่ใช่ MIN_RR_HARD_BLOCK ที่ Scoring ใช้) — ดูที่มาที่ config.py
+    min_rr = MIN_RR_HARD_BLOCK_REVERSAL if _MIN_RR_OVERRIDE is None else _MIN_RR_OVERRIDE
+    if rr < min_rr - 1e-9 and not force:
+        raise ValueError(f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {min_rr} — ห้ามเข้า trade")
 
     # Hard block: R:R สูงผิดปกติ — ดู comment ที่ config.MAX_RR_HARD_BLOCK
     if rr > MAX_RR_HARD_BLOCK + 1e-9 and not force:

@@ -51,6 +51,8 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ด้วย ,) — ไว้ตอบว่า "ถ้าไม่เข้าไม้ตอน regime นี้เลย ผลรวมดีขึ้นไหม"
      --rev-min-sl=X  ทับเกณฑ์ระยะ SL ขั้นต่ำ **เฉพาะทาง Reversal** (--min-sl ทับทั้งสองทาง) —
                  ไว้ตอบว่าเกณฑ์ที่ backtest มาจากฝั่ง Scoring เหมาะกับไม้สวนด้วยไหม
+     --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ปกติ 1.1) — ด่าน R:R ขั้นต่ำของ
+                 ไม้สวน (คนละตัวกับ MIN_RR_HARD_BLOCK=1.5 ที่ Scoring ใช้)
      --rev-tp-from-entry  ฉาย Fibonacci TP ของ Reversal จากราคาเข้าแทน swing B — ไว้ตอบว่า
                  การที่ reward หดตามระยะที่ราคาห่างจาก swing (จน TP ไปโผล่หลัง entry 22-28%
                  ของ setup) เป็นตัวที่ทำให้ไม้ Reversal เข้าน้อยหรือเปล่า
@@ -158,6 +160,9 @@ if legacy_sl:
 _rms_arg = next((a for a in sys.argv if a.startswith("--rev-min-sl=")), None)
 if _rms_arg:
     reversal.MIN_SL_OVERRIDE = float(_rms_arg.split("=")[1])
+_rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
+if _rmr_arg:
+    reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
 rev_tp_entry = "--rev-tp-from-entry" in sys.argv
 if rev_tp_entry:
     reversal.TP_FROM_ENTRY = True
@@ -428,19 +433,9 @@ for n, row in enumerate(clock.to_dict("records")):
                 symbol, direction, entry, key_level=rinfo["key_level"],
                 df_4h=rinfo["df_4h"], as_of=now)
             sl, tp, strategy = inf["sl"], inf["tp"], "Reversal"
-            # ฝั่ง Reversal ยังคำนวณ exec_sl ที่นี่เหมือนเดิม — compute_reversal_score ไม่ได้ย้าย
-            # ตามมา (ด่าน R:R ของ Reversal เป็นคนละชุด ไม่ได้อยู่ในขอบเขตการแก้ครั้งนี้)
-            exec_sl, atr_entry_ = sl, None
-            if scoring.EXEC_SL_ATR_MULT:
-                try:
-                    _tr = em.calc_atr_trailing_sl(get_ohlcv_real(symbol, "4H", bars=210, as_of=now),
-                                                  symbol, now, direction, as_of=now)
-                    if _tr:
-                        atr_entry_ = _tr["atr_entry"]
-                        exec_sl = (sl - scoring.EXEC_SL_ATR_MULT * atr_entry_) if direction == "Long" \
-                                  else (sl + scoring.EXEC_SL_ATR_MULT * atr_entry_)
-                except Exception:
-                    pass
+            # 2026-09-05: exec_sl มาจาก compute_reversal_score แล้ว (เหมือนทาง Scoring) —
+            # เดิมคำนวณเองตรงนี้ ทำให้ด่าน R:R ข้างในตรวจด้วย SL โครงสร้างที่แคบกว่าของจริง
+            exec_sl, atr_entry_ = inf["exec_sl"], inf["atr_entry"]
         else:
             note(f"regime ไม่รู้จัก = {regime}")
             continue
@@ -549,6 +544,8 @@ if _sr_arg:
     _tag += "_skip-" + "-".join(r.replace(" ", "") for r in _skip)
 if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
+if _rmr_arg:
+    _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
 if rev_tp_entry:
     _tag += "_revtpentry"
 if _dma_arg:

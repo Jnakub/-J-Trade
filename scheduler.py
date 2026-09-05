@@ -181,11 +181,17 @@ def scan_symbol(symbol: str) -> None:
             div_polarity = regime_info["divergence"]["divergence"]
             direction = "Long" if div_polarity == "bullish" else "Short"
             print(f"  [{symbol}] เปิด Reversal — Divergence={div_polarity} -> เข้าเป็น {direction}  Entry={entry:.5f}")
-            score, criteria, passed, info = reversal.compute_reversal_score(
+            # 2026-09-05: รับเข้า `sl_info` ตัวเดียวกับทาง Scoring — เดิมรับเป็น `info` แล้วโค้ด
+            # ด้านล่าง (exec_sl / pinned_swing) อ่านจาก `sl_info` แบบไม่แยก branch ทำให้ไม้
+            # Reversal โยน NameError: name 'sl_info' is not defined ทุกครั้งแล้วโดน except
+            # ด้านล่างกลืนไปเป็น "ERROR — ..." = **ระบบจริงเปิดไม้ Reversal ไม่ได้เลยตั้งแต่
+            # 2026-08-31** (รอบที่ย้าย exec_sl เข้า compute_score แล้วไม่ได้แก้ทาง Reversal ตาม)
+            # backtest ไม่เจอเพราะ backtest_replay.py มีโค้ดคำนวณ exec_sl ของตัวเองแยกต่างหาก
+            score, criteria, passed, sl_info = reversal.compute_reversal_score(
                 symbol, direction, entry, key_level=regime_info["key_level"],
                 df_4h=regime_info["df_4h"])
-            sl, tp = info["sl"], info["tp"]
-            rr = info["rr"]
+            sl, tp = sl_info["sl"], sl_info["tp"]
+            rr = sl_info["rr"]
             score_total = reversal.TOTAL_WEIGHT
             strategy = "Reversal"
 
