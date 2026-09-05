@@ -207,10 +207,15 @@ def scan_symbol(symbol: str) -> None:
         if MAX_RUNUP_24H_R is not None and strategy == "Scoring":
             _exec_sl_for_runup = sl_info.get("exec_sl") or sl
             _risk = abs(entry - _exec_sl_for_runup)
-            _h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=26)
-            if _risk and len(_h1) >= 25:
-                # แท่ง 1H ที่ปิดแล้ว 24 แท่งก่อนหน้า — iloc[-1] คือแท่งที่ยังไม่ปิด จึงนับจาก -2
-                _past = float(_h1["close"].iloc[-25])
+            _h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=27)
+            if _risk and len(_h1) >= 26:
+                # iloc[-1] = แท่งที่ยังไม่ปิด, iloc[-2] = แท่งที่ปิดล่าสุด (ราคา ~ตอนนี้)
+                # ย้อนไปอีก 24 แท่งจึงเป็น iloc[-2-24] = iloc[-26]
+                # 2026-09-05: เดิมเขียน iloc[-25] = ย้อนแค่ 23 แท่ง ไม่ตรงกับ backtest_replay ที่
+                # เทียบ clock["close"].iloc[n-24] กับราคาเข้าที่ index n (24 แท่งพอดี) — ผลต่างเล็ก
+                # แต่เป็นความไม่ตรงกันระหว่างเครื่องมือวัดกับระบบจริง ซึ่งเป็นบั๊กแบบเดียวกับ
+                # lookahead ที่เพิ่งแก้ไปวันนี้
+                _past = float(_h1["close"].iloc[-26])
                 _runup = ((entry - _past) if direction == "Long" else (_past - entry)) / _risk
                 if _runup > MAX_RUNUP_24H_R:
                     print(f"  [{symbol}] NO ENTRY — ราคาวิ่งไปทาง {direction} มาแล้ว {_runup:.2f}R "
