@@ -465,9 +465,16 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
                             wick_ratio_min=wick_ratio_min)
     last_idx = len(df) - 1
 
-    result = {"divergence": None, "detail": "", "points": [], "swing_idx": None}
+    # result["fail"] = เงื่อนไขที่ไม่ผ่าน (ฝั่งที่มีคู่ swing ให้ตรวจ) — ไม่กระทบการตัดสินใจ
+    # มีไว้ตอบว่า "Divergence ติดตรงไหน" ได้โดยไม่ต้องเดา: 4 เงื่อนไขเป็น AND ซ้อนกัน ถ้าไม่วัด
+    # ก็ไม่รู้ว่าตัวไหนคือคอขวด (ดู scratchpad/div_funnel.py)
+    result = {"divergence": None, "detail": "", "points": [], "swing_idx": None, "fail": []}
+    if not highs and not lows:
+        result["fail"].append("ไม่มี swing เลย")
 
     h1 = _find_spacing_partner(highs)
+    if highs and h1 is None:
+        result["fail"].append("bearish: หาคู่ swing ที่ห่างพอไม่ได้")
     if h1 is not None:
         h2 = highs[-1]
         fresh   = (last_idx - h2) <= DIV_MAX_AGE_BARS
@@ -485,8 +492,15 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
                                 (df["time"].iloc[h2], df["high"].iloc[h2], rsi.iloc[h2])]
             result["swing_idx"] = h2
             return result
+        for ok, why in ((fresh, "bearish: swing เก่าเกิน"), (zone_ok, "bearish: RSI จุดแรกไม่ถึงโซน"),
+                        (price_hh, "bearish: ราคาไม่ได้ทำ HH"),
+                        (strict_lh or soft_stall, "bearish: RSI ไม่ได้ LH/stall")):
+            if not ok:
+                result["fail"].append(why)
 
     l1 = _find_spacing_partner(lows)
+    if lows and l1 is None:
+        result["fail"].append("bullish: หาคู่ swing ที่ห่างพอไม่ได้")
     if l1 is not None:
         l2 = lows[-1]
         fresh   = (last_idx - l2) <= DIV_MAX_AGE_BARS
@@ -504,6 +518,11 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
                                 (df["time"].iloc[l2], df["low"].iloc[l2], rsi.iloc[l2])]
             result["swing_idx"] = l2
             return result
+        for ok, why in ((fresh, "bullish: swing เก่าเกิน"), (zone_ok, "bullish: RSI จุดแรกไม่ถึงโซน"),
+                        (price_ll, "bullish: ราคาไม่ได้ทำ LL"),
+                        (strict_hl or soft_stall, "bullish: RSI ไม่ได้ HL/stall")):
+            if not ok:
+                result["fail"].append(why)
 
     result["detail"] = "ไม่พบ divergence (สดภายใน {} แท่ง)".format(DIV_MAX_AGE_BARS)
     return result

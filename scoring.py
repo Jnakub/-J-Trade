@@ -40,6 +40,12 @@ SCORECARD_CRITERIA_NAMES = ("OBV 1D", "RSI 4H Rebound", "Trend 1H",
 # ของรายงานให้เห็นชัด — ผลที่ได้จากรอบที่ไม่ว่างห้ามเอาไปเทียบกับรอบปกติโดยไม่ดูว่าตัดอะไรไป
 DISABLED_CRITERIA: tuple = ()
 
+# ตัวคูณ ATR ที่ SL ตอนเข้าถูกขยับออกจาก SL โครงสร้าง ก่อนส่ง broker — ต้องตรงกับสูตรใน
+# exit_monitor.calc_atr_trailing_sl (initial_sl = pinned_swing ∓ 2×ATR) ไม่งั้น SL แรกกับรอบ
+# trailing แรกจะอยู่คนละจุด ตั้ง 0 = ไม่ขยับ (SL ที่ส่ง = SL โครงสร้าง แบบก่อน 2026-08-27)
+# ไว้ให้ backtest_replay.py --legacy-sl ใช้เทียบ
+EXEC_SL_ATR_MULT = 2.0
+
 # k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
 # <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
 #   BTCUSDm: k=0.20  FalseFlip=0/58 (0%)   เร็วกว่า EMA cross เฉลี่ย 9.5 แท่ง  (matched 14 คู่)
@@ -179,7 +185,16 @@ def check_rsi_double_rebound(rsi: pd.Series, is_long: bool,
     เข้าเกณฑ์จำนวนครั้งพอ — ยังไม่มี backtest ยืนยัน ตามคำสั่งผู้ใช้
 
     แทนที่เกณฑ์ "RSI 4H" เดิม (threshold เดี่ยว ณ แท่งปัจจุบัน) — ยังไม่มี backtest ยืนยัน ตาม
-    คำสั่งผู้ใช้ ควร backtest เทียบกับเกณฑ์เดิมก่อนใช้ตัดสินใจเทรดจริง"""
+    คำสั่งผู้ใช้ ควร backtest เทียบกับเกณฑ์เดิมก่อนใช้ตัดสินใจเทรดจริง
+
+    2026-09-01: วัดแล้วด้วย backtest_replay 730 วัน (--drop="RSI 4H Rebound" --min-score=4)
+    ผลคนละทิศกันสอง symbol และรวมแล้วแย่ลง จึง **เก็บเกณฑ์นี้ไว้ตามเดิม**:
+      BTC Scoring 20 ไม้ -1.05R -> 21 ไม้ -0.80R (ดีขึ้น)
+      XAU Scoring 12 ไม้ -0.34R -> 16 ไม้ -1.00R (แย่ลง)   รวม -1.39R -> -1.80R
+    ที่มาของการทดสอบ: ในไม้ Scoring ที่เข้าจริง กลุ่มที่ "ตก" เกณฑ์นี้ (ผ่าน 5/6 ได้อยู่) ทำกำไร
+    +1.40R ขณะที่กลุ่มผ่านครบ 6/6 ขาดทุน -1.67R ดูเผินๆ เหมือนเกณฑ์กลับด้าน แต่พอวัดทั้งระบบ
+    แล้วไม่ใช่ — กลุ่มที่ตกเกณฑ์นี้ถือเฉลี่ย 8.5 วัน ส่วนกลุ่ม 6/6 ถือ 4.3 วัน ต่างกันที่ประเภท
+    ของ setup มากกว่าตัวเกณฑ์"""
     if len(rsi) < lookback + 1:
         return False
 
@@ -310,6 +325,33 @@ def compute_score(symbol: str, direction: str, entry: float,
             raise ValueError(f"หา SL ไม่ได้ — {sl_info.get('reason', 'unknown')}")
         sl = sl_info["sl"]
 
+    # ── SL ที่จะส่ง broker จริง (exec_sl) ────────────────────────────────────────────────
+    # 2026-08-31: เดิมด่าน R:R คำนวณจาก `sl` (SL โครงสร้าง) แต่ scheduler.py ขยับ SL ออกไปอีก
+    # EXEC_SL_ATR_MULT×ATR *หลัง* compute_score จบไปแล้ว (ตั้งแต่ 2026-08-27) ระยะเสี่ยงจริงจึง
+    # กว้างกว่าที่ด่านคิดเฉลี่ย 1.49 เท่า (ช่วง 1.20-2.06) วัดจากไม้ Scoring 38 ไม้ของ replay:
+    #   R:R ที่ด่านเห็น เฉลี่ย 4.12 (ต่ำสุด 1.50) แต่ R:R จริง เฉลี่ย 2.65 (ต่ำสุด 1.06)
+    #   11/38 ไม้ (29%) ผ่านด่าน MIN_RR_HARD_BLOCK=1.5 มาได้ทั้งที่ R:R จริงต่ำกว่า 1.5
+    # ย้ายการคำนวณเข้ามาที่นี่เพื่อให้ "เลขที่ด่านตรวจ" = "สิ่งที่ระบบทำจริง" — เกณฑ์ไม่เปลี่ยน
+    # เปลี่ยนแค่ไม้บรรทัดที่ใช้วัด (ดู comment เจตนาเดิมที่ scheduler.py: "R:R ตอนเข้า และ
+    # Trailing SL ระหว่างถือ จะไปทางเดียวกันเสมอ" ซึ่งขาดไปโดยไม่ตั้งใจตอนแก้ 2026-08-27)
+    #
+    # import ในฟังก์ชันเพราะ exit_monitor import scoring อยู่แล้ว — import ระดับโมดูลจะวน
+    # ใช้ calc_atr_trailing_sl ตัวเดียวกับที่ scheduler/exit_monitor ใช้ ไม่คำนวณ ATR เองซ้ำ
+    # กันสองที่คิดคนละค่า ถ้าคำนวณไม่ได้ (ข้อมูลไม่พอ) จะ fallback เป็น exec_sl = sl แบบเดิม
+    atr_entry, exec_sl = None, sl
+    if EXEC_SL_ATR_MULT:
+        try:
+            from exit_monitor import calc_atr_trailing_sl, BARS as _TRAIL_BARS
+            _t = as_of if as_of is not None else datetime.now()
+            _tr = calc_atr_trailing_sl(get_ohlcv_real(symbol, "4H", bars=_TRAIL_BARS, as_of=as_of),
+                                       symbol, _t, direction.capitalize(), as_of=as_of)
+            if _tr:
+                atr_entry = _tr["atr_entry"]
+                exec_sl = (sl - EXEC_SL_ATR_MULT * atr_entry) if is_long else \
+                          (sl + EXEC_SL_ATR_MULT * atr_entry)
+        except Exception:
+            pass
+
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
     used_fallback_tp = False   # TP มาจากสูตร fallback (ไม่ใช่ Fibonacci) — ดูเกณฑ์ R:R ด้านล่าง
@@ -325,10 +367,12 @@ def compute_score(symbol: str, direction: str, entry: float,
             # — แยกให้ขาดกัน: MIN_RR = "เกณฑ์ให้คะแนน", MIN_RR_HARD_BLOCK = "ขั้นต่ำที่ยอมเทรด"
             # ซึ่งเป็นความหมายที่ตรงกับ TP ขั้นต่ำที่ยอมรับได้มากกว่า (ไม้ fallback ไม่ได้แต้ม R:R
             # อยู่แล้วเพราะ used_fallback_tp — ค่านี้จึงไม่กระทบคะแนน กระทบแค่ TP จริง)
+            # 2026-08-31: อิง exec_sl (ระยะเสี่ยงจริง) ไม่ใช่ sl โครงสร้าง — ไม่งั้น TP ที่ตั้งให้
+            # ได้ R:R = MIN_RR_HARD_BLOCK พอดี จะให้ R:R จริงต่ำกว่าเกณฑ์ทันทีที่ SL ถูกขยับออก
             used_fallback_tp = True
             fallback_rr = MIN_RR_HARD_BLOCK
-            tp = (entry + abs(entry - sl) * fallback_rr) if is_long else \
-                 (entry - abs(entry - sl) * fallback_rr)
+            tp = (entry + abs(entry - exec_sl) * fallback_rr) if is_long else \
+                 (entry - abs(entry - exec_sl) * fallback_rr)
 
     # Confirmation — ราคาทะลุ Swing Low/High บน 4H
     # 2026-07-26: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
@@ -339,7 +383,8 @@ def compute_score(symbol: str, direction: str, entry: float,
     plus_di_1h, minus_di_1h         = calc_di(df_1h)
     macd_line, signal_line, macd_hist = calc_macd(df_4h)
     rsi_4h                          = calc_rsi(df_4h["close"], RSI_SCORE_PERIOD)
-    rr                              = calc_rr(entry, sl, tp, direction)
+    # R:R วัดจาก exec_sl = ระยะเสี่ยงจริงที่จะส่ง broker (ดู comment ที่คำนวณ exec_sl ด้านบน)
+    rr                              = calc_rr(entry, exec_sl, tp, direction)
 
     def obv_rising(obv: pd.Series, lookback: int = 10) -> bool:
         # เทียบ OBV ล่าสุดกับ 5 แท่งก่อน — จับ trend ไม่ใช่ noise
@@ -378,7 +423,9 @@ def compute_score(symbol: str, direction: str, entry: float,
         ("R:R",          (not used_fallback_tp) and rr >= MIN_RR - 1e-9,          WEIGHT_RR),
     ]
 
-    sl_info["sl"]           = sl
+    sl_info["sl"]           = sl          # SL โครงสร้าง — เป็น pinned_swing ของสูตร trailing
+    sl_info["exec_sl"]      = exec_sl     # SL ที่ต้องส่ง broker จริง (ผู้เรียกใช้ตัวนี้ อย่าคำนวณเอง
+    sl_info["atr_entry"]    = atr_entry   # ซ้ำ ไม่งั้นสองที่จะได้ ATR คนละค่าแล้ว R:R เพี้ยนอีก)
     sl_info["tp"]           = tp
     sl_info["fib_info"]     = fib_info
     sl_info["conf_result"]  = conf_result

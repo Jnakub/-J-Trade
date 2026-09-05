@@ -17,15 +17,14 @@ import journal
 from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
-    COOLDOWN_HOURS_BY_SYMBOL,
+    COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R,
 )
 from mt5_connect import connect, get_account_balance
-from scoring import compute_score, calc_rr, get_ohlcv, get_ohlcv_real, get_trend_bias
+from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
 from order import calculate_lot_size, clamp_lot, place_order
 from binance import merge_real_volume
 from exit_monitor import (
     analyze_position, print_report, execute_decision,
-    calc_atr_trailing_sl, BARS as TRAIL_STRUCTURE_BARS,
     check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS_CURRENCY,
 )
 from regime_check import get_regime
@@ -201,6 +200,23 @@ def scan_symbol(symbol: str) -> None:
             print(f"  [{symbol}] NO ENTRY — ไม่ผ่าน: {', '.join(failed)}")
             return
 
+        # 4c. ด่านกันเข้า "ตอนปลายทาง" — ราคาวิ่งไปทางที่จะเข้ามาแล้วเกิน MAX_RUNUP_24H_R เท่าของ
+        #     ระยะเสี่ยง ภายใน 24 แท่ง 1H ที่ผ่านมา ให้ข้ามรอบนี้ (ดูที่มา/ตัวเลขที่ config.py)
+        #     ใช้เฉพาะ Scoring — Reversal เข้าสวนเทรนด์โดยดีไซน์ ตัวเลขนี้ตีความคนละแบบ
+        #     วัดด้วย "ระยะเสี่ยงจริงของไม้นี้" (entry -> SL ที่ส่ง broker) ให้เทียบข้าม symbol ได้
+        if MAX_RUNUP_24H_R is not None and strategy == "Scoring":
+            _exec_sl_for_runup = sl_info.get("exec_sl") or sl
+            _risk = abs(entry - _exec_sl_for_runup)
+            _h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=26)
+            if _risk and len(_h1) >= 25:
+                # แท่ง 1H ที่ปิดแล้ว 24 แท่งก่อนหน้า — iloc[-1] คือแท่งที่ยังไม่ปิด จึงนับจาก -2
+                _past = float(_h1["close"].iloc[-25])
+                _runup = ((entry - _past) if direction == "Long" else (_past - entry)) / _risk
+                if _runup > MAX_RUNUP_24H_R:
+                    print(f"  [{symbol}] NO ENTRY — ราคาวิ่งไปทาง {direction} มาแล้ว {_runup:.2f}R "
+                          f"ใน 24 ชม. (เกิน {MAX_RUNUP_24H_R:g}R) — เข้าตอนปลายทาง")
+                    return
+
         # 5. Execute
         # ── ฐานตรึงของ ATR Trailing SL — คำนวณก่อนส่ง order เพื่อส่งเข้า place_order() รวดเดียว
         # (2026-08-09: ย้าย journal logging เข้าไปอยู่ใน place_order() เอง ไม่แยกเรียกทีหลังอีก —
@@ -213,13 +229,14 @@ def scan_symbol(symbol: str) -> None:
         # — เดิมสองระบบนี้คำนวณจุดยึดคนละจุดกันเอง ทำให้ระยะเสี่ยงจริง (trailing) ไม่ตรงกับ R:R
         # ที่ใช้กรองตอนเข้า พอ anchor เดียวกัน ทั้ง R:R ตอนเข้า และ Trailing SL ระหว่างถือ จะไปทาง
         # เดียวกันเสมอ — ยังคง roll ตาม ATR1H รายชั่วโมงเหมือนเดิมทุกอย่าง เปลี่ยนแค่จุดเริ่มต้น
+        # 2026-08-31: exec_sl / atr_entry มาจาก compute_score แล้ว (sl_info) ไม่คำนวณซ้ำที่นี่ —
+        # เดิมคำนวณตรงนี้ *หลัง* ด่าน R:R ผ่านไปแล้ว ทำให้ด่านตรวจคนละระยะเสี่ยงกับที่ส่งจริง
+        # และถ้าคำนวณสองที่ก็มีโอกาสได้ ATR คนละค่า (คนละวินาที/คนละจำนวนแท่ง) — ดู scoring.py
         pinned_swing = pinned_atr_entry = None
-        exec_sl = sl        # SL ที่ส่ง broker จริง — ปกติ = SL โครงสร้าง เว้นแต่คำนวณ trailing ได้
+        exec_sl = sl_info.get("exec_sl") or sl   # SL ที่ส่ง broker จริง
         try:
-            df_4h_trail = get_ohlcv_real(symbol, "4H", bars=TRAIL_STRUCTURE_BARS)
-            trail = calc_atr_trailing_sl(df_4h_trail, symbol, datetime.now(), direction)
-            if trail:
-                pinned_swing, pinned_atr_entry = sl, trail["atr_entry"]
+            if sl_info.get("atr_entry") is not None:
+                pinned_swing, pinned_atr_entry = sl, sl_info["atr_entry"]
                 # 2026-08-27: ส่ง SL แรกไปที่จุดเดียวกับที่ ATR trailing จะเลื่อนไปอยู่ดีในรอบแรก
                 # (exit_monitor คำนวณ initial_sl = pinned_swing ∓ 2×ATR แล้วสั่งขยับทันทีที่รันรอบ
                 # แรกภายใน 1 ชม.) เดิมส่ง `sl` แคบๆ ไปก่อนแล้วค่อยโดนขยับออก = ระบบคิด lot จาก
@@ -237,11 +254,10 @@ def scan_symbol(symbol: str) -> None:
                 # pinned_swing ยังเป็น `sl` เท่าเดิม -> สูตร trailing ทั้งหมดไม่เปลี่ยนเลย
                 # เปลี่ยนแค่ "จุดเริ่ม" ให้ตรงกับที่มันจะไปอยู่แล้ว
                 #
-                # ⚠️ ยังไม่ได้แตะ MIN_RR_HARD_BLOCK / MIN_RR ซึ่งยังคิด R:R จาก `sl` แคบอยู่ —
-                # แปลว่าด่านคัดเข้ายังใช้ R:R ที่สูงกว่าความเป็นจริงราว 1.3 เท่า (ตั้งใจแยกเป็น
-                # คนละเรื่อง จะได้รู้ว่าการแก้ risk sizing อย่างเดียวให้ผลยังไงก่อน)
-                exec_sl = (sl - 2 * trail["atr_entry"]) if direction == "Long" \
-                          else (sl + 2 * trail["atr_entry"])
+                # 2026-08-31: ช่องว่างที่เคยเขียนเตือนไว้ตรงนี้ ("ด่านคัดเข้ายังใช้ R:R ที่สูงกว่า
+                # ความเป็นจริงราว 1.3 เท่า") ปิดแล้ว — compute_score คำนวณ exec_sl เองและใช้ตรวจ
+                # R:R วัดจริงบนไม้ replay 38 ไม้: ความเสี่ยงจริงกว้างกว่าที่ด่านเคยคิด 1.49 เท่า
+                # และ 11/38 ไม้ (29%) เคยผ่านด่าน 1.5 มาได้ทั้งที่ R:R จริงต่ำกว่า 1.5
         except Exception as exc:
             print(f"  [{symbol}] WARNING — บันทึกฐานตรึงไม่ได้ ({exc}) — exit_monitor จะ fallback คำนวณเองภายหลัง")
 

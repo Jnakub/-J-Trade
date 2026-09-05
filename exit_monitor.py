@@ -365,6 +365,25 @@ def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timesta
 # เดียวกับ "still_valid" ใน swing.find_sl_from_structure (ATR × STRUCTURE_TOLERANCE) ไม่เพิ่ม
 # magic number ใหม่ — ต้องปิดทะลุเกิน ATR×0.22 ถึงนับว่า broken จริง
 
+# 2026-09-03: **ปิดกฎนี้ทั้งระบบ** (STRUCTURE_BREAK_ENABLED = False) ตามการตัดสินใจของผู้ใช้
+# หลังวัดด้วย backtest_replay 730 วันครบ 8 symbol ใน config.SYMBOLS (engine ที่แก้บั๊ก lookahead
+# แล้ว) — กฎนี้เป็นทางออกที่ระบบใช้บ่อยที่สุดและแพงที่สุด: ปิดไม้ 74 จาก 142 ไม้ (52%) ที่ WR
+# 28.4% รวม -16.98R
+#   เปิดกฎ (เดิม)  142 ไม้  WR 42.3%  -1.81R
+#   ปิดกฎ          130 ไม้  WR 45.4%  +1.44R      => +3.25R ทั้งพอร์ต
+# แยกตาม asset class — กฎนี้มีค่าเฉพาะกับ crypto:
+#   fx     -5.98R -> -2.70R (+3.28)   crypto  +4.98R -> +4.72R (-0.26)
+#   index  -1.88R -> -1.75R (+0.13)   metal   +1.06R -> +1.16R (+0.10)
+# (crypto หลุด swing แล้วไหลต่อจริง ส่วน fx แกว่งกลับเข้ากรอบบ่อย ปิด 100% ตอนหลุด = ขายที่ก้น)
+# ผลข้างเคียงที่ต้องรู้: ไม้ที่ชน SL เพิ่มจาก 27 -> 62 ไม้ (-39.04R) แลกกับไม้ที่ถึง TP เพิ่มจาก
+# 29 -> 36 (+34.74R) และ BE 12 -> 21 ไม้ (+4.55R) — ไม้ถือนานขึ้น ยึด "ช่อง" นานขึ้น จำนวนไม้รวม
+# จึงลดจาก 142 เหลือ 130 และมี 8 ไม้ชนเพดาน MAX_HOLD_DAYS ของ backtest (ระบบจริงไม่มีเพดานนี้
+# ตัวเลขส่วนนั้นจึงไม่ตรงกับของจริง)
+# ⚠️ ทางเลือกที่ยังไม่ได้ทำ: แยกเปิด/ปิดตาม asset class (เปิดกับ crypto ปิดกับที่เหลือ) น่าจะดีกว่า
+# ทั้งสองทางเลือกสุดขั้ว แต่ผู้ใช้เลือกปิดทั้งระบบไปก่อน — ฟังก์ชันยังอยู่ครบ เปิดกลับได้ที่ค่านี้
+STRUCTURE_BREAK_ENABLED = False
+
+
 def check_structure_break(symbol: str, direction: str, as_of=None) -> bool:
     df_4h = get_ohlcv_real(symbol, "4H", bars=210, as_of=as_of)
     vol_mult = swing_vol_multiplier(symbol)
@@ -560,7 +579,8 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     trend_keep_pct = trend_info["keep_pct"]
     trend_broken_full    = trend_keep_pct <= 0
     trend_broken_partial = 0 < trend_keep_pct < 100
-    structure_broken = check_structure_break(symbol, direction, as_of=as_of)
+    structure_broken = (check_structure_break(symbol, direction, as_of=as_of)
+                        if STRUCTURE_BREAK_ENABLED else False)
     # News ย้อนหลังไม่ได้ (ForexFactory ให้เฉพาะปฏิทินปัจจุบัน) — โหมด backtest ถือว่าไม่มีข่าว
     if as_of is None:
         has_news, news_detail, news_hours_left = check_upcoming_news()
