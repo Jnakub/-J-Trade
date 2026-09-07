@@ -18,6 +18,7 @@ from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
     COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R,
+    SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
@@ -68,10 +69,18 @@ INTERVAL_SECONDS = 3600   # เช็คทุก 1 ชั่วโมง
 def scan_symbol(symbol: str) -> None:
     print(f"\n  [{symbol}] กำลังวิเคราะห์...")
 
-    # 1. มี position เปิดอยู่แล้ว? -> ไม่หา entry ใหม่ รัน Exit Monitor ดูแลไม้เดิมแทน
+    # 1. มี position เปิดอยู่แล้ว? -> รัน Exit Monitor ดูแลไม้เดิมก่อนเสมอ
+    #    SLOT_PER_STRATEGY=True: ช่องแยกตามกลยุทธ์ ไม้ Scoring ที่เปิดอยู่จึงไม่บล็อกไม้ Reversal
+    #    (และกลับกัน) ด่านจริงอยู่ที่ข้อ 4b หลัง regime บอกแล้วว่ารอบนี้จะเปิดกลยุทธ์ไหน
+    #    occupied ถูกอ่าน *ก่อน* รัน Exit Monitor โดยตั้งใจ — ตรงกับ backtest_replay ที่ snapshot
+    #    ช่องก่อนเดินไม้ ผลคือไม้ที่เพิ่งถูกปิดในรอบนี้จะยังไม่เปิดไม้ใหม่ทับทันทีในชั่วโมงเดียวกัน
     positions = mt5.positions_get(symbol=symbol)
+    occupied = set()
     if positions:
-        print(f"  [{symbol}] มี position เปิดอยู่ {len(positions)} ไม้ -> รัน Exit Monitor")
+        for pos in positions:
+            occupied.add(journal.get_trade_strategy(pos.ticket))
+        print(f"  [{symbol}] มี position เปิดอยู่ {len(positions)} ไม้ "
+              f"({', '.join(sorted(occupied))}) -> รัน Exit Monitor")
         for pos in positions:
             try:
                 m = analyze_position(pos)
@@ -80,7 +89,11 @@ def scan_symbol(symbol: str) -> None:
             except Exception as exc:
                 print(f"  [{symbol}] Exit Monitor ERROR — {exc}")
                 log.error(f"[{symbol}] Exit Monitor ERROR", exc_info=True)
-        return
+        if not SLOT_PER_STRATEGY:
+            return
+        if occupied >= {"Scoring", "Reversal"}:
+            print(f"  [{symbol}] ช่องเต็มทั้งสองกลยุทธ์ -> ไม่หา entry ใหม่")
+            return
 
     # 1b. โบรกปิดเทรด symbol นี้ไว้ไหม (trade_mode != FULL) — เช็คก่อนวิเคราะห์อะไรเลย
     # 2026-08-15: เจอ XRPUSDm ถูก Exness ปิดเทรดบนเซิร์ฟเวอร์ trial (trade_mode=DISABLED)
@@ -151,6 +164,15 @@ def scan_symbol(symbol: str) -> None:
             print(f"  [{symbol}] SKIP — regime ยังไม่พร้อมเปิด scorecard ใดๆ")
             return
 
+        # 4b. ช่องของกลยุทธ์ที่ regime รอบนี้จะเปิด ว่างไหม — regime เป็นตัวเลือกกลยุทธ์ตัวเดียว
+        #     (Mutual Exclusivity ตามข้อ 4) จึงรู้ได้ตั้งแต่ตรงนี้โดยไม่ต้องคำนวณสกอร์การ์ดก่อน
+        #     occupied อ่านไว้ตั้งแต่ข้อ 1 ก่อนรัน Exit Monitor — ตรงลำดับกับ backtest_replay
+        #     (ถ้า SLOT_PER_STRATEGY=False ข้อ 1 return ไปตั้งแต่มีไม้ใดๆ แล้ว มาไม่ถึงตรงนี้)
+        want = "Scoring" if regime in REGIME_TREND else "Reversal"
+        if want in occupied:
+            print(f"  [{symbol}] SKIP — ช่อง {want} มีไม้เปิดอยู่แล้ว")
+            return
+
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             print(f"  [{symbol}] ERROR — ดึงราคาไม่ได้")
@@ -180,6 +202,18 @@ def scan_symbol(symbol: str) -> None:
             # ── เปิด Reversal (ทิศตามขั้ว divergence ที่ทำให้ REVERSAL-READY ยิง ไม่ใช่แค่กลับ bias) ──
             div_polarity = regime_info["divergence"]["divergence"]
             direction = "Long" if div_polarity == "bullish" else "Short"
+            # ── ด่านฝั่ง Short: ต้องมีเทรนด์ 1D หนุนด้วย (ดูที่มา/ตัวเลขที่ config.py) ──
+            # ใช้ get_trend_bias ตัวเดียวกับที่ฝั่ง Scoring ใช้ ไม่เพิ่มนิยามเทรนด์ตัวที่สอง
+            # เข้าระบบ และดึง 1D แบบเดียวกันเป๊ะ (bars=800 + merge_real_volume)
+            if direction == "Short" and REVERSAL_SHORT_NEEDS_1D_TREND:
+                df_1d_rev = merge_real_volume(
+                    get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800), symbol, "1D")
+                bias_1d, bias_src = get_trend_bias(symbol, df_1d_rev)
+                if bias_1d != "Short":
+                    print(f"  [{symbol}] SKIP — Reversal Short แต่เทรนด์ 1D = {bias_1d} "
+                          f"({bias_src}) ต้องเป็น Short ถึงจะเข้าได้")
+                    return
+                print(f"  [{symbol}] Reversal Short — เทรนด์ 1D = Short ({bias_src}) ผ่านด่าน")
             print(f"  [{symbol}] เปิด Reversal — Divergence={div_polarity} -> เข้าเป็น {direction}  Entry={entry:.5f}")
             # 2026-09-05: รับเข้า `sl_info` ตัวเดียวกับทาง Scoring — เดิมรับเป็น `info` แล้วโค้ด
             # ด้านล่าง (exec_sl / pinned_swing) อ่านจาก `sl_info` แบบไม่แยก branch ทำให้ไม้

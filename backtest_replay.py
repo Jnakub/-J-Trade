@@ -51,6 +51,13 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ด้วย ,) — ไว้ตอบว่า "ถ้าไม่เข้าไม้ตอน regime นี้เลย ผลรวมดีขึ้นไหม"
      --rev-min-sl=X  ทับเกณฑ์ระยะ SL ขั้นต่ำ **เฉพาะทาง Reversal** (--min-sl ทับทั้งสองทาง) —
                  ไว้ตอบว่าเกณฑ์ที่ backtest มาจากฝั่ง Scoring เหมาะกับไม้สวนด้วยไหม
+     --slot-per-strategy  ให้ถือไม้ได้ 1 ไม้ต่อ **กลยุทธ์** ต่อ symbol (ปกติ 1 ไม้ต่อ symbol) —
+                 regime แยก TREND/REVERSAL-READY ชัดเจนอยู่แล้ว สองกลยุทธ์ไม่เคยแย่ง "สัญญาณ"
+                 กันจริง แค่แย่ง "ช่องถือไม้" — ไว้ตอบว่าถ้าปลดล็อกช่องแล้ว Reversal ที่โดน
+                 Scoring เบียดหายไปจะกลับมาไหม
+                 ⚠️ ผลคือถือได้ 2 ไม้พร้อมกันต่อ symbol = ความเสี่ยงต่อ symbol เป็น 2 เท่า
+                 backtest บวก R ตรงๆ ไม่ได้ปรับ sizing ให้ ตัวเลขที่ได้จึงเป็น "ถ้ายอมเสี่ยง
+                 2 เท่า" ไม่ใช่ "ได้ฟรี"
      --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ปกติ 1.1) — ด่าน R:R ขั้นต่ำของ
                  ไม้สวน (คนละตัวกับ MIN_RR_HARD_BLOCK=1.5 ที่ Scoring ใช้)
      --rev-tp-from-entry  ฉาย Fibonacci TP ของ Reversal จากราคาเข้าแทน swing B — ไว้ตอบว่า
@@ -160,6 +167,19 @@ if legacy_sl:
 _rms_arg = next((a for a in sys.argv if a.startswith("--rev-min-sl=")), None)
 if _rms_arg:
     reversal.MIN_SL_OVERRIDE = float(_rms_arg.split("=")[1])
+# สองตัวนี้อ่านค่าเริ่มต้นจาก config เพื่อให้ backtest ตรงกับระบบจริงเสมอ — flag มีไว้สลับ
+# ทดลองเท่านั้น (--one-slot / --no-rev-short-1d = ย้อนกลับไปพฤติกรรมก่อนหน้า)
+slot_per_strategy = config.SLOT_PER_STRATEGY
+if "--slot-per-strategy" in sys.argv:
+    slot_per_strategy = True
+if "--one-slot" in sys.argv:
+    slot_per_strategy = False
+rev_short_1d = config.REVERSAL_SHORT_NEEDS_1D_TREND   # Reversal Short ต้องมีเทรนด์ 1D หนุน
+if "--rev-short-1d" in sys.argv:
+    rev_short_1d = True
+if "--no-rev-short-1d" in sys.argv:
+    rev_short_1d = False
+no_rev_short = "--no-rev-short" in sys.argv            # ปิดฝั่ง Short ของ Reversal ทิ้งเลย
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -253,12 +273,17 @@ if _dma_arg or div_no_vol:
 if max_runup is not None:
     print(f"  Entry: ข้ามรอบที่ราคาวิ่งไปทางที่จะเข้าเกิน {max_runup:g}R ใน 24 แท่ง 1H (เฉพาะ Scoring)"
           f"{'   [ทับด้วย --max-runup-24h]' if _runup_arg else ''}")
+print(f"  Slot: ถือได้ 1 ไม้ต่อ{'กลยุทธ์ต่อ' if slot_per_strategy else ''} symbol   "
+      f"Reversal Short: {'ต้องมีเทรนด์ 1D หนุน' if rev_short_1d else 'ไม่กรองเทรนด์ 1D'}"
+      f"{'   [ปิดฝั่ง Short ทิ้ง]' if no_rev_short else ''}")
 print(f"  Exit: ถึง 1R เหลือ {em.RULE_1R_KEEP:g}%   ครึ่งทางไป TP เหลือ {em.RULE_HALFWAY_KEEP:g}%   "
       f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}"
       f"{'   ปิดกฎ trend invalidation' if no_trend_inval else ''}")
 print()
 
-pos = None
+# ช่องถือไม้: dict slot -> ไม้ที่ถืออยู่ — โหมดปกติมีช่องเดียวชื่อ "ANY" (พฤติกรรมเดิมเป๊ะ)
+# โหมด --slot-per-strategy แยกช่องตามชื่อกลยุทธ์
+positions = {}
 trades, skips = [], {}
 regime_seen, reversal_fate = {}, {}   # นับทุกรอบสแกน (ดู comment ใน loop)
 daily_r = {}
@@ -299,10 +324,13 @@ def note(reason):
     skips[reason] = skips.get(reason, 0) + 1
 
 
-def step_position(t, bar, now):
+def slot_of(strategy):
+    return strategy if slot_per_strategy else "ANY"
+
+
+def step_position(pos, key, t, bar, now):
     """เดินไม้ที่ถืออยู่ไป 1 ชั่วโมง — broker เช็ค SL/TP ระหว่างแท่ง t->now ก่อน แล้ว
     exit_monitor ตัวจริงทำงานที่ปลายชั่วโมง (now) ตรงกับ INTERVAL_SECONDS=3600 ของระบบจริง"""
-    global pos
     long_ = pos["direction"] == "Long"
     risk = abs(pos["entry"] - pos["sl0"])      # ระยะเสี่ยงตอนเข้า = ฐาน 1R ของบัญชี
 
@@ -310,10 +338,10 @@ def step_position(t, bar, now):
     if (bar["low"] <= pos["sl"]) if long_ else (bar["high"] >= pos["sl"]):
         r = ((pos["sl"] - pos["entry"]) if long_ else (pos["entry"] - pos["sl"])) / risk
         how = "BE" if abs(pos["sl"] - pos["entry"]) < 1e-9 else "SL"
-        return close_pos(now, pos["booked"] + pos["rem"] * r, how)
+        return close_pos(pos, key, now, pos["booked"] + pos["rem"] * r, how)
     if (bar["high"] >= pos["tp"]) if long_ else (bar["low"] <= pos["tp"]):
         r = ((pos["tp"] - pos["entry"]) if long_ else (pos["entry"] - pos["tp"])) / risk
-        return close_pos(now, pos["booked"] + pos["rem"] * r, "TP")
+        return close_pos(pos, key, now, pos["booked"] + pos["rem"] * r, "TP")
 
     # 2) exit_monitor ตัวจริง — เรียกด้วย as_of + ctx (ไม้จำลองไม่มีใน journal)
     sim = SimPos(symbol, pos["direction"], pos["entry"], pos["sl"], pos["tp"], pos["rem"], pos["time"])
@@ -333,7 +361,7 @@ def step_position(t, bar, now):
         pos["rem"] = keep
         pos["cuts"] += 1
         if pos["rem"] <= 1e-9:
-            return close_pos(now, pos["booked"], m["final_decision"][0][:24])
+            return close_pos(pos, key, now, pos["booked"], m["final_decision"][0][:24])
 
     if m["desired_sl"] is not None:            # ATR trailing / breakeven
         new_sl = m["desired_sl"]
@@ -345,18 +373,18 @@ def step_position(t, bar, now):
 
     if (now - pos["time"]) >= timedelta(days=MAX_HOLD_DAYS):
         r = ((bar["close"] - pos["entry"]) if long_ else (pos["entry"] - bar["close"])) / risk
-        return close_pos(now, pos["booked"] + pos["rem"] * r, "HOLD-CAP")
+        return close_pos(pos, key, now, pos["booked"] + pos["rem"] * r, "HOLD-CAP")
     return None
 
 
-def close_pos(t, r, how):
-    global pos, last_close_time
+def close_pos(pos, key, t, r, how):
+    global last_close_time
     if use_cost:
         r -= cost_pct / 100 * pos["entry"] / abs(pos["entry"] - pos["sl0"])   # spread ขาเข้า+ออก ~1 ครั้ง
     rec = {**pos, "exit_time": t, "R": r, "how": how}
     daily_r[t.date()] = daily_r.get(t.date(), 0.0) + r
     last_close_time = t
-    pos = None
+    positions.pop(key, None)
     return rec
 
 
@@ -385,11 +413,18 @@ for n, row in enumerate(clock.to_dict("records")):
         if _rev:
             reversal_fate[tag] = reversal_fate.get(tag, 0) + 1
 
-    if pos is not None:                                   # ด่าน 1
-        fate("ถือไม้อื่นอยู่")
-        rec = step_position(t, bar, now)
-        if rec:
-            trades.append(rec)
+    # ด่าน 1 — เช็คช่องก่อนเดินไม้ (ตรงกับ scheduler ที่อ่าน positions_get ก่อนทำอย่างอื่น
+    # แล้วถ้ามีไม้อยู่จะไม่เปิดใหม่ในรอบนั้น) ไม้ที่เพิ่งปิดในชั่วโมงนี้จึงยังไม่เปิดไม้ใหม่ทันที
+    _occupied = set(positions)
+    for _k, _p in list(positions.items()):
+        _rec = step_position(_p, _k, t, bar, now)
+        if _rec:
+            trades.append(_rec)
+
+    # กลยุทธ์ที่ regime รอบนี้จะเปิด (ไม่มีทางเกิดพร้อมกัน — regime เป็นตัวเลือกให้ตัวเดียว)
+    _want = "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None)
+    if _want is not None and slot_of(_want) in _occupied:
+        note("ถือไม้อยู่แล้ว (ช่องไม่ว่าง)"); fate("ถือไม้อื่นอยู่")
         continue
 
     if daily_r.get(now.date(), 0.0) <= -max_daily_loss_r:  # ด่าน 3
@@ -429,6 +464,23 @@ for n, row in enumerate(clock.to_dict("records")):
         elif regime in REGIME_REVERSAL:
             pol = rinfo["divergence"]["divergence"]
             direction = "Long" if pol == "bullish" else "Short"
+            # --no-rev-short / --rev-short-1d : ทดลองปิดหรือกรองฝั่ง Short ของ Reversal
+            # ที่มา: บน 8 symbol ไม้ Reversal Short 18 ไม้ -6.08R และ first-touch ด้วย SL/TP
+            # แผนเดิม (ไม่มีกฎ exit เลย) แตะ SL ก่อน 15/16 = WR ดิบ 6.2% ที่จุดคุ้มทุน 29.4%
+            # ขณะที่ฝั่ง Long 10/19 = 52.6% ที่จุดคุ้มทุน 26.2% — สาเหตุที่วัดได้คือ RSI 4H
+            # อยู่เหนือ 70 บ่อยกว่าต่ำกว่า 30 ราว 1.7 เท่าทุก symbol (overbought = สภาพปกติของ
+            # ตลาดที่ไต่ขึ้น) bearish divergence ที่ key level จึงยิงใส่ความแข็งแรงธรรมดา
+            # (ดู scratchpad/rev_short.py, div_bias.py)
+            bias_1d = None
+            if direction == "Short" and (no_rev_short or rev_short_1d):
+                if no_rev_short:
+                    note("ปิดฝั่ง Short ของ Reversal"); fate("Reversal Short ถูกปิด")
+                    continue
+                bias_1d, _ = get_trend_bias(symbol, df1d_at(now))
+                if bias_1d != "Short":
+                    note(f"Reversal Short แต่เทรนด์ 1D = {bias_1d}")
+                    fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
+                    continue
             score, criteria, passed, inf = reversal.compute_reversal_score(
                 symbol, direction, entry, key_level=rinfo["key_level"],
                 df_4h=rinfo["df_4h"], as_of=now)
@@ -474,7 +526,7 @@ for n, row in enumerate(clock.to_dict("records")):
     # รายเกณฑ์ ซึ่งได้ค่าจาก scoring.py "ณ วันที่วิเคราะห์" ไม่ใช่ตัวที่กรองไม้นี้จริงตอน replay
     # (ถ้าสกอร์การ์ดถูกแก้ระหว่างนั้น ตัวเลขจะไม่ตรงกับไม้ที่ได้มาโดยที่ไม่มีอะไรฟ้อง)
     # ชื่อคอลัมน์ = ชื่อเกณฑ์ตรงๆ ฝั่ง Scoring/Reversal คนละชุด อีกฝั่งจึงเป็นค่าว่าง
-    pos = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
+    positions[slot_of(strategy)] = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
            "tp": tp, "tp0": tp, "score": score, "strategy": strategy, "regime": regime,
            **{name: bool(ok) for name, ok, _ in criteria},
            "booked": 0.0, "rem": 1.0, "cuts": 0,
@@ -492,7 +544,7 @@ mt5.shutdown()
 t = pd.DataFrame(trades)
 print(f"\n{'=' * 78}")
 print(f"  รอบสแกน {len(clock)}  ->  เข้าไม้จริง {len(t)} ไม้"
-      f"{'  (ยังถือค้าง 1 ไม้)' if pos else ''}")
+      f"{f'  (ยังถือค้าง {len(positions)} ไม้)' if positions else ''}")
 print(f"  {'-' * 74}")
 print("  เหตุผลที่ไม่เข้า (นับรอบสแกน):")
 for k, v in sorted(skips.items(), key=lambda x: -x[1])[:10]:
@@ -546,6 +598,12 @@ if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
 if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
+if slot_per_strategy != config.SLOT_PER_STRATEGY:          # ติด tag เฉพาะรอบที่สวนค่าในระบบจริง
+    _tag += "_slotper" if slot_per_strategy else "_oneslot"
+if no_rev_short:
+    _tag += "_norevshort"
+if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
+    _tag += "_revshort1d" if rev_short_1d else "_revshortany"
 if rev_tp_entry:
     _tag += "_revtpentry"
 if _dma_arg:
