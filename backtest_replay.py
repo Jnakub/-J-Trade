@@ -180,6 +180,9 @@ if "--rev-short-1d" in sys.argv:
 if "--no-rev-short-1d" in sys.argv:
     rev_short_1d = False
 no_rev_short = "--no-rev-short" in sys.argv            # ปิดฝั่ง Short ของ Reversal ทิ้งเลย
+# --tp-cap-r=X : เพดานระยะ TP เป็นเท่าของความเสี่ยง (ดูที่จุดใช้งานในลูปหลัก)
+_tpc_arg = next((a for a in sys.argv if a.startswith("--tp-cap-r=")), None)
+tp_cap_r = float(_tpc_arg.split("=")[1]) if _tpc_arg else None
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -276,6 +279,9 @@ if max_runup is not None:
 print(f"  Slot: ถือได้ 1 ไม้ต่อ{'กลยุทธ์ต่อ' if slot_per_strategy else ''} symbol   "
       f"Reversal Short: {'ต้องมีเทรนด์ 1D หนุน' if rev_short_1d else 'ไม่กรองเทรนด์ 1D'}"
       f"{'   [ปิดฝั่ง Short ทิ้ง]' if no_rev_short else ''}")
+if tp_cap_r is not None:
+    print(f"  TP: ดึงเข้าไม่ให้ไกลเกิน {tp_cap_r:g}R ของระยะเสี่ยงจริง (ปกติใช้ Fibonacci "
+          f"{config.TP_FIB_RATIO:g} ล้วน)")
 print(f"  Exit: ถึง 1R เหลือ {em.RULE_1R_KEEP:g}%   ครึ่งทางไป TP เหลือ {em.RULE_HALFWAY_KEEP:g}%   "
       f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}"
       f"{'   ปิดกฎ trend invalidation' if no_trend_inval else ''}")
@@ -511,6 +517,18 @@ for n, row in enumerate(clock.to_dict("records")):
     # pinned_swing ยังเป็น SL โครงสร้างเท่าเดิม สูตร trailing จึงไม่เปลี่ยน
     sl, atr_entry = exec_sl, atr_entry_
 
+    # --tp-cap-r=X : ดึง TP เข้ามาไม่ให้ไกลเกิน X เท่าของระยะเสี่ยงจริง (entry -> exec_sl)
+    # ที่มา: TP จาก Fibonacci 1.618 ตั้งไว้ไกลกว่าที่ราคาวิ่งไปจริงราว 2 เท่าในทุก symbol —
+    # R:R แผนเฉลี่ย 2.87 แต่ MFE (ราคาวิ่งไปทางเราสูงสุดจริง) เฉลี่ยแค่ 1.0-1.6R ต่อ symbol
+    # ทำให้ไม้ถึง TP แค่ 25.6% ที่เหลือไปจบที่ SL/BE ทั้งที่เคยกำไรมาแล้ว
+    # ใช้ min() ไม่ใช่ตั้งค่าตายตัว — ไม้ที่ fib ให้ TP ใกล้กว่า X อยู่แล้วไม่ถูกยืดออก
+    # วางไว้หลังด่าน R:R (ในสกอร์การ์ด) โดยตั้งใจ: ไม้ยังต้องผ่าน MIN_RR_HARD_BLOCK ด้วย TP
+    # โครงสร้างจริงก่อน แล้วค่อยดึงเข้า ไม่ใช่ปล่อยไม้ที่โครงสร้างไม่มีที่ไปให้ผ่านเพราะเป้าใกล้
+    if tp_cap_r is not None:
+        _risk = abs(entry - sl)
+        _cap = _risk * tp_cap_r
+        tp = (min(tp, entry + _cap) if direction == "Long" else max(tp, entry - _cap))
+
     # --max-runup-24h : ข้ามไม้ที่ "ราคาวิ่งไปทางเรามาก่อนแล้ว" (เข้าตอนปลายทาง) — วัดเทียบเป็น R
     # ด้วยระยะเสี่ยงจริงของไม้นี้ ใช้ 24 แท่ง 1H ย้อนหลังในนาฬิกาเดียวกับ replay (fx/index ที่มี
     # วันหยุดจึงเท่ากับ 24 ชั่วโมง "ที่ตลาดเปิด" ไม่ใช่ 24 ชม.ตามปฏิทิน)
@@ -602,6 +620,8 @@ if slot_per_strategy != config.SLOT_PER_STRATEGY:          # ติด tag เ�
     _tag += "_slotper" if slot_per_strategy else "_oneslot"
 if no_rev_short:
     _tag += "_norevshort"
+if tp_cap_r is not None:
+    _tag += f"_tpcap{tp_cap_r:g}"
 if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
     _tag += "_revshort1d" if rev_short_1d else "_revshortany"
 if rev_tp_entry:
