@@ -98,7 +98,27 @@ RSI_OVERSOLD         = 30
 RULE_HOT_KEEP        = 75
 RULE_HALFWAY_TRIGGER = 50    # TP progress %
 RULE_HALFWAY_KEEP    = 60
-RULE_CLIMAX_KEEP     = 50
+# 2026-09-10: 50 -> 100 = **ปิดกฎนี้** (100 = ไม่ตัดเลย เกณฑ์ยังถูกคำนวณและแสดงผลเหมือนเดิม)
+# วัดด้วย backtest_replay --log-cuts ครบ 7 symbol 730 วัน ซึ่งบันทึกทุกครั้งที่กฎสั่งปิดบางส่วน
+# แล้วตามดูว่าราคาไปต่อถึงไหนจนไม้ปิดจริง (309 ครั้ง):
+#   กฎ                    ครั้ง   R เฉลี่ยตอนยิง   เสียโอกาส
+#   แท่ง Climax            118        -0.06        +12.53R   <- 81% ของความเสียหายทั้งชุด
+#   Indicator ร้อน         120        +0.43         +1.80R
+#   ถึง 1R                  40        +1.13         +1.52R
+#   เดินทาง >=50% ไป TP     27        +1.05         +1.38R
+#                                              รวม  +15.39R
+# **Climax ยิงตอนไม้ยังติดลบ** (R เฉลี่ย -0.06) = ไม่ได้ล็อกกำไร แต่ตัดไม้ที่ขาดทุนทิ้งแล้วไม้
+# พวกนั้นฟื้นกลับมา — ความเสียหาย +11.26R จาก +12.53R อยู่ในกลุ่ม "ตัดตอนติดลบ" ล้วนๆ
+# ผลจริงเมื่อปิดกฎ (7 symbol 730 วัน):
+#   ก่อน 192 ไม้ WR 50.5% +22.44R  ->  หลัง 192 ไม้ WR 53.1% +32.93R   (+10.48R, ดีขึ้น 7/7)
+#   **ชุดไม้เหมือนเดิมทุกไม้** จุดเข้า/จุดออก/วิธีออกตรงกันหมด (SL 79 TP 55 BE 43) เปลี่ยนแค่
+#   ขนาดไม้ระหว่างทาง — การปิดบางส่วนไม่ปล่อยช่อง จึงไม่เกิดปัญหา "ไม้อื่นเข้ามาแทน" ที่ทำให้
+#   ด่านกรองล้มเหลวมา 3 ครั้ง (ดู MIN_SL_DISTANCE_PCT / TP_FIB_RATIO / MIN_SCORE ใน config.py)
+# ⚠️ ลองแล้วว่า "ยิงเฉพาะตอนไม้กำไร" (CLIMAX_ONLY_IN_PROFIT) **แย่กว่าปิดทิ้ง** — ได้ +28.62R
+#    เทียบกับ +32.93R เพราะการตัดตอนกำไรก็ยังเผาเงินทุกช่วง (0-0.5R +1.81 / 0.5-1R +0.81 /
+#    1-1.5R +0.97 / 1.5-2R +0.54) ไม่มีระดับกำไรไหนที่กฎนี้คุ้ม
+RULE_CLIMAX_KEEP     = 100
+CLIMAX_ONLY_IN_PROFIT = False   # ทดสอบแล้วแพ้การปิดกฎทิ้ง (ดูด้านบน) — เก็บสวิตช์ไว้วัดซ้ำ
 
 INTERVAL_SECONDS  = 3600
 MONITOR_TIMEFRAME = MT5_TIMEFRAMES["4H"]
@@ -669,7 +689,11 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
              "cond": "RSI ชนขอบ / ราคาชน Bollinger ฝั่งกำไร"},
             {"no": 3, "name": "เดินทาง >=50% ไป TP",   "trigger": halfway_trigger,       "keep_pct": RULE_HALFWAY_KEEP,
              "cond": "TP Progress >= 50%"},
-            {"no": 4, "name": "แท่ง Climax",           "trigger": climax,                "keep_pct": RULE_CLIMAX_KEEP,
+            {"no": 4, "name": "แท่ง Climax",
+             # r_multiple เป็น None ได้ถ้า sl_range = 0 — ถือว่า "ยังไม่กำไร" ไม่ให้กฎยิง
+             "trigger": climax and ((r_multiple is not None and r_multiple > 0)
+                                    if CLIMAX_ONLY_IN_PROFIT else True),
+             "keep_pct": RULE_CLIMAX_KEEP,
              "cond": "volume สุดขั้ว + range ใหญ่"},
             {"no": 5, "name": "ใกล้ข่าว High Impact",  "trigger": news_imminent,          "keep_pct": NEWS_IMMINENT_KEEP,
              "cond": f"ข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ภายใน {NEWS_IMMINENT_H} ชม. — {news_detail if news_imminent else ''}"},

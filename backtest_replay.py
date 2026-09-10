@@ -186,6 +186,11 @@ tp_cap_r = float(_tpc_arg.split("=")[1]) if _tpc_arg else None
 # --max-sl-atr=X : เพดานความกว้างของ SL เป็นเท่าของ ATR (ดูที่จุดใช้งานในลูปหลัก)
 _msa_arg = next((a for a in sys.argv if a.startswith("--max-sl-atr=")), None)
 max_sl_atr = float(_msa_arg.split("=")[1]) if _msa_arg else None
+# --log-cuts : บันทึกทุกครั้งที่กฎ Position Sizing สั่งปิดบางส่วน พร้อมว่ากฎไหนยิง — ไว้วัดว่า
+# กฎแต่ละตัวคุ้มไหม (ไม้ที่ชนะเก็บได้แค่ 38% ของกำไรสูงสุดที่เคยมี = ราว 28R หายไปตรงนี้)
+# ไม่เปลี่ยนพฤติกรรมอะไรเลย แค่เขียน log เพิ่ม
+log_cuts = "--log-cuts" in sys.argv
+cut_log = []
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -209,6 +214,19 @@ if div_no_vol:
 _1rk_arg = next((a for a in sys.argv if a.startswith("--rule-1r-keep=")), None)
 if _1rk_arg:
     em.RULE_1R_KEEP = float(_1rk_arg.split("=")[1])
+# --rule-climax-keep / --rule-hot-keep : สองกฎที่เหลือของชุด Position Sizing (100 = ปิดกฎนั้น)
+# วัดแล้วว่า Climax เป็นตัวที่กินกำไรมากที่สุด: ยิง 118 ครั้งตอน R เฉลี่ย -0.06 (คือตัดตอนไม้
+# ยังติดลบ ไม่ใช่ล็อกกำไร) และทำให้เสียโอกาสรวม +12.53R จากทั้งชุด +15.39R
+_clk_arg = next((a for a in sys.argv if a.startswith("--rule-climax-keep=")), None)
+if _clk_arg:
+    em.RULE_CLIMAX_KEEP = float(_clk_arg.split("=")[1])
+_hotk_arg = next((a for a in sys.argv if a.startswith("--rule-hot-keep=")), None)
+if _hotk_arg:
+    em.RULE_HOT_KEEP = float(_hotk_arg.split("=")[1])
+# --climax-only-in-profit : ให้กฎ Climax ยิงเฉพาะตอนไม้กำไรอยู่ (ดูเหตุผลที่ exit_monitor.py)
+climax_in_profit = "--climax-only-in-profit" in sys.argv
+if climax_in_profit:
+    em.CLIMAX_ONLY_IN_PROFIT = True
 _hwk_arg = next((a for a in sys.argv if a.startswith("--rule-halfway-keep=")), None)
 if _hwk_arg:
     em.RULE_HALFWAY_KEEP = float(_hwk_arg.split("=")[1])
@@ -288,6 +306,7 @@ if tp_cap_r is not None:
     print(f"  TP: ดึงเข้าไม่ให้ไกลเกิน {tp_cap_r:g}R ของระยะเสี่ยงจริง (ปกติใช้ Fibonacci "
           f"{config.TP_FIB_RATIO:g} ล้วน)")
 print(f"  Exit: ถึง 1R เหลือ {em.RULE_1R_KEEP:g}%   ครึ่งทางไป TP เหลือ {em.RULE_HALFWAY_KEEP:g}%   "
+      f"Climax เหลือ {em.RULE_CLIMAX_KEEP:g}%   ร้อนเหลือ {em.RULE_HOT_KEEP:g}%\n        "
       f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}"
       f"{'   ปิดกฎ trend invalidation' if no_trend_inval else ''}")
 print()
@@ -368,6 +387,16 @@ def step_position(pos, key, t, bar, now):
     if keep < pos["rem"] - 1e-9:               # ปิดบางส่วน/ทั้งหมดตามที่ระบบสั่ง
         cut = pos["rem"] - keep
         r_now = ((price - pos["entry"]) if long_ else (pos["entry"] - price)) / risk
+        if log_cuts:
+            cut_log.append({
+                "symbol": symbol, "entry_time": pos["time"], "cut_time": now,
+                "direction": pos["direction"], "strategy": pos["strategy"],
+                "entry": pos["entry"], "sl0": pos["sl0"], "risk": risk,
+                "price": price, "R_ตอนตัด": r_now, "ตัดไป": cut, "เหลือ": keep,
+                "base_keep": m["base_keep_pct"], "stage_keep": m["stage_keep_pct"],
+                "กฎที่ยิง": "|".join(r["name"] for r in m["position_rules"] if r["trigger"]),
+                "ชม.ที่ถือมา": (now - pos["time"]).total_seconds() / 3600,
+                "final": str(m["final_decision"][0])[:40]})
         pos["booked"] += cut * r_now
         pos["rem"] = keep
         pos["cuts"] += 1
@@ -653,6 +682,12 @@ if div_no_vol:
     _tag += "_divnovol"
 if _1rk_arg:
     _tag += f"_1rkeep{em.RULE_1R_KEEP:g}"
+if _clk_arg:
+    _tag += f"_climaxkeep{em.RULE_CLIMAX_KEEP:g}"
+if climax_in_profit:
+    _tag += "_climaxprofit"
+if _hotk_arg:
+    _tag += f"_hotkeep{em.RULE_HOT_KEEP:g}"
 if _hwk_arg:
     _tag += f"_hwkeep{em.RULE_HALFWAY_KEEP:g}"
 if no_trend_inval:
@@ -661,5 +696,8 @@ if "--structure-break" in sys.argv and not no_struct_break:
     _tag += "_structbreak"
 if _runup_arg:
     _tag += f"_runup{max_runup:g}"
+if log_cuts and cut_log:
+    pd.DataFrame(cut_log).to_csv(f"replay_cuts_{symbol}{_tag}.csv", index=False)
+    print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
 t.to_csv(f"replay_trades_{symbol}{_tag}.csv", index=False)
 print(f"  เขียนไม้ทั้งหมดลง replay_trades_{symbol}{_tag}.csv")
