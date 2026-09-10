@@ -183,6 +183,9 @@ no_rev_short = "--no-rev-short" in sys.argv            # ปิดฝั่ง S
 # --tp-cap-r=X : เพดานระยะ TP เป็นเท่าของความเสี่ยง (ดูที่จุดใช้งานในลูปหลัก)
 _tpc_arg = next((a for a in sys.argv if a.startswith("--tp-cap-r=")), None)
 tp_cap_r = float(_tpc_arg.split("=")[1]) if _tpc_arg else None
+# --max-sl-atr=X : เพดานความกว้างของ SL เป็นเท่าของ ATR (ดูที่จุดใช้งานในลูปหลัก)
+_msa_arg = next((a for a in sys.argv if a.startswith("--max-sl-atr=")), None)
+max_sl_atr = float(_msa_arg.split("=")[1]) if _msa_arg else None
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -279,6 +282,8 @@ if max_runup is not None:
 print(f"  Slot: ถือได้ 1 ไม้ต่อ{'กลยุทธ์ต่อ' if slot_per_strategy else ''} symbol   "
       f"Reversal Short: {'ต้องมีเทรนด์ 1D หนุน' if rev_short_1d else 'ไม่กรองเทรนด์ 1D'}"
       f"{'   [ปิดฝั่ง Short ทิ้ง]' if no_rev_short else ''}")
+if max_sl_atr is not None:
+    print(f"  Entry: ข้ามไม้ที่ SL ห่างจาก entry เกิน {max_sl_atr:g} ATR")
 if tp_cap_r is not None:
     print(f"  TP: ดึงเข้าไม่ให้ไกลเกิน {tp_cap_r:g}R ของระยะเสี่ยงจริง (ปกติใช้ Fibonacci "
           f"{config.TP_FIB_RATIO:g} ล้วน)")
@@ -517,6 +522,20 @@ for n, row in enumerate(clock.to_dict("records")):
     # pinned_swing ยังเป็น SL โครงสร้างเท่าเดิม สูตร trailing จึงไม่เปลี่ยน
     sl, atr_entry = exec_sl, atr_entry_
 
+    # --max-sl-atr=X : ข้ามไม้ที่ SL (ที่ส่ง broker จริง) ห่างจาก entry เกิน X เท่าของ ATR
+    # ที่มา: SL/ATR เป็นตัวแปร ณ เวลาเข้าไม้ตัวเดียวที่แยก "ไม้ที่ไม่เคยไปทางเราเลย" ออกจาก
+    # "ไม้ที่ชนะ" ได้จริง (ห่างกัน 0.62 SD) — ADX 1H/4H 0.06/0.11, ATR percentile 0.12,
+    # ระยะ EMA200 0.19, R:R แผน 0.28 = แยกไม่ออกทั้งหมด
+    # กลไก: SL ห่าง 19 ATR แปลว่าต้องให้ราคาวิ่ง 19 ATR ถึงได้ 1R ไม้พวกนี้ MFE 0.02-0.32R
+    # ทั้งที่ราคาขยับ 1-2 ATR ตามปกติ = ชนะไม่ได้ตั้งแต่ก่อนเข้า ไม่ใช่เพราะทิศผิด
+    # ระบบมี MIN_SL_DISTANCE_PCT เป็นพื้นอยู่แล้วแต่ไม่เคยมีเพดาน
+    if max_sl_atr is not None and atr_entry:
+        _sl_atr = abs(entry - sl) / atr_entry
+        if _sl_atr > max_sl_atr:
+            note(f"SL ห่างเกิน {max_sl_atr:g} ATR ({_sl_atr:.1f})")
+            fate(f"SL ห่างเกิน {max_sl_atr:g} ATR")
+            continue
+
     # --tp-cap-r=X : ดึง TP เข้ามาไม่ให้ไกลเกิน X เท่าของระยะเสี่ยงจริง (entry -> exec_sl)
     # ที่มา: TP จาก Fibonacci 1.618 ตั้งไว้ไกลกว่าที่ราคาวิ่งไปจริงราว 2 เท่าในทุก symbol —
     # R:R แผนเฉลี่ย 2.87 แต่ MFE (ราคาวิ่งไปทางเราสูงสุดจริง) เฉลี่ยแค่ 1.0-1.6R ต่อ symbol
@@ -622,6 +641,8 @@ if no_rev_short:
     _tag += "_norevshort"
 if tp_cap_r is not None:
     _tag += f"_tpcap{tp_cap_r:g}"
+if max_sl_atr is not None:
+    _tag += f"_maxslatr{max_sl_atr:g}"
 if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
     _tag += "_revshort1d" if rev_short_1d else "_revshortany"
 if rev_tp_entry:
