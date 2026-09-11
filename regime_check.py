@@ -10,7 +10,8 @@ Checklist:
   3. ADX peak                        — มองย้อน 10 แท่ง หา peak แล้วเช็คว่าโค้งลงหรือยัง
   4. โครงสร้าง trend ยัง intact?     — Swing High/Low บน 1D (HH/HL = Long, LL/LH = Short)
   5. ราคาอยู่ที่ Key Level สำคัญ?     — โซนแนวรับ/ต้าน (Swing High+Low แตะซ้ำ >=2 ครั้ง, ห่าง <=1%)
-  6. มี Divergence (RSI)?            — ราคาทำ new extreme แต่ RSI(14) ไม่ทำตาม
+  6. มี Divergence (RSI)?            — ราคาทำ new extreme แต่ RSI ไม่ทำตาม
+                                       (period = DIV_RSI_PERIOD ด้านล่าง ปัจจุบัน 20)
                                         (สดภายใน DIV_MAX_AGE_BARS แท่ง + จุดแรกต้องเคย
                                          overbought/oversold จริง)
 
@@ -455,7 +456,7 @@ def _find_spacing_partner(points: list[int]) -> int | None:
 
 
 def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
-    """ข้อ 6 — Divergence (RSI(14), 4H): ราคาทำ new extreme แต่ RSI ไม่ทำตาม
+    """ข้อ 6 — Divergence (RSI period = DIV_RSI_PERIOD, 4H): ราคาทำ new extreme แต่ RSI ไม่ทำตาม
     Bearish: ราคา Higher High แต่ RSI Lower High  (ระวังฝั่งขึ้นอ่อนแรง)
     Bullish: ราคา Lower Low  แต่ RSI Higher Low   (ระวังฝั่งลงอ่อนแรง)
     เทียบ swing ราคา 2 จุดล่าสุด + จุดใหม่ต้องยืนยันภายใน DIV_MAX_AGE_BARS แท่ง

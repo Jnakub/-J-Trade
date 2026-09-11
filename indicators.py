@@ -7,9 +7,17 @@ backtest_exit_compare.py ใช้ร่วมกัน แยกมาไว้
 import pandas as pd
 
 
-def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
+def calc_rsi(series: pd.Series, period: int = 20) -> pd.Series:
     """RSI (Wilder) — ใช้ RMA (alpha=1/period) ตามสูตรดั้งเดิมของ Wilder ตรงกับ default ของ
     TradingView (ไม่ใช่ SMA/EMA มาตรฐาน)
+
+    2026-09-12: default 14 -> 20 ให้ตรงกับทั้งสามที่ที่คุม RSI จริงในระบบ (DIV_RSI_PERIOD,
+    RSI_SCORE_PERIOD, exit_monitor.RSI_PERIOD ซึ่งเปลี่ยนเป็น 20 พร้อมกันวันนี้) ตอนนี้ทุก
+    caller ในระบบส่ง period มาเองหมด ค่านี้จึงไม่ถูกใช้จริงและการเปลี่ยนไม่กระทบพฤติกรรมใดๆ
+    ที่เปลี่ยนเพราะมันเป็นกับดัก: ถ้าวันหนึ่งมีคนเรียกโดยไม่ส่ง period จะได้ค่าที่ไม่ตรงกับ
+    ระบบเงียบๆ — เคยเกิดมาแล้วจริงที่ reversal.py:207 ซึ่งรับ default ของ regime_check.calc_rsi
+    มาใช้เป็นเกณฑ์ RSI extreme โดยไม่มีใครตั้งใจ (ไฟล์นี้ไม่ import config ได้เพราะ circular
+    จึงต้องซิงก์ด้วยมือ — แก้ที่ไหนต้องมาดูที่นี่ด้วย)
 
     2026-08-19: ย้ายมาไว้ที่นี่ตอนที่ scoring.py ต้องใช้ RSI ด้วย — เดิมมีสำเนาเหมือนกันเป๊ะ
     อยู่ 2 ที่ (exit_monitor.py, regime_check.py) scoring.py import จากทั้งสองไฟล์นั้นไม่ได้
