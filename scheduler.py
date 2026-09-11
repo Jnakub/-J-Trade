@@ -17,7 +17,7 @@ import journal
 from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
-    COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R,
+    COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
 )
 from mt5_connect import connect, get_account_balance
@@ -239,6 +239,23 @@ def scan_symbol(symbol: str) -> None:
         if not passed:
             print(f"  [{symbol}] NO ENTRY — ไม่ผ่าน: {', '.join(failed)}")
             return
+
+        # 4b-2. เพดานระยะ TP เป็นเท่าของ ATR ตอนเข้าไม้ (ดูที่มา/ตัวเลข/คำเตือนที่ config.TP_MAX_ATR)
+        #     วางไว้ **หลังด่านสกอร์การ์ดผ่านแล้ว** โดยตั้งใจ ตรงกับลำดับใน backtest_replay.py:
+        #     ไม้ต้องผ่าน MIN_RR_HARD_BLOCK ด้วย TP โครงสร้างจริงก่อน แล้วค่อยดึงเข้า — ถ้าดึงก่อน
+        #     จะกลายเป็นการปล่อยไม้ที่โครงสร้างไม่มีที่ไปให้ผ่านด่านเพราะเป้ามันใกล้ (คนละเรื่องกัน)
+        #     ใช้ atr_entry จาก sl_info = ตัวเดียวกับที่ compute_score ใช้คิด exec_sl (ทั้งทาง
+        #     Scoring และ Reversal คืนคีย์นี้) ไม่คำนวณ ATR ใหม่ กันสองที่ได้คนละค่าแบบที่เคยเจอ
+        _atr_entry = sl_info.get("atr_entry")
+        if TP_MAX_ATR and _atr_entry:
+            _cap = _atr_entry * TP_MAX_ATR
+            _tp_capped = (min(tp, entry + _cap) if direction == "Long" else max(tp, entry - _cap))
+            if _tp_capped != tp:
+                print(f"  [{symbol}] ดึง TP เข้า — เป้าเดิม {tp:.5f} ห่าง "
+                      f"{abs(tp - entry) / _atr_entry:.1f} ATR เกินเพดาน {TP_MAX_ATR:g} "
+                      f"-> TP = {_tp_capped:.5f}  R:R จริง = "
+                      f"{calc_rr(entry, sl_info.get('exec_sl') or sl, _tp_capped, direction):.2f}")
+                tp = _tp_capped
 
         # 4c. ด่านกันเข้า "ตอนปลายทาง" — ราคาวิ่งไปทางที่จะเข้ามาแล้วเกิน MAX_RUNUP_24H_R เท่าของ
         #     ระยะเสี่ยง ภายใน 24 แท่ง 1H ที่ผ่านมา ให้ข้ามรอบนี้ (ดูที่มา/ตัวเลขที่ config.py)

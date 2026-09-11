@@ -14,7 +14,9 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
   4. Regime check — SKIP ถ้า regime อยู่ใน REGIME_NO_TRADE
      REGIME_TREND    -> Scoring  (get_trend_bias + compute_score)
      REGIME_REVERSAL -> Reversal (compute_reversal_score ทิศตามขั้ว divergence)
-  5. ผ่านสกอร์การ์ด -> เปิดไม้ที่ราคา ณ ชั่วโมงนั้น + spread
+  4b-2. ผ่านสกอร์การ์ดแล้วดึง TP เข้าไม่ให้ไกลเกิน config.TP_MAX_ATR เท่าของ ATR ตอนเข้าไม้
+  4c. Run-up guard — ข้ามไม้ที่ราคาวิ่งไปทางที่จะเข้ามาแล้วเกิน MAX_RUNUP_24H_R (เฉพาะ Scoring)
+  5. ผ่านทุกด่าน -> เปิดไม้ที่ราคา ณ ชั่วโมงนั้น + spread
 
 รอบสแกน = ทุก 1 ชั่วโมง ตรงกับ scheduler.INTERVAL_SECONDS (backtest_criteria.py สแกนทุก 4 ชม.
 ซึ่งทำให้พลาดจังหวะที่ระบบจริงเข้าได้ 3 ใน 4 ของโอกาส)
@@ -69,6 +71,10 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ของ Scoring วิ่งเฉลี่ยถึง +2.25R แต่เก็บได้จริงแค่ 30% ของนั้น
      --rule-halfway-keep=N  ทับ exit_monitor.RULE_HALFWAY_KEEP (ปกติ 60) — กฎ "เดินทาง >=50%
                  ไป TP แล้วตัด 40%" ซึ่งยิงใส่เฉพาะไม้ที่กำลังวิ่งเข้าหา TP = ไม้ที่ชนะ
+     --tp-cap-atr=X  ทับ config.TP_MAX_ATR (ปกติ 18) — เพดานระยะ TP เป็นเท่าของ ATR ตอนเข้าไม้
+                 ใส่ 0 เพื่อปิดเพดานทิ้ง (= พฤติกรรมก่อน 2026-09-11 ไว้เทียบ base)
+                 ⚠️ ค่า default = ของระบบจริง รันเปล่าๆ จึงมีเพดานติดมาด้วยแล้ว ไฟล์ผลจะติด tag
+                 เฉพาะรอบที่สวนค่า (_tpcapatr15 / _notpcap) รอบที่ตรงกับระบบจริงได้ชื่อไฟล์เปล่า
      --max-runup-24h=X  ทับ config.MAX_RUNUP_24H_R (ปกติ 0.5) — ข้ามรอบนั้นถ้าราคา "วิ่งไปทางที่กำลังจะเข้า" มาแล้วเกิน X R ใน 24 แท่ง
                  1H ก่อนหน้า (ใช้กับทาง Scoring เท่านั้น) — มาจากการวัดไม้ Scoring 90 ไม้ 8 symbol:
                    ย่อลงมาหาเรา (<0)  10 ไม้ WR 60.0% +5.53R   วิ่งไปแล้ว 0-0.3R  32 ไม้ WR 40.6% -4.18R
@@ -183,6 +189,15 @@ no_rev_short = "--no-rev-short" in sys.argv            # ปิดฝั่ง S
 # --tp-cap-r=X : เพดานระยะ TP เป็นเท่าของความเสี่ยง (ดูที่จุดใช้งานในลูปหลัก)
 _tpc_arg = next((a for a in sys.argv if a.startswith("--tp-cap-r=")), None)
 tp_cap_r = float(_tpc_arg.split("=")[1]) if _tpc_arg else None
+# --tp-cap-atr=X : เพดานระยะ TP เป็นเท่าของ ATR ตอนเข้าไม้ (คนละแกนกับ --tp-cap-r)
+# 2026-09-11: **default = config.TP_MAX_ATR ไม่ใช่ None** — ตั้งแต่เพดานนี้เข้าระบบจริงแล้ว
+# การรัน replay เปล่าๆ ต้องได้พฤติกรรมเดียวกับระบบจริง ไม่งั้นเครื่องมือที่ใช้ตัดสินใจจะวัด
+# คนละสูตรกับของจริงเงียบๆ (เคยเกิดมาแล้วกับ TP_FIB_RATIO ที่ backtest ค้างที่ 0.786 อยู่ 11 วัน
+# ดู comment ที่ config.TP_FIB_RATIO) — ใส่ --tp-cap-atr=0 เพื่อปิดเพดานสำหรับรอบทดลอง
+_tpa_arg = next((a for a in sys.argv if a.startswith("--tp-cap-atr=")), None)
+tp_cap_atr = float(_tpa_arg.split("=")[1]) if _tpa_arg else config.TP_MAX_ATR
+if not tp_cap_atr:          # 0 / None = ปิด (เทียบกับ base ที่ไม่มีเพดาน)
+    tp_cap_atr = None
 # --max-sl-atr=X : เพดานความกว้างของ SL เป็นเท่าของ ATR (ดูที่จุดใช้งานในลูปหลัก)
 _msa_arg = next((a for a in sys.argv if a.startswith("--max-sl-atr=")), None)
 max_sl_atr = float(_msa_arg.split("=")[1]) if _msa_arg else None
@@ -305,6 +320,8 @@ if max_sl_atr is not None:
 if tp_cap_r is not None:
     print(f"  TP: ดึงเข้าไม่ให้ไกลเกิน {tp_cap_r:g}R ของระยะเสี่ยงจริง (ปกติใช้ Fibonacci "
           f"{config.TP_FIB_RATIO:g} ล้วน)")
+print(f"  TP: {f'ดึงเข้าไม่ให้ไกลเกิน {tp_cap_atr:g} ATR ตอนเข้าไม้' if tp_cap_atr else 'ไม่มีเพดาน ATR'}"
+      f"{'' if tp_cap_atr == (config.TP_MAX_ATR or None) else '   [ทับด้วย --tp-cap-atr]'}")
 print(f"  Exit: ถึง 1R เหลือ {em.RULE_1R_KEEP:g}%   ครึ่งทางไป TP เหลือ {em.RULE_HALFWAY_KEEP:g}%   "
       f"Climax เหลือ {em.RULE_CLIMAX_KEEP:g}%   ร้อนเหลือ {em.RULE_HOT_KEEP:g}%\n        "
       f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}"
@@ -577,6 +594,15 @@ for n, row in enumerate(clock.to_dict("records")):
         _cap = _risk * tp_cap_r
         tp = (min(tp, entry + _cap) if direction == "Long" else max(tp, entry - _cap))
 
+    # เพดาน TP เป็นเท่าของ ATR ตอนเข้าไม้ — **เป็นพฤติกรรมของระบบจริงแล้ว** (config.TP_MAX_ATR)
+    # ตั้งแต่ 2026-09-11 ไม่ใช่แค่แฟลกทดลอง ที่มา/ตัวเลข/คำเตือนทั้งหมดอยู่ที่ config.TP_MAX_ATR
+    # ใช้ --tp-cap-atr=X ทับ หรือ =0 เพื่อปิด (จะติด tag _tpcapatrX / _notpcap ที่ชื่อไฟล์ผล)
+    # ตรงกับ scheduler.scan_symbol ข้อ 4b-2 ทั้งตำแหน่งในลำดับด่าน (หลังสกอร์การ์ดผ่าน ก่อนด่าน
+    # runup) และตัว atr_entry ที่ใช้ (sl_info["atr_entry"] ตัวเดียวกับที่คิด exec_sl)
+    if tp_cap_atr is not None and atr_entry:
+        _cap = atr_entry * tp_cap_atr
+        tp = (min(tp, entry + _cap) if direction == "Long" else max(tp, entry - _cap))
+
     # --max-runup-24h : ข้ามไม้ที่ "ราคาวิ่งไปทางเรามาก่อนแล้ว" (เข้าตอนปลายทาง) — วัดเทียบเป็น R
     # ด้วยระยะเสี่ยงจริงของไม้นี้ ใช้ 24 แท่ง 1H ย้อนหลังในนาฬิกาเดียวกับ replay (fx/index ที่มี
     # วันหยุดจึงเท่ากับ 24 ชั่วโมง "ที่ตลาดเปิด" ไม่ใช่ 24 ชม.ตามปฏิทิน)
@@ -670,6 +696,8 @@ if no_rev_short:
     _tag += "_norevshort"
 if tp_cap_r is not None:
     _tag += f"_tpcap{tp_cap_r:g}"
+if tp_cap_atr != (config.TP_MAX_ATR or None):    # ติด tag เฉพาะรอบที่สวนค่าในระบบจริง
+    _tag += f"_tpcapatr{tp_cap_atr:g}" if tp_cap_atr else "_notpcap"
 if max_sl_atr is not None:
     _tag += f"_maxslatr{max_sl_atr:g}"
 if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
