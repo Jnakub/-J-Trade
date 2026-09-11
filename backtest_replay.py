@@ -92,7 +92,11 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ทิ้ง 12 ครั้งแลกกลับมา -0.5R นั้นคุ้มไหม
                  ⚠️ สองตัวนี้คือกฎที่ยังไม่ถูกทดสอบ หลังจาก --rule-1r-keep พิสูจน์แล้วว่ากฎ 1R
                  ไม่ใช่ตัวที่กินกำไรไม้ใหญ่ (ปิดกฎ 1R ไปเลย ไม้ TP ก้อนใหญ่ไม่ขยับสักไม้)
-     --div-max-age=N  ทับ DIV_MAX_AGE_BARS (ปกติ 14) — swing ของ divergence เก่าได้กี่แท่ง
+     --div-max-age=N  ทับ DIV_MAX_AGE_BARS (ปกติ 20) — swing ของ divergence เก่าได้กี่แท่ง
+     --div-rsi-period=N  ทับ DIV_RSI_PERIOD (ปกติ 20) — period ของ RSI ที่ใช้หา divergence
+                 ⚠️ คุมเกณฑ์ "RSI extreme" (30/70) ของ Reversal ด้วย (reversal.py:207 เรียก
+                 calc_rsi() โดยไม่ส่ง period) รอบที่ใส่ธงนี้จึงขยับสองด่านพร้อมกัน แยกผลไม่ได้
+                 ไม่กระทบ RSI_SCORE_PERIOD (สกอร์การ์ด Scoring) และ exit_monitor.RSI_PERIOD
      --div-no-volume  หา swing สำหรับ divergence โดยไม่กรอง volume/wick
                  สองตัวนี้คลายด่าน Divergence ซึ่งเป็นด่านที่ตัดโอกาส Reversal ทิ้งมากที่สุด
                  (มีผลกับ regime ด้วย: REVERSAL-WATCH จะกลายเป็น REVERSAL-READY มากขึ้น)
@@ -217,9 +221,26 @@ if rev_tp_entry:
 # ตอนถูกเรียกทุกครั้ง (ทั้งจาก get_regime และจาก compute_reversal_score) การ set ตรงนี้จึงมีผล
 # กับทั้งการจัด regime และสกอร์การ์ดพร้อมกัน เหมือนแก้ค่าคงที่จริงแต่เฉพาะรอบนี้
 import regime_check
+_DIV_AGE_LIVE = regime_check.DIV_MAX_AGE_BARS      # ค่าของระบบจริง เก็บไว้ก่อนถูกทับ ใช้ตัดสินว่า
+_DIV_RSI_LIVE = regime_check.DIV_RSI_PERIOD        # รอบนี้ "สวนค่าระบบจริง" หรือไม่ (ไว้ติด tag)
 _dma_arg = next((a for a in sys.argv if a.startswith("--div-max-age=")), None)
 if _dma_arg:
     regime_check.DIV_MAX_AGE_BARS = int(_dma_arg.split("=")[1])
+# --div-rsi-period=N : ทับ regime_check.DIV_RSI_PERIOD เฉพาะรอบนี้
+# ⚠️ ค่านี้ไม่ได้คุมแค่ divergence — reversal.py:207 เรียก calc_rsi() โดยไม่ส่ง period จึงรับ
+# ค่านี้เป็น default ด้วย = เกณฑ์ "RSI extreme" (30/70) ของ Reversal ขยับตามไปพร้อมกัน
+# (RSI period ยาวขึ้น = แกว่งแคบลง = แตะ 30/70 ยากขึ้น = ด่านนั้นเข้มขึ้นเอง) เวลาอ่านผลรอบนี้
+# จึงแยกไม่ได้ว่าอะไรมาจาก divergence อะไรมาจาก RSI extreme — เป็นสองอย่างที่ขยับพร้อมกัน
+# แก้ที่โมดูลไม่ใช่ที่ config เพราะ reversal.py/regime_check.py อ่านจาก regime_check ตอนถูกเรียก
+_drp_arg = next((a for a in sys.argv if a.startswith("--div-rsi-period=")), None)
+if _drp_arg:
+    regime_check.DIV_RSI_PERIOD = int(_drp_arg.split("=")[1])
+    # ⚠️ ตั้งตัวแปรโมดูลอย่างเดียว **ไม่พอ** — regime_check.calc_rsi ประกาศว่า
+    # `def calc_rsi(series, period=DIV_RSI_PERIOD)` default ถูกผูกค่าไว้ตั้งแต่ตอน def
+    # การแก้ตัวแปรทีหลังจึงไม่มีผลกับคนที่เรียกแบบไม่ส่ง period (check_divergence:459 และ
+    # reversal.py:207 เรียกแบบนั้นทั้งคู่) ต้องแก้ที่ __defaults__ ของตัวฟังก์ชันเอง
+    # reversal.calc_rsi เป็น object เดียวกัน (import มาจาก regime_check) จึงถูกแก้ไปพร้อมกัน
+    regime_check.calc_rsi.__defaults__ = (regime_check.DIV_RSI_PERIOD,)
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
     regime_check.DIV_SWING_VOL_FILTER = False
@@ -304,9 +325,10 @@ if _rms_arg or rev_tp_entry:
     print(f"  Reversal (ทดลอง): MIN_SL "
           f"{reversal.MIN_SL_OVERRIDE if _rms_arg else get_min_sl_distance_pct(symbol)}%"
           f"{'   TP ฉายจากราคาเข้า' if rev_tp_entry else ''}")
-if _dma_arg or div_no_vol:
-    print(f"  Divergence (ทดลอง): อายุ swing <= {regime_check.DIV_MAX_AGE_BARS} แท่ง"
-          f"{'   ไม่กรอง volume/wick' if div_no_vol else ''}")
+print(f"  Divergence: อายุ swing <= {regime_check.DIV_MAX_AGE_BARS} แท่ง   "
+      f"RSI period {regime_check.DIV_RSI_PERIOD} (คุม RSI extreme ของ Reversal ด้วย)"
+      f"{'   ไม่กรอง volume/wick' if div_no_vol else ''}"
+      f"{'   [ทับค่าระบบจริง]' if (regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE or regime_check.DIV_RSI_PERIOD != _DIV_RSI_LIVE) else ''}")
 # พิมพ์สถานะกฎ exit ทุกรอบเสมอ (ไม่ใช่เฉพาะรอบที่ใส่ธง) — ตั้งแต่ 2026-09-03 ที่ structure
 # break ถูกปิดเป็น default การอ่าน log เก่าเทียบใหม่โดยไม่รู้ว่ารอบนั้นกฎเปิดหรือปิดจะหลงทางได้
 if max_runup is not None:
@@ -704,8 +726,10 @@ if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
     _tag += "_revshort1d" if rev_short_1d else "_revshortany"
 if rev_tp_entry:
     _tag += "_revtpentry"
-if _dma_arg:
+if regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE:    # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += f"_divage{regime_check.DIV_MAX_AGE_BARS}"
+if regime_check.DIV_RSI_PERIOD != _DIV_RSI_LIVE:
+    _tag += f"_divrsi{regime_check.DIV_RSI_PERIOD}"
 if div_no_vol:
     _tag += "_divnovol"
 if _1rk_arg:
