@@ -1,0 +1,172 @@
+"""backtest_portfolio.py — วัดเพดานความเสี่ยงระดับพอร์ต
+
+backtest_replay.py เดินทีละ symbol ตามด่านจริงชั่วโมงต่อชั่วโมง ซึ่งถูกต้องสำหรับทุกคำถาม
+ที่อยู่ใน symbol เดียว แต่มองไม่เห็นอย่างเดียว: ตอนนั้นอีก 6 symbol ถือไม้อะไรอยู่
+ไฟล์นี้เอา output ของ replay ทั้ง 7 ตัวมาต่อเป็นเส้นเวลาเดียว แล้วถามว่าเพดานความเสี่ยง
+รวมระดับพอร์ตจะบล็อกไม้ไหนทิ้งบ้าง และราคาของมันกี่ R
+
+    python3 backtest_portfolio.py                    # ตารางเปรียบเทียบเพดานทุกระดับ
+    python3 backtest_portfolio.py --cap=3 --group=2  # ดูค่าที่ตั้งไว้จริงใน config
+
+⚠️ **ตัวเลข ΔR ที่ได้คือขอบบนของต้นทุน ไม่ใช่ต้นทุนจริง**
+ไฟล์นี้ไม่ได้ replay ใหม่ — มันหยิบไม้ที่ replay รายตัวสร้างไว้แล้วมาคัดออก ไม้ที่ถูก
+บล็อกจึงหายไปเฉยๆ ของจริงช่องของ symbol นั้นจะว่างและมีสิทธิ์รับไม้ถัดไปแทน ซึ่งเป็นไม้
+ที่ replay รายตัวไม่เคยสร้างให้ดู ต้นทุนจริงจึงต่ำกว่าที่รายงานตรงนี้เสมอ
+ใช้ตัดสินใจได้เฉพาะคำถาม "เพดานนี้แพงเกินไปไหม" (ถ้าขอบบนยังถูก ของจริงก็ถูก)
+ห้ามใช้ตอบ "เพดานไหนให้ R สูงสุด" — ดู memory เรื่องผลต่าง 2-4R คือ noise
+
+ต้องรัน backtest_replay.py --log-cuts ให้ครบทุก symbol ก่อน เพราะความเสี่ยงที่ยังมีชีวิต
+ของแต่ละไม้สร้างจาก replay_cuts_*.csv (ไม้ที่ขยับ SL ไป breakeven แล้ว = เสี่ยง 0)
+"""
+import csv
+import sys
+import datetime
+from collections import defaultdict
+
+from config import (SYMBOLS, RISK_PER_TRADE, MAX_PORTFOLIO_RISK_R,
+                    MAX_GROUP_RISK_R, CORRELATION_GROUPS)
+
+P = datetime.datetime.fromisoformat
+BE_PREFIX = "ขยับ SL ไปจุด Entry"
+
+
+def load():
+    """คืน list ของไม้ พร้อม sched = [(เวลา, ความเสี่ยงที่เหลือเป็น R), ...]"""
+    trades = []
+    for sym in SYMBOLS:
+        try:
+            fh = open(f"replay_trades_{sym}.csv")
+        except FileNotFoundError:
+            sys.exit(f"ไม่มี replay_trades_{sym}.csv — รัน backtest_replay.py {sym} ก่อน")
+        for row in csv.DictReader(fh):
+            if not row.get("exit_time"):
+                continue        # ไม้ที่ยังค้างตอน replay จบ — ไม่รู้ผล ตัดทิ้ง
+            try:
+                r = float(row["R"])
+            except ValueError:
+                continue
+            trades.append(dict(sym=sym, t_in=P(row["time"]), t_out=P(row["exit_time"]),
+                               R=r, strategy=row["strategy"], key=row["time"],
+                               grp=CORRELATION_GROUPS.get(sym, sym)))
+
+    cuts = defaultdict(list)
+    for sym in SYMBOLS:
+        try:
+            fh = open(f"replay_cuts_{sym}.csv")
+        except FileNotFoundError:
+            print(f"  ! ไม่มี replay_cuts_{sym}.csv — ไม้ของ {sym} จะถูกคิดเป็น 1R เต็ม"
+                  f" ตลอดอายุไม้ (รัน replay ด้วย --log-cuts เพื่อให้แม่นขึ้น)")
+            continue
+        for row in csv.DictReader(fh):
+            cuts[(sym, row["entry_time"])].append(row)
+
+    for t in trades:
+        sched, rem, be = [(t["t_in"], 1.0)], 1.0, False
+        for c in sorted(cuts[(t["sym"], t["key"])], key=lambda c: c["cut_time"]):
+            try:
+                rem = float(c["เหลือ"])     # สัดส่วนที่เหลือหลังปิดบางส่วน
+            except (ValueError, KeyError):
+                pass
+            if c["final"].startswith(BE_PREFIX):
+                be = True
+            sched.append((P(c["cut_time"]), 0.0 if be else rem))
+        sched.append((t["t_out"], 0.0))
+        t["sched"] = sched
+    return trades
+
+
+def risk_of(t, now):
+    cur = 0.0
+    for when, risk in t["sched"]:
+        if when > now:
+            break
+        cur = risk
+    return cur
+
+
+def run(trades, cap_r=None, cap_n=None, grp_r=None):
+    taken, blocked, opens = [], [], []
+    for t in sorted(trades, key=lambda t: t["t_in"]):
+        now = t["t_in"]
+        opens = [p for p in opens if p["t_out"] > now]
+        risks = [(p, risk_of(p, now)) for p in opens]
+        if cap_n is not None and len(opens) + 1 > cap_n:
+            blocked.append(t)
+            continue
+        if cap_r is not None and sum(r for _, r in risks) + 1.0 > cap_r + 1e-9:
+            blocked.append(t)
+            continue
+        if grp_r is not None:
+            g = sum(r for p, r in risks if p["grp"] == t["grp"])
+            if g + 1.0 > grp_r + 1e-9:
+                blocked.append(t)
+                continue
+        taken.append(t)
+        opens.append(t)
+    return taken, blocked
+
+
+def peak_risk(trades):
+    """ความเสี่ยงรวมสูงสุดที่เคยเปิดค้างพร้อมกัน + สัดส่วนเวลาที่อยู่เหนือแต่ละระดับ"""
+    marks = sorted({w for t in trades for w, _ in t["sched"]})
+    peak, above = 0.0, defaultdict(float)
+    for i, now in enumerate(marks[:-1]):
+        span = (marks[i + 1] - now).total_seconds() / 3600
+        tot = sum(risk_of(t, now) for t in trades
+                  if t["t_in"] <= now < t["t_out"])
+        peak = max(peak, tot)
+        for lvl in (1, 2, 3, 4):
+            if tot >= lvl:
+                above[lvl] += span
+    total_h = (marks[-1] - marks[0]).total_seconds() / 3600
+    return peak, {k: v / total_h * 100 for k, v in above.items()}
+
+
+def main():
+    trades = load()
+    base = sum(t["R"] for t in trades)
+    span = f'{min(t["t_in"] for t in trades):%Y-%m-%d} → {max(t["t_out"] for t in trades):%Y-%m-%d}'
+    print(f"\n{len(trades)} ไม้  {span}  TotalR {base:+.2f}  "
+          f"(1R = RISK_PER_TRADE {RISK_PER_TRADE*100:.0f}%)")
+
+    peak, above = peak_risk(trades)
+    print(f"\nความเสี่ยงรวมที่เปิดค้างพร้อมกัน — สูงสุดที่เคยแตะ {peak:.2f}R "
+          f"({peak*RISK_PER_TRADE*100:.0f}% ของพอร์ต)")
+    for lvl, pct in sorted(above.items()):
+        print(f"  อยู่เหนือ {lvl}.0R  {pct:5.1f}% ของเวลา")
+
+    def show(label, taken, blocked):
+        tr = sum(t["R"] for t in taken)
+        print(f"  {label:34}{len(taken):>4} ไม้  บล็อก {len(blocked):>3}   "
+              f"TotalR {tr:>7.2f}   ΔR {tr - base:>+6.2f}")
+
+    args = [a for a in sys.argv[1:] if a.startswith("--")]
+    cap = next((float(a.split("=")[1]) for a in args if a.startswith("--cap=")), None)
+    grp = next((float(a.split("=")[1]) for a in args if a.startswith("--group=")), None)
+
+    if cap is not None or grp is not None:
+        print(f"\n── cap={cap}R  group={grp}R ──")
+        show("ผลรวม", *run(trades, cap_r=cap, grp_r=grp))
+        return
+
+    print("\n── เพดานความเสี่ยงรวม (ไม้ที่ BE แล้วนับเป็น 0R) ──")
+    for c in (2.0, 2.5, 3.0, 3.5, 4.0):
+        show(f"cap {c}R = {c*RISK_PER_TRADE*100:.0f}% ของพอร์ต", *run(trades, cap_r=c))
+
+    print("\n── เทียบกับเพดานที่นับหัวไม้ดิบ (ทำไมถึงไม่ใช้) ──")
+    for n in (3, 4, 5, 6):
+        show(f"max {n} ไม้พร้อมกัน", *run(trades, cap_n=n))
+
+    print(f"\n── เพดานต่อกลุ่มที่วิ่งด้วยกัน {sorted(set(CORRELATION_GROUPS.values()))} ──")
+    for g in (1.0, 1.5, 2.0):
+        show(f"group cap {g}R", *run(trades, grp_r=g))
+
+    print(f"\n── ค่าที่ config ตั้งไว้จริง: {MAX_PORTFOLIO_RISK_R}R "
+          f"+ group {MAX_GROUP_RISK_R}R ──")
+    show("ผลรวมสองด่าน", *run(trades, cap_r=MAX_PORTFOLIO_RISK_R,
+                              grp_r=MAX_GROUP_RISK_R))
+    print()
+
+
+if __name__ == "__main__":
+    main()

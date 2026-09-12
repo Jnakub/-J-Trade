@@ -48,6 +48,31 @@ def calculate_lot_size(symbol: str, entry: float, sl: float,
     return lot, decimals
 
 
+def position_risk_amount(symbol: str, direction: str,
+                         entry: float, sl: float, lot: float) -> float:
+    """เงินที่ยังเสี่ยงอยู่จริงของ position หนึ่งไม้ (USD) = ถ้าโดน SL ตอนนี้จะขาดทุนเท่าไหร่
+    เทียบกับราคาเข้า
+
+    เป็นสูตรกลับด้านของ calculate_lot_size() เป๊ะ (รวมทั้งการแปลงค่าเงินของคู่ JPY) —
+    ต้องแก้คู่กันเสมอ ไม่งั้นเพดานความเสี่ยงระดับพอร์ตจะคิดจากคนละฐานกับตอนคิด lot
+
+    SL ที่เลยจุด entry ไปแล้ว (breakeven/ล็อกกำไร) คืน 0.0 ไม่ใช่ค่าติดลบ เพราะกำไรที่
+    ล็อกไว้ของไม้หนึ่งเอาไปหักความเสี่ยงของอีกไม้ไม่ได้ถ้าสองไม้วิ่งสวนกัน — และนี่คือ
+    เหตุผลที่เพดานคิดจากความเสี่ยง ไม่ใช่จำนวนไม้: ไม้ที่ BE แล้วคืนโควตาให้ไม้ถัดไป
+    """
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"หา symbol info ของ {symbol} ไม่ได้  [{code}] {msg}")
+
+    distance = (entry - sl) if direction == "Long" else (sl - entry)
+    distance = max(0.0, distance)
+    contract_size = info.trade_contract_size
+    if "JPY" in symbol.upper():
+        return distance * contract_size * lot / entry
+    return distance * contract_size * lot
+
+
 def clamp_lot(symbol: str, lot: float) -> float:
     """Snap lot to broker's min/max/step constraints."""
     info = mt5.symbol_info(symbol)

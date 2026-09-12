@@ -19,6 +19,7 @@ __pycache__/
 # ผลลัพธ์ backtest (สร้างใหม่ได้จาก backtest_criteria.py)
 criteria_samples_*.csv
 replay_trades_*.csv
+replay_cuts_*.csv
 
 # ไฟล์ที่ Wine สร้างทิ้งไว้ตอนรัน python ผ่าน run_wine.sh
 msedgewebview2.dxvk-cache

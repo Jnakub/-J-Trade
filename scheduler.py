@@ -19,10 +19,11 @@ from config import (
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
     COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
+    MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
-from order import calculate_lot_size, clamp_lot, place_order
+from order import calculate_lot_size, clamp_lot, place_order, position_risk_amount
 from binance import merge_real_volume
 from exit_monitor import (
     analyze_position, print_report, execute_decision,
@@ -65,6 +66,63 @@ INTERVAL_SECONDS = 3600   # เช็คทุก 1 ชั่วโมง
 # ---------------------------------------------------------------------------
 # สแกนและส่ง order ถ้าผ่าน
 # ---------------------------------------------------------------------------
+
+def check_portfolio_risk(symbol: str, balance: float) -> tuple[bool, str]:
+    """เพดานความเสี่ยงที่เปิดค้างอยู่ *ทั้งพอร์ต* — ด่านเดียวที่มองข้าม symbol
+
+    ด่านอื่นทุกตัวมองทีละ symbol: scan_symbol เรียก positions_get(symbol=...),
+    SLOT_PER_STRATEGY คุมแค่ช่องในตัวเอง, MAX_DAILY_LOSS นับเฉพาะไม้ที่ปิดไปแล้ววันนี้
+    ไม่มีใครเห็นภาพรวมว่าตอนนี้เปิดความเสี่ยงค้างอยู่เท่าไหร่ — ดู comment ที่
+    config.MAX_PORTFOLIO_RISK_R สำหรับตัวเลขที่วัดมา
+
+    คิดจาก "ความเสี่ยงที่ยังมีชีวิต" (SL ปัจจุบันเทียบ entry) ไม่ใช่จำนวนไม้ ไม้ที่ขยับ
+    SL ไป breakeven แล้วจึงคืนโควตาให้ไม้ใหม่เองอัตโนมัติ
+
+    ไม้ใหม่ถูกคิดเป็น 1R เต็มเสมอ (= RISK_PER_TRADE) ตรงกับตอนคิด lot ที่ยังไม่ถูก
+    clamp_lot() ปัด — ด่านนี้อยู่ก่อนการวิเคราะห์ทั้งหมดจึงยังไม่รู้ lot จริง ซึ่งตรงกับ
+    backtest_portfolio.py ที่วัดค่า 3.0R มา
+    """
+    risk_unit = balance * RISK_PER_TRADE
+    if risk_unit <= 0:
+        return False, f"risk unit ไม่ถูกต้อง (balance={balance:.2f})"
+
+    positions = mt5.positions_get()
+    if not positions:
+        return True, ""
+
+    total_r, group_r = 0.0, 0.0
+    my_group = CORRELATION_GROUPS.get(symbol)
+    for pos in positions:
+        direction = "Long" if pos.type == mt5.POSITION_TYPE_BUY else "Short"
+        if not pos.sl:
+            # SL หลุด/ยังไม่ได้ตั้ง = ความเสี่ยงไม่มีขอบเขต ไม่ใช่ศูนย์ — คิดเป็น 1R ไว้ก่อน
+            # แล้วเตือน (ของจริงแย่กว่านี้ แต่ประเมินให้เกินไปกว่านี้ก็เดาเอาทั้งนั้น)
+            print(f"  [{symbol}] WARNING — #{pos.ticket} ({pos.symbol}) ไม่มี SL "
+                  f"— นับเป็น 1R ในเพดานความเสี่ยง")
+            r = 1.0
+        else:
+            try:
+                r = position_risk_amount(pos.symbol, direction, pos.price_open,
+                                         pos.sl, pos.volume) / risk_unit
+            except RuntimeError as exc:
+                print(f"  [{symbol}] WARNING — คิดความเสี่ยงของ #{pos.ticket} ไม่ได้ "
+                      f"({exc}) — นับเป็น 1R")
+                r = 1.0
+        total_r += r
+        if my_group and CORRELATION_GROUPS.get(pos.symbol) == my_group:
+            group_r += r
+
+    if total_r + 1.0 > MAX_PORTFOLIO_RISK_R + 1e-9:
+        return False, (f"เพดานความเสี่ยงรวมทั้งพอร์ต — เปิดค้างอยู่ {total_r:.2f}R "
+                       f"+ ไม้ใหม่ 1R > {MAX_PORTFOLIO_RISK_R}R "
+                       f"({MAX_PORTFOLIO_RISK_R * RISK_PER_TRADE * 100:.0f}% ของพอร์ต)")
+
+    if my_group and group_r + 1.0 > MAX_GROUP_RISK_R + 1e-9:
+        return False, (f"เพดานความเสี่ยงกลุ่ม {my_group} — เปิดค้างอยู่ {group_r:.2f}R "
+                       f"+ ไม้ใหม่ 1R > {MAX_GROUP_RISK_R}R")
+
+    return True, ""
+
 
 def scan_symbol(symbol: str) -> None:
     print(f"\n  [{symbol}] กำลังวิเคราะห์...")
@@ -142,6 +200,14 @@ def scan_symbol(symbol: str) -> None:
     # เสมออยู่แล้ว จุดที่พังจริงคือ balance <= 0 ไม่ใช่สัดส่วน)
     if balance <= 0:
         print(f"  [{symbol}] SKIP — balance ไม่พอ ({balance:.2f})")
+        return
+
+    # 4a. เพดานความเสี่ยงระดับพอร์ต — ต้องอยู่หลังเช็ค balance (หารด้วย risk unit) แต่ก่อน
+    #     News guard ที่ต้องยิงเน็ต และก่อน regime/สกอร์การ์ดที่ต้องดึงบาร์ 1D/4H/1H
+    #     อ่าน positions_get() ของทั้งพอร์ตอย่างเดียว ถูกกว่าทุกด่านที่ตามมา
+    ok, risk_reason = check_portfolio_risk(symbol, balance)
+    if not ok:
+        print(f"  [{symbol}] SKIP — {risk_reason}")
         return
 
     # 4b. News guard — ไม่เปิดไม้ใหม่ถ้าข่าว High Impact (USD) จะออกภายใน NEWS_IMMINENT_H ชม.
