@@ -762,6 +762,8 @@ if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
 if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
+if _smr_arg:
+    _tag += f"_minrr{scoring._MIN_RR_OVERRIDE:g}"
 if slot_per_strategy != config.SLOT_PER_STRATEGY:          # ติด tag เฉพาะรอบที่สวนค่าในระบบจริง
     _tag += "_slotper" if slot_per_strategy else "_oneslot"
 if no_rev_short:
