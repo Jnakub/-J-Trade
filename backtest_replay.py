@@ -60,8 +60,16 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ ผลคือถือได้ 2 ไม้พร้อมกันต่อ symbol = ความเสี่ยงต่อ symbol เป็น 2 เท่า
                  backtest บวก R ตรงๆ ไม่ได้ปรับ sizing ให้ ตัวเลขที่ได้จึงเป็น "ถ้ายอมเสี่ยง
                  2 เท่า" ไม่ใช่ "ได้ฟรี"
-     --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ปกติ 1.1) — ด่าน R:R ขั้นต่ำของ
-                 ไม้สวน (คนละตัวกับ MIN_RR_HARD_BLOCK=1.5 ที่ Scoring ใช้)
+     --min-rr=X  ทับ config.MIN_RR_HARD_BLOCK (ปัจจุบัน 1.5) — ด่าน R:R ขั้นต่ำของไม้ Scoring
+                 ทับเฉพาะ "ด่านเข้าไม้" ไม่แตะสูตร fallback TP ที่อิงค่าเดียวกัน (ดู
+                 scoring._MIN_RR_OVERRIDE ว่าทำไมต้องแยก)
+                 ที่มา: บนลิสต์ไม้ 177 ไม้ กลุ่ม R:R สูงสุด 1/3 (>=2.57) ทำ avgR +0.33
+                 เทียบกับ +0.06/+0.02 ของสองกลุ่มล่าง และไปทางเดียวกันทั้ง 7 symbol / 3 ปี
+                 ⚠️ นั่นเป็นการ "กรองลิสต์เดิม" ซึ่งไม่นับไม้ที่จะเข้ามาแทนตอนช่องว่าง —
+                 ต้องรันด้วยธงนี้จริงถึงจะรู้ผล อย่าเอาตัวเลขกรองลิสต์ไปตัดสินใจ
+     --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ปัจจุบัน 1.5) — ด่าน R:R ขั้นต่ำ
+                 ของไม้สวน (ตัวแปรคนละตัวกับ MIN_RR_HARD_BLOCK ที่ Scoring ใช้ ซึ่งเป็น 1.5
+                 เท่ากันอยู่ตอนนี้) เคยลองลดเป็น 1.1 แล้วไม่ช่วย ดู config.py ที่ตัวแปรนั้น
      --rev-tp-from-entry  ฉาย Fibonacci TP ของ Reversal จากราคาเข้าแทน swing B — ไว้ตอบว่า
                  การที่ reward หดตามระยะที่ราคาห่างจาก swing (จน TP ไปโผล่หลัง entry 22-28%
                  ของ setup) เป็นตัวที่ทำให้ไม้ Reversal เข้าน้อยหรือเปล่า
@@ -218,6 +226,9 @@ cut_log = []
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
+_smr_arg = next((a for a in sys.argv if a.startswith("--min-rr=")), None)
+if _smr_arg:
+    scoring._MIN_RR_OVERRIDE = float(_smr_arg.split("=")[1])
 rev_tp_entry = "--rev-tp-from-entry" in sys.argv
 if rev_tp_entry:
     reversal.TP_FROM_ENTRY = True
