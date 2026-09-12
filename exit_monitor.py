@@ -976,7 +976,9 @@ def execute_decision(m: dict) -> None:
     try:
         # 1) ฟันธงออก 100% (Trend/Structure พัง) — ปิดเต็มจำนวน
         if keep_pct <= 0:
-            close_order(ticket)
+            # ส่งชื่อกฎไปด้วยเพื่อให้ journal แยกออกว่าเป็นบอทปิดตามกฎ ไม่ใช่คนกดปิด
+            # (2026-09-12 — เดิมทิ้งข้อมูลนี้ทั้งที่รู้อยู่แล้วตรงนี้ ดู order.close_order)
+            close_order(ticket, exit_rule=m["final_decision"][0])
             print(f"  {RED}[AUTO] ปิด #{ticket} เต็มจำนวน (Final Decision = ออก 100%){RESET}")
             return
 
@@ -1000,7 +1002,7 @@ def execute_decision(m: dict) -> None:
                 if excess >= min_lot:
                     close_vol = clamp_lot(symbol, excess)
                     if 0 < close_vol < lot:
-                        partial_close_order(ticket, close_vol)
+                        partial_close_order(ticket, close_vol, m=m)
                         print(f"  {YELLOW}[AUTO] ปิดบางส่วน #{ticket} {close_vol} lot "
                               f"(เหลือ {keep_pct}% ของ {original_lot} = {target_lot}){RESET}")
 

@@ -178,7 +178,10 @@ def place_order(symbol: str, direction: str, entry: float,
 # Close position
 # ---------------------------------------------------------------------------
 
-def close_order(ticket: int) -> None:
+def close_order(ticket: int, exit_rule: str = "") -> None:
+    """exit_rule: ชื่อกฎที่ทำให้ปิด — ส่งมาเฉพาะตอน exit_monitor สั่งปิดตามกฎ
+    เว้นว่าง = ถูกเรียกมือ (CLI/สคริปต์) ซึ่งบันทึกเป็น 'Manual Cut' ตามจริง
+    """
     pos       = get_position_or_raise(ticket)
     symbol    = pos.symbol
     lot       = pos.volume
@@ -223,13 +226,18 @@ def close_order(ticket: int) -> None:
     print(f"  P/L         : {pos.profit:+.2f} USD")
 
     import journal
-    result_label = "Manual Cut"
+    # 2026-09-12: เดิม hardcode "Manual Cut" ทุกกรณี ทำให้ไม้ที่ exit_monitor สั่งปิดตามกฎ
+    # กับไม้ที่คนกดปิดเอง แยกกันไม่ออกใน log — ทั้งที่ตอนเรียกมาถึงตรงนี้รู้อยู่แล้วว่าเป็นอันไหน
+    result_label = "Bot Exit" if exit_rule else "Manual Cut"
+    exit_by      = "bot" if exit_rule else "manual"
     try:
-        journal.log_trade_close(ticket, result_label, round(pos.profit, 2))
+        journal.log_trade_close(ticket, result_label, round(pos.profit, 2),
+                                exit_by=exit_by, exit_rule=exit_rule)
     except ValueError:
         journal.log_trade_open(symbol, direction, pos.price_open,
                                pos.sl, pos.tp, lot, 0.0, ticket)
-        journal.log_trade_close(ticket, result_label, round(pos.profit, 2))
+        journal.log_trade_close(ticket, result_label, round(pos.profit, 2),
+                                exit_by=exit_by, exit_rule=exit_rule)
 
     notify.notify_order_closed(symbol, direction, ticket, result_label,
                                round(pos.profit, 2), is_demo=is_demo_account())
@@ -239,7 +247,11 @@ def close_order(ticket: int) -> None:
 # Partial close (ปิดบางส่วน)
 # ---------------------------------------------------------------------------
 
-def partial_close_order(ticket: int, close_volume: float, comment: str = "partial exit auto") -> None:
+def partial_close_order(ticket: int, close_volume: float, comment: str = "partial exit auto",
+                        m: dict = None) -> None:
+    """m: dict จาก exit_monitor.analyze_position() — ส่งมาเพื่อให้บันทึกลง cuts_log.csv ได้ว่า
+    กฎข้อไหนทำให้ปิดส่วนนี้ เว้นว่าง = ถูกเรียกมือ จะบันทึกเฉพาะ lot ที่ปิดโดยไม่มีชื่อกฎ
+    """
     pos     = get_position_or_raise(ticket)
     symbol  = pos.symbol
     is_long = pos.type == mt5.ORDER_TYPE_BUY
@@ -293,6 +305,20 @@ def partial_close_order(ticket: int, close_volume: float, comment: str = "partia
     lot_basis    = original_lot if original_lot is not None else pos.volume
     keep_pct = round((pos.volume - close_volume) / lot_basis * 100, 1)
     notify.notify_partial_close(symbol, ticket, close_volume, keep_pct, is_demo=is_demo_account())
+
+    # 2026-09-12: บันทึกลง cuts_log.csv — เดิมการปิดบางส่วนทิ้งไว้แค่ข้อความ Telegram
+    # การบันทึกล้มต้องไม่ทำให้การเทรดล้มตาม ไม้ถูกปิดไปเรียบร้อยแล้วตอนมาถึงบรรทัดนี้
+    try:
+        ctx = dict(m) if m else {"ticket": ticket, "symbol": symbol,
+                                 "entry": pos.price_open, "sl": pos.sl}
+        ctx["ticket"] = ticket
+        # ราคาที่ fill จริง ไม่ใช่ current_price ตอน analyze — ต่างกันได้ตามสเปรด/slippage
+        # และ log นี้มีไว้เทียบกับของจริง จึงต้องเก็บของจริง
+        ctx["current_price"] = result.price
+        journal.log_cut(ctx, closed_lot=close_volume,
+                        remaining_lot=round(pos.volume - close_volume, 3))
+    except Exception as exc:
+        print(f"  WARNING — บันทึก cut ของ #{ticket} ไม่ได้ ({exc})")
 
 
 # ---------------------------------------------------------------------------
