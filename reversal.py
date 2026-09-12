@@ -138,8 +138,10 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     # หา SL อัตโนมัติจาก swing structure (4H) ถ้าไม่ได้กรอกมา — เกณฑ์เดียวกับ scoring.py
     sl_info = {}
     if sl is None:
+        # ส่ง entry เป็น current_price ด้วยเหตุผลเดียวกับ scoring.py (ดู swing.py)
         sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
-                                         vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
+                                         vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min,
+                                         current_price=entry)
         if not sl_info.get("passed"):
             raise ValueError(f"หา SL ไม่ได้ — {sl_info.get('reason', 'unknown')}")
         sl = sl_info["sl"]

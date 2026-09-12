@@ -319,8 +319,11 @@ def compute_score(symbol: str, direction: str, entry: float,
     # หา SL อัตโนมัติจาก swing structure (4H) ถ้าไม่ได้กรอกมา
     sl_info = {}
     if sl is None:
+        # ส่ง entry เข้าไปเป็น current_price — ด่านตรวจ "ราคาทะลุ swing ไปแล้วหรือยัง" ต้องวัด
+        # กับราคาที่จะเข้าไม้จริง ไม่ใช่ close ของแท่ง 4H ที่ปิดไปแล้วถึง 3 ชม. (ดู swing.py)
         sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
-                                         vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
+                                         vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min,
+                                         current_price=entry)
         if not sl_info.get("passed"):
             raise ValueError(f"หา SL ไม่ได้ — {sl_info.get('reason', 'unknown')}")
         sl = sl_info["sl"]

@@ -3,6 +3,12 @@ import pandas as pd
 from config import TP_FIB_RATIO, ASSET_CLASS
 from indicators import calc_atr, calc_di   # re-exported เพื่อไม่ให้ต้องแก้ import ที่อื่น
 
+# สวิตช์ทดลอง — ค่า default = พฤติกรรมระบบจริง ห้ามแก้ที่นี่
+# False = find_sl_from_structure กลับไปตรวจด่าน still_valid ด้วย close ของแท่ง 4H ล่าสุดแทน
+# ราคาที่จะเข้าไม้จริง (= พฤติกรรมก่อน 2026-09-12 ดูคำอธิบายเต็มในฟังก์ชัน)
+# backtest_replay.py ตั้งค่านี้เฉพาะรอบที่รันด้วย --sl-guard-legacy ไว้เทียบว่าการแก้คุ้มไหม
+USE_ENTRY_AS_CURRENT_PRICE = True
+
 
 # 2026-08-13: ลบ has_rejection() / _rejection_ok() ทิ้ง — ทั้งคู่ไม่มีใครเรียกเลย (ตรวจทั้ง repo
 # แล้ว) แต่ scoring.py ยังพิมพ์ `sl_info.get('rejection', '-')` อยู่ ทั้งที่ find_sl_from_structure
@@ -233,7 +239,8 @@ def find_sl_from_structure(df: pd.DataFrame,
                            right: int = 4,
                            tolerance_atr: float = 0.22,   # 2026-07-23: เปลี่ยนจาก 0.05 — ยังไม่มี backtest ยืนยัน
                            vol_multiplier: float = 1.9,
-                           wick_ratio_min: float | None = None) -> dict:
+                           wick_ratio_min: float | None = None,
+                           current_price: float | None = None) -> dict:
     """
     หา SL อัตโนมัติจาก Swing High/Low **ล่าสุดสุดเท่านั้น** — จุดเดียวกับที่
     find_tp_from_fibonacci ใช้เป็น origin (B) เสมอ ทำให้ SL/TP อ้างอิง swing point
@@ -261,7 +268,20 @@ def find_sl_from_structure(df: pd.DataFrame,
     """
     is_short      = direction.capitalize() == "Short"
     atr           = calc_atr(df)
-    current_price = df["close"].iloc[-1]
+    # current_price = ราคาที่จะใช้เข้าไม้จริง ส่งมาจากผู้เรียก (compute_score/compute_reversal_score)
+    # 2026-09-12: เดิมอ่าน df["close"].iloc[-1] เอง ซึ่งเป็น close ของแท่ง **4H** ที่ปิดล่าสุด
+    # แต่ราคาที่เอาไปเข้าไม้จริงคือ tick/close ของแท่ง 1H ณ วินาทีที่ตัดสินใจ — ห่างกันได้ถึง
+    # 3 ชม. (bars.py กรองแท่ง 4H ที่ยังไม่ครบทิ้งอยู่แล้ว แท่งล่าสุดจึงปิดไปแล้วเสมอ)
+    # ผล: ด่าน still_valid ด้านล่างประกาศว่ากันไม่ให้ราคาทะลุ swing เกิน ATR×tolerance_atr
+    # (0.22) แต่บังคับกับราคาที่เก่าได้ถึง 3 ชม. ซึ่งบนแท่ง 1H ราคาวิ่งเกิน 0.22 ATR ได้สบาย
+    # = ด่านหลวมกว่าที่เขียนไว้มาก เจอจากไม้ BTCUSDm 2025-03-04 02:00 Long ที่ผ่านด่านมาได้
+    # ทั้งที่ SL โครงสร้างอยู่ **เหนือ** ราคาเข้า 0.95 ATR (ถอดกลับแล้วราคาที่ด่านใช้ตรวจสูงกว่า
+    # ราคาเข้าจริงอย่างน้อย 0.83 ATR) — ไม้แบบนั้นชนะไม่ได้ตั้งแต่ก่อนเข้าเพราะ SL ผิดฝั่ง
+    # เป็นบั๊กประเภทเดียวกับ lookahead ที่แก้ไปเมื่อ 2026-09-01 (ตัดสินใจด้วยราคาหนึ่ง เทรดด้วย
+    # อีกราคาหนึ่ง) ต่างกันที่ครั้งนี้เป็นราคาเก่า ไม่ใช่ราคาอนาคต
+    # ไม่ส่งมา = ใช้พฤติกรรมเดิม (ผู้เรียกที่เป็นเครื่องมือวินิจฉัยยังเรียกแบบเดิมได้)
+    if current_price is None or not USE_ENTRY_AS_CURRENT_PRICE:
+        current_price = df["close"].iloc[-1]
     break_tolerance = atr.iloc[-1] * tolerance_atr
     swing_highs   = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,
                                      vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)

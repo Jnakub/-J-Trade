@@ -97,6 +97,11 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ คุมเกณฑ์ "RSI extreme" (30/70) ของ Reversal ด้วย (reversal.py:207 เรียก
                  calc_rsi() โดยไม่ส่ง period) รอบที่ใส่ธงนี้จึงขยับสองด่านพร้อมกัน แยกผลไม่ได้
                  ไม่กระทบ RSI_SCORE_PERIOD (สกอร์การ์ด Scoring) และ exit_monitor.RSI_PERIOD
+     --exit-rsi-period=N  ทับ exit_monitor.RSI_PERIOD (ปกติ 20) — คุมกฎ "Indicator ร้อน"
+                 ที่ตัด RULE_HOT_KEEP เมื่อ RSI แตะ 70/30 หรือราคาทะลุ Bollinger
+                 (ขา Bollinger ไม่ขยับตาม BB_PERIOD เป็น 20 ของมันเอง คนละตัวกัน)
+     --sl-guard-legacy  ให้ด่านตรวจ SL ใช้ close แท่ง 4H ล่าสุดแทนราคาเข้าไม้จริง
+                 = พฤติกรรมก่อน 2026-09-12 (ดู swing.find_sl_from_structure) ไว้เทียบผลการแก้บั๊ก
      --div-no-volume  หา swing สำหรับ divergence โดยไม่กรอง volume/wick
                  สองตัวนี้คลายด่าน Divergence ซึ่งเป็นด่านที่ตัดโอกาส Reversal ทิ้งมากที่สุด
                  (มีผลกับ regime ด้วย: REVERSAL-WATCH จะกลายเป็น REVERSAL-READY มากขึ้น)
@@ -241,9 +246,29 @@ if _drp_arg:
     # reversal.py:207 เรียกแบบนั้นทั้งคู่) ต้องแก้ที่ __defaults__ ของตัวฟังก์ชันเอง
     # reversal.calc_rsi เป็น object เดียวกัน (import มาจาก regime_check) จึงถูกแก้ไปพร้อมกัน
     regime_check.calc_rsi.__defaults__ = (regime_check.DIV_RSI_PERIOD,)
+# --sl-guard-legacy : ให้ด่านตรวจ SL (swing.find_sl_from_structure) กลับไปใช้ close ของแท่ง 4H
+# ล่าสุดแทนราคาที่จะเข้าไม้จริง = พฤติกรรมก่อน 2026-09-12 ไว้วัดว่าการแก้บั๊กนั้นคุ้มไหม
+# (ราคา 4H เก่าได้ถึง 3 ชม. ทำให้ด่าน "ราคาทะลุ swing เกิน 0.22 ATR" หลวมกว่าที่เขียนไว้มาก)
+import swing as _swing_mod
+sl_guard_legacy = "--sl-guard-legacy" in sys.argv
+if sl_guard_legacy:
+    _swing_mod.USE_ENTRY_AS_CURRENT_PRICE = False
+
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
     regime_check.DIV_SWING_VOL_FILTER = False
+
+# --exit-rsi-period=N : ทับ exit_monitor.RSI_PERIOD เฉพาะรอบนี้ — คุมกฎ "Indicator ร้อน" (ข้อ 2)
+# ที่ตัด RULE_HOT_KEEP เมื่อ RSI แตะ RSI_OVERBOUGHT/OVERSOLD **หรือ** ราคาทะลุ Bollinger
+# ขา Bollinger ไม่ขยับตาม (BB_PERIOD เป็น 20 ของมันเอง) กฎจึงยังยิงจากขานั้นเท่าเดิม
+# ต่างจาก --div-rsi-period ตรงที่ไม่ต้อง patch __defaults__: analyze_position:554 เรียก
+# calc_rsi(df["close"], RSI_PERIOD) โดยส่ง period มาตรงๆ และอ่าน global ตอนถูกเรียกทุกครั้ง
+# (ยังแก้ __defaults__ ของ em.calc_rsi ให้ด้วย เผื่ออนาคตมีคนเพิ่ม caller ที่ไม่ส่ง period)
+_EXIT_RSI_LIVE = em.RSI_PERIOD          # ค่าระบบจริง เก็บก่อนถูกทับ
+_erp_arg = next((a for a in sys.argv if a.startswith("--exit-rsi-period=")), None)
+if _erp_arg:
+    em.RSI_PERIOD = int(_erp_arg.split("=")[1])
+    em.calc_rsi.__defaults__ = (em.RSI_PERIOD,)
 
 # --rule-1r-keep : ทับกฎ Position Sizing ข้อ 1 ของ exit_monitor — analyze_position อ่านค่าจาก
 # โมดูลตอนประกอบ position_rules ทุกครั้งที่ถูกเรียก การ set ตรงนี้จึงมีผลกับทุกไม้ในรอบนี้
@@ -325,6 +350,8 @@ if _rms_arg or rev_tp_entry:
     print(f"  Reversal (ทดลอง): MIN_SL "
           f"{reversal.MIN_SL_OVERRIDE if _rms_arg else get_min_sl_distance_pct(symbol)}%"
           f"{'   TP ฉายจากราคาเข้า' if rev_tp_entry else ''}")
+print(f"  ด่าน SL: ตรวจ 'ราคาทะลุ swing' ด้วย "
+      f"{'close แท่ง 4H ล่าสุด [legacy]' if sl_guard_legacy else 'ราคาที่เข้าไม้จริง'}")
 print(f"  Divergence: อายุ swing <= {regime_check.DIV_MAX_AGE_BARS} แท่ง   "
       f"RSI period {regime_check.DIV_RSI_PERIOD} (คุม RSI extreme ของ Reversal ด้วย)"
       f"{'   ไม่กรอง volume/wick' if div_no_vol else ''}"
@@ -344,6 +371,7 @@ if tp_cap_r is not None:
           f"{config.TP_FIB_RATIO:g} ล้วน)")
 print(f"  TP: {f'ดึงเข้าไม่ให้ไกลเกิน {tp_cap_atr:g} ATR ตอนเข้าไม้' if tp_cap_atr else 'ไม่มีเพดาน ATR'}"
       f"{'' if tp_cap_atr == (config.TP_MAX_ATR or None) else '   [ทับด้วย --tp-cap-atr]'}")
+print(f"  Exit: RSI period {em.RSI_PERIOD} (กฎ Indicator ร้อน){'   [ทับค่าระบบจริง]' if em.RSI_PERIOD != _EXIT_RSI_LIVE else ''}")
 print(f"  Exit: ถึง 1R เหลือ {em.RULE_1R_KEEP:g}%   ครึ่งทางไป TP เหลือ {em.RULE_HALFWAY_KEEP:g}%   "
       f"Climax เหลือ {em.RULE_CLIMAX_KEEP:g}%   ร้อนเหลือ {em.RULE_HOT_KEEP:g}%\n        "
       f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}"
@@ -604,6 +632,15 @@ for n, row in enumerate(clock.to_dict("records")):
             fate(f"SL ห่างเกิน {max_sl_atr:g} ATR")
             continue
 
+    # tp_fib = TP ที่ Fibonacci ให้ **ก่อนโดนเพดานใดๆ ดึงเข้า** — เก็บแยกไว้ลงไฟล์ผล
+    # 2026-09-12: ตั้งแต่ TP_MAX_ATR=18 เข้าระบบ ไม้ราว 1 ใน 3 มี tp0 ที่ถูกเพดานตัดแล้ว
+    # (Long 34% / Short 27% จาก 197 ไม้) ใครก็ตามที่เอา tp0 ไปคิด R:R แผน หรือถอด `move`
+    # ของ fib กลับ จะได้ค่าที่ต่ำกว่าจริงโดยไม่มีอะไรฟ้อง — เจอมาแล้วตอนไล่ดูว่าทำไม R:R
+    # ของไม้ Short ต่ำกว่า Long (ตัวเลขชี้ว่า fib ลำเอียงตามทิศ พอตัดไม้ที่ชนเพดานออกแล้ว
+    # ความต่างหดจาก 0.25 เหลือ 0.17 และกลับด้านใน 2 จาก 6 symbol = ไม่ใช่ของจริง)
+    # เทียบ tp0 กับ tp_fib ได้ว่าไม้ไหนโดนเพดาน: tp0 != tp_fib
+    tp_fib = tp
+
     # --tp-cap-r=X : ดึง TP เข้ามาไม่ให้ไกลเกิน X เท่าของระยะเสี่ยงจริง (entry -> exec_sl)
     # ที่มา: TP จาก Fibonacci 1.618 ตั้งไว้ไกลกว่าที่ราคาวิ่งไปจริงราว 2 เท่าในทุก symbol —
     # R:R แผนเฉลี่ย 2.87 แต่ MFE (ราคาวิ่งไปทางเราสูงสุดจริง) เฉลี่ยแค่ 1.0-1.6R ต่อ symbol
@@ -641,7 +678,9 @@ for n, row in enumerate(clock.to_dict("records")):
     # (ถ้าสกอร์การ์ดถูกแก้ระหว่างนั้น ตัวเลขจะไม่ตรงกับไม้ที่ได้มาโดยที่ไม่มีอะไรฟ้อง)
     # ชื่อคอลัมน์ = ชื่อเกณฑ์ตรงๆ ฝั่ง Scoring/Reversal คนละชุด อีกฝั่งจึงเป็นค่าว่าง
     positions[slot_of(strategy)] = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
-           "tp": tp, "tp0": tp, "score": score, "strategy": strategy, "regime": regime,
+           # tp0 = TP ที่ส่งจริงตอนเข้า (ผ่านเพดานแล้ว)  tp_fib = ที่ Fibonacci ให้ก่อนเพดาน
+           # สองค่านี้ต่างกันเมื่อไม้นั้นโดนเพดานดึงเข้า — ดู comment ที่จุดคำนวณ tp_fib
+           "tp": tp, "tp0": tp, "tp_fib": tp_fib, "score": score, "strategy": strategy, "regime": regime,
            **{name: bool(ok) for name, ok, _ in criteria},
            "booked": 0.0, "rem": 1.0, "cuts": 0,
            # pinned_swing = SL โครงสร้าง (ถอย exec_sl กลับด้วยตัวคูณเดียวกับที่ขยับออกไป)
@@ -730,6 +769,10 @@ if regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE:    # ติด tag เฉพ�
     _tag += f"_divage{regime_check.DIV_MAX_AGE_BARS}"
 if regime_check.DIV_RSI_PERIOD != _DIV_RSI_LIVE:
     _tag += f"_divrsi{regime_check.DIV_RSI_PERIOD}"
+if em.RSI_PERIOD != _EXIT_RSI_LIVE:
+    _tag += f"_exitrsi{em.RSI_PERIOD}"
+if sl_guard_legacy:
+    _tag += "_slguardlegacy"
 if div_no_vol:
     _tag += "_divnovol"
 if _1rk_arg:
