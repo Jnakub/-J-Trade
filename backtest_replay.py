@@ -276,6 +276,12 @@ div_wick_tick = "--div-wick-tickvol" in sys.argv
 if div_wick_tick:
     regime_check.DIV_WICK_WHEN_TICK_VOLUME = True
 
+# --div-price-tol=X : ผ่อนการเทียบ "ราคาทำ new extreme" ได้ X ATR (ปกติ 0 = เทียบเป๊ะ)
+# ดู regime_check.DIV_PRICE_TOLERANCE_ATR — ไม่แตะรายการ swing จึงเพิ่มได้อย่างเดียว
+_dpt_arg = next((a for a in sys.argv if a.startswith("--div-price-tol=")), None)
+if _dpt_arg:
+    regime_check.DIV_PRICE_TOLERANCE_ATR = float(_dpt_arg.split("=")[1])
+
 # --exit-rsi-period=N : ทับ exit_monitor.RSI_PERIOD เฉพาะรอบนี้ — คุมกฎ "Indicator ร้อน" (ข้อ 2)
 # ที่ตัด RULE_HOT_KEEP เมื่อ RSI แตะ RSI_OVERBOUGHT/OVERSOLD **หรือ** ราคาทะลุ Bollinger
 # ขา Bollinger ไม่ขยับตาม (BB_PERIOD เป็น 20 ของมันเอง) กฎจึงยังยิงจากขานั้นเท่าเดิม
@@ -797,6 +803,8 @@ if div_no_vol:
     _tag += "_divnovol"
 if div_wick_tick:
     _tag += "_divwicktick"
+if _dpt_arg:
+    _tag += f"_divpricetol{regime_check.DIV_PRICE_TOLERANCE_ATR:g}"
 if _1rk_arg:
     _tag += f"_1rkeep{em.RULE_1R_KEEP:g}"
 if _clk_arg:

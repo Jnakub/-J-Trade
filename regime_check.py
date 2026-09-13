@@ -44,7 +44,7 @@ from config import MT5_TIMEFRAMES, SYMBOLS
 from mt5_connect import connect
 from scoring import get_ohlcv, get_ohlcv_real
 from swing import find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
-from indicators import calc_adx, calc_rsi as _calc_rsi
+from indicators import calc_adx, calc_atr, calc_rsi as _calc_rsi
 from bars import BAR_OFFSET_H as ADX_BAR_OFFSET_H, get_aligned_4h
 
 REGIME_TIMEFRAME = MT5_TIMEFRAMES["4H"]
@@ -198,6 +198,40 @@ DIV_ZONE_OVERSOLD   = 45
 # win rate รวม 50% (3/6) ดีกว่า strict อย่างเดียว (33%, 1/3) — ยังไม่มี full backtest
 # ยืนยันหนักแน่น (sample เล็กเกินจะฟันธง) ปรับได้ถ้ามีข้อมูลเพิ่มแล้วผลต่าง
 DIV_STALL_THRESHOLD = 5
+
+# DIV_PRICE_TOLERANCE_ATR: ผ่อนการเทียบ "ราคาทำ new extreme" ให้คลาดได้กี่ ATR
+# (backtest_replay --div-price-tol=X) 0.0 = เทียบเป๊ะแบบเดิม
+#
+# ที่มา: ฝั่ง RSI มี tolerance อยู่แล้ว (DIV_STALL_THRESHOLD = "RSI แทบไม่ขยับก็นับให้") และ
+# การหา swing เองก็ผ่อนได้ 0.22 ATR (SWING_TOLERANCE) แต่การเทียบราคาในด่าน divergence
+# เป็นจุดเดียวที่ยังเทียบแบบ strict — ต่างกัน 0.03% ก็ปัดตก
+# เคสที่ทำให้เห็น (USDJPYm 2026-09): low 152.882 -> 152.933 (สูงกว่าเดิม 0.05 เยน = 0.03%
+# = double bottom ในทางปฏิบัติ) แต่ RSI 23.0 -> 32.0 ขึ้น 9 แต้ม = แรงขายหมดชัดเจน
+# ตกด้วยเงื่อนไข price_ll อย่างเดียว
+#
+# นับบน 800 แท่ง 4H ทุก symbol เฉพาะเคสที่ RSI+โซนผ่านแล้ว เหลือติดแค่ราคา:
+#   เจอตอนนี้ 56 ครั้ง | ผ่อน 0.22 ATR +7 ครั้ง (+12%) | ผ่อน 0.5 ATR +18 ครั้ง (+45%)
+#
+# ⚠️ ต่างจากการเปิด wick (ดู DIV_WICK_WHEN_TICK_VOLUME) ตรงกลไก: ตัวนี้ **ไม่แตะรายการ swing**
+#    _find_spacing_partner จับคู่จุดเดิมเป๊ะ จึงเพิ่มได้อย่างเดียว ทำ divergence เดิมหายไม่ได้
+#
+# 🟡 2026-09-13: **ทดสอบที่ 0.5 ATR แล้ว — เสมอตัว ไม่เอา คงไว้ที่ 0**
+#   replay 730 วัน 6 symbol (GBP ข้าม ไม่มีเคสเฉียดเลย): +35.40R -> +34.62R  (ΔR -0.78)
+#   XAU +1.46 | EUR +0.88 | US500 +0.15 | USDJPY 0.00 | BTC -1.01 | ETH -2.26
+#
+#   คำทำนายเชิงกลไกข้างบน **ถูกยืนยันแล้ว**:
+#     ไม้เดิมหายไป 0 ไม้   (ต่างจาก wick ที่ทำไม้ชนะเดิมหาย 5 ไม้)
+#     ไม้ Scoring ไม่ขยับเลย (29/29, 24/24, 22/22, 16/16, 30/30, 31/31)
+#     ได้ไม้ Reversal ใหม่ 7 ไม้ รวม -0.78R  (ชนะ 3 แพ้ 4)
+#
+#   เหตุผลที่ไม่เอา: ไม้ที่เพิ่มมาเป็นการโยนหัวก้อย -0.11R ต่อไม้ จาก 7 ไม้ = แยกจากศูนย์ไม่ได้
+#   (ดู memory เรื่องผลต่าง 2-4R คือ noise) ไม่ใช่เพราะมันอันตราย — ตัวนี้ปลอดภัยกว่า wick มาก
+#   ถ้าจะรื้อมาดูใหม่ตอนมีไม้จริงเยอะขึ้น ธงยังอยู่ ใช้ได้เลย
+#
+#   หมายเหตุ: สแกนเจอเคสเฉียด 18 ครั้ง แต่กลายเป็นไม้จริงแค่ 7 — ที่เหลือตกด่านอื่นต่อ
+#   (regime ต้องเป็น REVERSAL-READY + Key Level + สกอร์การ์ด 7/10 + ช่องว่าง)
+# ทดสอบซ้ำ: ./run_wine.sh backtest_replay.py XAUUSDm 730 --div-price-tol=0.5 --log-cuts
+DIV_PRICE_TOLERANCE_ATR = 0.0
 
 # Min spacing / max lookback (2026-07-25) — swing point ที่ผ่านเกณฑ์อาจอยู่ติดกันเกินไป
 # (window หา swing overlap กัน) โดยเฉพาะ XAU ที่เพิ่งเปิด volume OR wick ratio: backtest
@@ -479,6 +513,15 @@ def calc_rsi(series: pd.Series, period: int = DIV_RSI_PERIOD) -> pd.Series:
     return _calc_rsi(series, period)
 
 
+def _price_tol(df: pd.DataFrame, idx: int) -> float:
+    """ระยะที่ยอมให้ราคาคลาดได้ตอนเทียบ new extreme — ดู DIV_PRICE_TOLERANCE_ATR
+    คืน 0.0 เมื่อปิด (ค่าปกติ) เพื่อให้ผลเทียบเท่ากับ strict เป๊ะ ไม่ต้องคำนวณ ATR เปล่าๆ"""
+    if DIV_PRICE_TOLERANCE_ATR <= 0:
+        return 0.0
+    atr = calc_atr(df).iloc[idx]
+    return 0.0 if pd.isna(atr) else float(atr) * DIV_PRICE_TOLERANCE_ATR
+
+
 def _find_spacing_partner(points: list[int]) -> int | None:
     """หาจุดก่อนหน้า (h1) ที่ห่างจากจุดล่าสุด (points[-1]) อย่างน้อย DIV_MIN_SPACING_BARS แท่ง
     ถอยย้อนจาก points[-2] ไปเรื่อยๆ จนเจอ หรือเกิน DIV_MAX_LOOKBACK_BARS ก็เลิกหา (คืน None)"""
@@ -561,7 +604,9 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
         h2 = highs[-1]
         fresh   = (last_idx - h2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[h1] >= DIV_ZONE_OVERBOUGHT
-        price_hh = df["high"].iloc[h2] > df["high"].iloc[h1]
+        # ผ่อนได้ตาม DIV_PRICE_TOLERANCE_ATR (ปกติ 0 = เทียบเป๊ะแบบเดิม)
+        _tol = _price_tol(df, h2)
+        price_hh = df["high"].iloc[h2] > df["high"].iloc[h1] - _tol
         rsi_diff = rsi.iloc[h2] - rsi.iloc[h1]
         strict_lh = rsi_diff < 0
         soft_stall = bool(symbol) and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
@@ -587,7 +632,8 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
         l2 = lows[-1]
         fresh   = (last_idx - l2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[l1] <= DIV_ZONE_OVERSOLD
-        price_ll = df["low"].iloc[l2] < df["low"].iloc[l1]
+        _tol = _price_tol(df, l2)
+        price_ll = df["low"].iloc[l2] < df["low"].iloc[l1] + _tol
         rsi_diff = rsi.iloc[l1] - rsi.iloc[l2]
         strict_hl = rsi_diff < 0
         soft_stall = bool(symbol) and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
