@@ -338,6 +338,20 @@ no_trend_inval = "--no-trend-invalidate" in sys.argv
 if no_trend_inval:
     em.TREND_CHECK_KEEP_BY_CONSEC = {k: 100 for k in em.TREND_CHECK_KEEP_BY_CONSEC}
 
+# --adx-period / --adx-choppy / --adx-gray-high / --adx-strong : ทับเกณฑ์ ADX เฉพาะรอบนี้
+# classify_regime อ่านค่าพวกนี้จาก module global ตอนถูกเรียกทุกครั้ง การ set ตรงนี้จึงมีผลทันที
+#   --adx-strong=999  = ปลด regime "TREND แรงจัด" ทิ้ง (ไม่มี ADX ไหนถึง 999) ไม้ที่เคยถูกล็อก
+#                       จะกลับมาเข้าเป็น TREND ปกติ — ดู comment ที่ scheduler.REGIME_NO_TRADE
+#                       ซึ่งบันทึกไว้เองว่าด่านนี้ "หลักฐานบางมาก ยังไม่ได้ทดสอบ out-of-sample"
+#   --adx-gray-high=20 = ยุบเขตเทาทิ้ง (ADX 20-22 กลายเป็น TREND)
+for _flag, _attr, _cast in (("--adx-period=",    "ADX_PERIOD",       int),
+                            ("--adx-choppy=",    "ADX_CHOPPY",       float),
+                            ("--adx-gray-high=", "ADX_GRAY_HIGH",    float),
+                            ("--adx-strong=",    "ADX_STRONG_TREND", float)):
+    _a = next((a for a in sys.argv if a.startswith(_flag)), None)
+    if _a:
+        setattr(regime_check, _attr, _cast(_a.split("=", 1)[1]))
+
 # --skip-regime : ปิดไม่ให้เข้าไม้ตอน regime ที่ระบุ (เพิ่มเข้า REGIME_NO_TRADE เฉพาะรอบนี้)
 _sr_arg = next((a for a in sys.argv if a.startswith("--skip-regime=")), None)
 if _sr_arg:
@@ -785,6 +799,12 @@ if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
 if _rms_score_arg:
     _tag += f"_revminscore{reversal.MIN_SCORE_REVERSAL:g}"
+for _flag, _attr, _short in (("--adx-period=",    "ADX_PERIOD",       "adxp"),
+                             ("--adx-choppy=",    "ADX_CHOPPY",       "adxchop"),
+                             ("--adx-gray-high=", "ADX_GRAY_HIGH",    "adxgray"),
+                             ("--adx-strong=",    "ADX_STRONG_TREND", "adxstrong")):
+    if any(a.startswith(_flag) for a in sys.argv):
+        _tag += f"_{_short}{getattr(regime_check, _attr):g}"
 if _smr_arg:
     _tag += f"_minrr{scoring._MIN_RR_OVERRIDE:g}"
 if slot_per_strategy != config.SLOT_PER_STRATEGY:          # ติด tag เฉพาะรอบที่สวนค่าในระบบจริง
