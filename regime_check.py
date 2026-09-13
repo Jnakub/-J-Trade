@@ -223,6 +223,45 @@ DIV_MAX_LOOKBACK_BARS = 180
 # 2026-07-23 — comment ตรงนั้นค้างอยู่ ยังไม่ได้แก้เพราะรอผลรอบนี้ก่อนว่าจะเอาแบบไหน)
 DIV_SWING_VOL_FILTER  = True
 
+# DIV_WICK_WHEN_TICK_VOLUME: ให้ symbol ที่ "ไม่มี real volume" ได้ OR-logic wick ratio ใน
+# check_divergence เหมือนที่ XAU ได้อยู่แล้ว (backtest_replay --div-wick-tickvol)
+#
+# ที่มา: เงื่อนไขในโค้ดเขียนว่า `is_btc = ไม่ใช่ XAU/GOLD` แล้วให้ wick fallback เฉพาะตอน
+# not is_btc — ชื่อตัวแปรหลอก เพราะจริงๆ มันครอบ BTC/ETH/USDJPY/EUR/GBP/US500 ทั้งหมด
+# เหตุผลที่ comment ให้ไว้คือ "BTC ใช้ volume อย่างเดียวได้เพราะมี real volume จาก Bitstamp
+# เชื่อถือได้" ซึ่งใช้ได้กับ BTC/ETH เท่านั้น — binance.BITSTAMP_MAP มีแค่ BTC/ETH/XRP
+# ส่วน USDJPY/EUR/GBP/US500 ใช้ tick_volume ล้วน (ล็อกจริงพิมพ์ "ไม่รู้จัก 'USDJPYm' —
+# ใช้ tick_volume") จึงเดินอยู่บน path ที่ comment เดียวกันบันทึกว่าเคยวัดแล้ว
+# "กรอง volume แบบ AND เดี่ยวๆ ตรวจ divergence ไม่เจอเลย 0%"
+#
+# ธงนี้ **ไม่แตะ BTC/ETH** (มี real volume จริง) และไม่เปลี่ยน XAU (ได้ wick อยู่แล้ว)
+# ผลจึงเห็นเฉพาะ 4 symbol ที่ใช้ tick_volume
+#
+# 🔴 2026-09-13: **ทดสอบแล้ว แย่ลงหนัก — คงไว้ที่ False** (replay 730 วัน, 4 symbol)
+#   baseline   96 ไม้ +17.07R   |   --div-wick-tickvol  100 ไม้ +6.60R   (ΔR -10.46)
+#   USDJPY -2.89 | GBP -5.90 | US500 -1.55 | EUR -0.13  (แย่ลงทั้ง 4 ตัว)
+#
+# สิ่งที่ยืนยันได้ (ข้อดีข้อเดียว): **ไม่ได้แค่ย้ายไม้จาก Scoring มา Reversal** — จำนวนไม้
+# Scoring เท่าเดิมเป๊ะทุก symbol (22/22, 16/16, 25/25, 24/24) ไม่มีไม้ Scoring หายหรือเพิ่ม
+# ข้อกังวลที่จดไว้ที่ reversal.py:87 จึงไม่ใช่สาเหตุของรอบนี้
+#
+# สาเหตุจริง — **การผ่อนตัวกรองตรวจจับไม่ได้เพิ่มอย่างเดียว มันไปแทนที่ของเดิมด้วย**:
+#   ได้ไม้ Reversal ใหม่  9 ไม้  -4.74R  โดน SL 7/9 (78%)
+#   เสียไม้ Reversal เดิม 5 ไม้  +5.72R  ชนะ 5/5 (100%, จบด้วย TP 4 ไม้)
+# swing ที่ผ่านด้วย wick (ไม่มี volume ยืนยัน) เข้าไปเปลี่ยนว่า _find_spacing_partner จะจับคู่
+# จุดไหน divergence ที่เคยเจอด้วย swing ที่ volume ยืนยันจึงถูกเบียดหาย = แลกไม้ชนะล้วน 5 ไม้
+# ไปกับไม้แพ้ 7 ใน 9 ไม้
+#
+# 👉 บทเรียน: อย่ามองการคลายด่านตรวจจับว่าเป็น superset ของเดิม ต้องเทียบไม้ทีละตัวเสมอว่า
+#    "ของเดิมหายไปไหม" ไม่ใช่ดูแค่จำนวนไม้รวมหรือ TotalR
+# ทดสอบซ้ำ: ./run_wine.sh backtest_replay.py GBPUSDm 730 --div-wick-tickvol --log-cuts
+DIV_WICK_WHEN_TICK_VOLUME = False
+
+# symbol ที่มีแหล่ง real volume จริง — อ่านจาก binance.py จุดเดียว ไม่ hardcode ซ้ำ
+def _has_real_volume(symbol: str) -> bool:
+    from binance import BITSTAMP_MAP, YFINANCE_MAP
+    return symbol in BITSTAMP_MAP or symbol in YFINANCE_MAP
+
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
 )
@@ -480,7 +519,9 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     # XAU ใช้ volume OR wick ratio เหมือน check_structure/check_key_level (2026-07-25) —
     # BTC ยังคงได้ vol_multiplier=1.9x, wick_ratio_min=None เหมือนเดิมทุกกรณี (ไม่แตะ path เดิม)
     vol_multiplier = swing_vol_multiplier(symbol) if symbol else 0.0
-    wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and not is_btc) else None
+    # ดู DIV_WICK_WHEN_TICK_VOLUME — ปกติ False = เดิมเป๊ะ (wick เฉพาะ XAU/GOLD)
+    _use_wick = (not is_btc) or (DIV_WICK_WHEN_TICK_VOLUME and not _has_real_volume(symbol))
+    wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and _use_wick) else None
     if not DIV_SWING_VOL_FILTER:          # โหมดทดลอง — ดู comment ที่ตัวแปรนั้น
         vol_multiplier, wick_ratio_min = 0.0, None
     rsi = calc_rsi(df["close"])

@@ -269,6 +269,13 @@ div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
     regime_check.DIV_SWING_VOL_FILTER = False
 
+# --div-wick-tickvol : ให้ symbol ที่ใช้ tick_volume (USDJPY/EUR/GBP/US500) ได้ OR-logic
+# wick ratio ใน check_divergence เหมือน XAU — ดู regime_check.DIV_WICK_WHEN_TICK_VOLUME
+# ไม่แตะ BTC/ETH (มี real volume) และไม่เปลี่ยน XAU (ได้ wick อยู่แล้ว)
+div_wick_tick = "--div-wick-tickvol" in sys.argv
+if div_wick_tick:
+    regime_check.DIV_WICK_WHEN_TICK_VOLUME = True
+
 # --exit-rsi-period=N : ทับ exit_monitor.RSI_PERIOD เฉพาะรอบนี้ — คุมกฎ "Indicator ร้อน" (ข้อ 2)
 # ที่ตัด RULE_HOT_KEEP เมื่อ RSI แตะ RSI_OVERBOUGHT/OVERSOLD **หรือ** ราคาทะลุ Bollinger
 # ขา Bollinger ไม่ขยับตาม (BB_PERIOD เป็น 20 ของมันเอง) กฎจึงยังยิงจากขานั้นเท่าเดิม
@@ -788,6 +795,8 @@ if sl_guard_legacy:
     _tag += "_slguardlegacy"
 if div_no_vol:
     _tag += "_divnovol"
+if div_wick_tick:
+    _tag += "_divwicktick"
 if _1rk_arg:
     _tag += f"_1rkeep{em.RULE_1R_KEEP:g}"
 if _clk_arg:
