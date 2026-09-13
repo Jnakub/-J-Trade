@@ -501,26 +501,40 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     เทียบ swing ราคา 2 จุดล่าสุด + จุดใหม่ต้องยืนยันภายใน DIV_MAX_AGE_BARS แท่ง
     + จุดแรกต้องเคยอยู่โซน overbought/oversold จริง (นิยาม divergence คลาสสิก, ยืนยันด้วย backtest)
 
-    Volume filter: BTC ใช้ volume อย่างเดียว (มี real volume จาก Bitstamp เชื่อถือได้ — 2026-07-23)
-    XAU ใช้ volume OR wick ratio (2026-07-25) — เดิมเคยปิด volume filter ไปเลยเพราะทดสอบแล้ว
-    กรอง volume แบบ AND เดี่ยวๆ ตรวจ divergence ไม่เจอเลย 0% แต่นั่นคือก่อนมี wick_ratio_min
-    OR-logic (ดู check_structure) พอเปลี่ยนมาเป็น volume OR wick ratio เหมือน check_structure/
-    check_key_level แล้วปัญหาเดิมไม่เกิดซ้ำ (wick ช่วยกู้จุดที่ volume คนเดียวมองไม่เห็น)
+    Volume filter: **XAU/GOLD เท่านั้น** ที่ใช้ volume OR wick ratio (2026-07-25) — symbol อื่น
+    ทั้งหมด (BTC, ETH, USDJPY, EUR, GBP, US500) ใช้ volume อย่างเดียว
+    ที่มาของ XAU: เดิมเคยปิด volume filter ไปเลยเพราะทดสอบแล้วกรอง volume แบบ AND เดี่ยวๆ
+    ตรวจ divergence ไม่เจอเลย 0% แต่นั่นคือก่อนมี wick_ratio_min OR-logic (ดู check_structure)
+    พอเปลี่ยนมาเป็น volume OR wick ratio เหมือน check_structure/check_key_level แล้วปัญหาเดิม
+    ไม่เกิดซ้ำ (wick ช่วยกู้จุดที่ volume คนเดียวมองไม่เห็น)
     ไม่ส่ง symbol มา (None) จะ fallback ปิด volume filter เหมือนเดิมทุกกรณี
 
-    Soft divergence (OR-logic): เปิดทั้ง BTC และ XAU (2026-07-25) — เดิมเปิดเฉพาะ BTC เพราะ
-    backtest แรกสุดทดสอบแค่ BTC (sample เล็กมาก 3-6 เคส) ตอนนี้ backtest แยกของ XAU เองแล้ว
+    ⚠️ 2026-09-13: เหตุผลเดิมที่จดไว้ตรงนี้ ("BTC ใช้ volume อย่างเดียวเพราะมี real volume จาก
+    Bitstamp เชื่อถือได้") **ใช้อธิบายเงื่อนไขจริงไม่ได้** — เงื่อนไขในโค้ดแยกด้วย "ใช่ทองไหม"
+    ไม่ใช่ "มี real volume ไหม" สองอย่างนี้ไม่ตรงกัน: BITSTAMP_MAP มีแค่ BTC/ETH/XRP ส่วน
+    USDJPY/EUR/GBP/US500 ใช้ tick_volume ล้วน และ **XAU เองก็ไม่มี real volume เหมือนกัน**
+    (yfinance GC=F พังที่ 4H — ดู binance.py) แต่วัดแล้วเปิด wick ให้ 4 ตัวที่ไม่มี real volume
+    ทำให้แย่ลง -10.46R (ดู DIV_WICK_WHEN_TICK_VOLUME) จึงคงพฤติกรรมเดิมไว้
+    = เหตุผลที่เคยเขียนผิด แต่พฤติกรรมถูก
+
+    Soft divergence (OR-logic): เปิดให้ **ทุก symbol ที่ส่งชื่อมา** (เงื่อนไขจริงคือ
+    `bool(symbol)` — เห็นที่ soft_stall ด้านล่าง) เดิม comment ตรงนี้เขียนว่า "เปิดทั้ง BTC และ
+    XAU" ซึ่งค้างมาจากตอนมีแค่ 2 symbol ในระบบ — 2026-09-13 แก้ให้ตรงโค้ด ไม่ได้เปลี่ยนพฤติกรรม
+    ที่มา: backtest แรกสุดทดสอบแค่ BTC (sample เล็กมาก 3-6 เคส) ต่อมามี backtest แยกของ XAU
     (scratch_stall_backtest_xau.py, ~500 วัน 4H, threshold=5 win rate 80% จาก 20 เคส — สูงสุด
     ในบรรดา threshold ที่ลอง 3/5/7/10 และตรงกับค่า DIV_STALL_THRESHOLD ของ BTC พอดี) — sample
     ยังเล็ก ไม่ได้ผ่าน reversal scorecard filter เต็มรูปแบบ ควร optimize/ยืนยันซ้ำทีหลัง
     นอกจาก RSI Lower High/Higher Low เป๊ะ (strict) ยังนับเป็น divergence ได้ถ้า RSI แทบไม่ขยับ
     ตามราคา (ไม่เกิน DIV_STALL_THRESHOLD แต้มในทิศตรงข้าม)"""
-    is_btc = bool(symbol) and "XAU" not in symbol.upper() and "GOLD" not in symbol.upper()
-    # XAU ใช้ volume OR wick ratio เหมือน check_structure/check_key_level (2026-07-25) —
-    # BTC ยังคงได้ vol_multiplier=1.9x, wick_ratio_min=None เหมือนเดิมทุกกรณี (ไม่แตะ path เดิม)
+    # 2026-09-13: เดิมเขียนกลับด้านเป็น `is_btc = ไม่ใช่ XAU/GOLD` ซึ่งชื่อหลอก — มันเป็นจริง
+    # กับ BTC/ETH/USDJPY/EUR/GBP/US500 ทั้งหมด ไม่ใช่แค่ BTC เขียนเป็นบวกให้ตรงกับสิ่งที่
+    # เงื่อนไขทำจริง (พฤติกรรมเหมือนเดิมเป๊ะ ดูเหตุผลเต็มใน docstring)
+    is_gold = bool(symbol) and ("XAU" in symbol.upper() or "GOLD" in symbol.upper())
     vol_multiplier = swing_vol_multiplier(symbol) if symbol else 0.0
-    # ดู DIV_WICK_WHEN_TICK_VOLUME — ปกติ False = เดิมเป๊ะ (wick เฉพาะ XAU/GOLD)
-    _use_wick = (not is_btc) or (DIV_WICK_WHEN_TICK_VOLUME and not _has_real_volume(symbol))
+    # ทองได้ volume OR wick ratio เหมือน check_structure/check_key_level (2026-07-25)
+    # ที่เหลือได้ volume อย่างเดียว — DIV_WICK_WHEN_TICK_VOLUME (ปกติ False) คือธงทดลองที่
+    # เคยลองผ่อนให้ตัวที่ใช้ tick_volume แล้ววัดได้ว่าแย่ลง
+    _use_wick = is_gold or (DIV_WICK_WHEN_TICK_VOLUME and not _has_real_volume(symbol))
     wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and _use_wick) else None
     if not DIV_SWING_VOL_FILTER:          # โหมดทดลอง — ดู comment ที่ตัวแปรนั้น
         vol_multiplier, wick_ratio_min = 0.0, None
