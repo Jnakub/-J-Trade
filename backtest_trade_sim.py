@@ -113,8 +113,10 @@ class TradeSim:
         return {"R": r, "how": how, "exit_time": t, "cuts": cuts, "MFE": mfe}
 
 
-def load_trades(symbol: str, strategy: str = None) -> pd.DataFrame:
-    t = pd.read_csv(f"replay_trades_{symbol}.csv", parse_dates=["time"])
+def load_trades(symbol: str, strategy: str = None, tag: str = "") -> pd.DataFrame:
+    """tag = ส่วนท้ายชื่อไฟล์ผลของ backtest_replay (เช่น "_1rkeep100_hwkeep100") — ต้องเลือกไฟล์
+    ที่สร้างด้วยค่าคงที่ชุดเดียวกับที่ระบบใช้อยู่ ไม่งั้น control จะไม่ตรงกับไฟล์"""
+    t = pd.read_csv(f"replay_trades_{symbol}{tag}.csv", parse_dates=["time"])
     return t[t.strategy == strategy].reset_index(drop=True) if strategy else t
 
 
