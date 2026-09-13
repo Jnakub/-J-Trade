@@ -60,13 +60,6 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ ผลคือถือได้ 2 ไม้พร้อมกันต่อ symbol = ความเสี่ยงต่อ symbol เป็น 2 เท่า
                  backtest บวก R ตรงๆ ไม่ได้ปรับ sizing ให้ ตัวเลขที่ได้จึงเป็น "ถ้ายอมเสี่ยง
                  2 เท่า" ไม่ใช่ "ได้ฟรี"
-     --min-rr=X  ทับ config.MIN_RR_HARD_BLOCK (ปัจจุบัน 1.5) — ด่าน R:R ขั้นต่ำของไม้ Scoring
-                 ทับเฉพาะ "ด่านเข้าไม้" ไม่แตะสูตร fallback TP ที่อิงค่าเดียวกัน (ดู
-                 scoring._MIN_RR_OVERRIDE ว่าทำไมต้องแยก)
-                 ที่มา: บนลิสต์ไม้ 177 ไม้ กลุ่ม R:R สูงสุด 1/3 (>=2.57) ทำ avgR +0.33
-                 เทียบกับ +0.06/+0.02 ของสองกลุ่มล่าง และไปทางเดียวกันทั้ง 7 symbol / 3 ปี
-                 ⚠️ นั่นเป็นการ "กรองลิสต์เดิม" ซึ่งไม่นับไม้ที่จะเข้ามาแทนตอนช่องว่าง —
-                 ต้องรันด้วยธงนี้จริงถึงจะรู้ผล อย่าเอาตัวเลขกรองลิสต์ไปตัดสินใจ
      --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ปัจจุบัน 1.5) — ด่าน R:R ขั้นต่ำ
                  ของไม้สวน (ตัวแปรคนละตัวกับ MIN_RR_HARD_BLOCK ที่ Scoring ใช้ ซึ่งเป็น 1.5
                  เท่ากันอยู่ตอนนี้) เคยลองลดเป็น 1.1 แล้วไม่ช่วย ดู config.py ที่ตัวแปรนั้น
@@ -234,9 +227,6 @@ if _rmr_arg:
 _rms_score_arg = next((a for a in sys.argv if a.startswith("--rev-min-score=")), None)
 if _rms_score_arg:
     reversal.MIN_SCORE_REVERSAL = float(_rms_score_arg.split("=")[1])
-_smr_arg = next((a for a in sys.argv if a.startswith("--min-rr=")), None)
-if _smr_arg:
-    scoring._MIN_RR_OVERRIDE = float(_smr_arg.split("=")[1])
 rev_tp_entry = "--rev-tp-from-entry" in sys.argv
 if rev_tp_entry:
     reversal.TP_FROM_ENTRY = True
@@ -276,19 +266,6 @@ if sl_guard_legacy:
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
     regime_check.DIV_SWING_VOL_FILTER = False
-
-# --div-wick-tickvol : ให้ symbol ที่ใช้ tick_volume (USDJPY/EUR/GBP/US500) ได้ OR-logic
-# wick ratio ใน check_divergence เหมือน XAU — ดู regime_check.DIV_WICK_WHEN_TICK_VOLUME
-# ไม่แตะ BTC/ETH (มี real volume) และไม่เปลี่ยน XAU (ได้ wick อยู่แล้ว)
-div_wick_tick = "--div-wick-tickvol" in sys.argv
-if div_wick_tick:
-    regime_check.DIV_WICK_WHEN_TICK_VOLUME = True
-
-# --div-price-tol=X : ผ่อนการเทียบ "ราคาทำ new extreme" ได้ X ATR (ปกติ 0 = เทียบเป๊ะ)
-# ดู regime_check.DIV_PRICE_TOLERANCE_ATR — ไม่แตะรายการ swing จึงเพิ่มได้อย่างเดียว
-_dpt_arg = next((a for a in sys.argv if a.startswith("--div-price-tol=")), None)
-if _dpt_arg:
-    regime_check.DIV_PRICE_TOLERANCE_ATR = float(_dpt_arg.split("=")[1])
 
 # --exit-rsi-period=N : ทับ exit_monitor.RSI_PERIOD เฉพาะรอบนี้ — คุมกฎ "Indicator ร้อน" (ข้อ 2)
 # ที่ตัด RULE_HOT_KEEP เมื่อ RSI แตะ RSI_OVERBOUGHT/OVERSOLD **หรือ** ราคาทะลุ Bollinger
@@ -805,8 +782,6 @@ for _flag, _attr, _short in (("--adx-period=",    "ADX_PERIOD",       "adxp"),
                              ("--adx-strong=",    "ADX_STRONG_TREND", "adxstrong")):
     if any(a.startswith(_flag) for a in sys.argv):
         _tag += f"_{_short}{getattr(regime_check, _attr):g}"
-if _smr_arg:
-    _tag += f"_minrr{scoring._MIN_RR_OVERRIDE:g}"
 if slot_per_strategy != config.SLOT_PER_STRATEGY:          # ติด tag เฉพาะรอบที่สวนค่าในระบบจริง
     _tag += "_slotper" if slot_per_strategy else "_oneslot"
 if no_rev_short:
@@ -831,10 +806,6 @@ if sl_guard_legacy:
     _tag += "_slguardlegacy"
 if div_no_vol:
     _tag += "_divnovol"
-if div_wick_tick:
-    _tag += "_divwicktick"
-if _dpt_arg:
-    _tag += f"_divpricetol{regime_check.DIV_PRICE_TOLERANCE_ATR:g}"
 if _1rk_arg:
     _tag += f"_1rkeep{em.RULE_1R_KEEP:g}"
 if _clk_arg:

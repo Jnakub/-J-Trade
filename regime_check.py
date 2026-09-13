@@ -44,7 +44,7 @@ from config import MT5_TIMEFRAMES, SYMBOLS
 from mt5_connect import connect
 from scoring import get_ohlcv, get_ohlcv_real
 from swing import find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
-from indicators import calc_adx, calc_atr, calc_rsi as _calc_rsi
+from indicators import calc_adx, calc_rsi as _calc_rsi
 from bars import BAR_OFFSET_H as ADX_BAR_OFFSET_H, get_aligned_4h
 
 REGIME_TIMEFRAME = MT5_TIMEFRAMES["4H"]
@@ -199,39 +199,12 @@ DIV_ZONE_OVERSOLD   = 45
 # ยืนยันหนักแน่น (sample เล็กเกินจะฟันธง) ปรับได้ถ้ามีข้อมูลเพิ่มแล้วผลต่าง
 DIV_STALL_THRESHOLD = 5
 
-# DIV_PRICE_TOLERANCE_ATR: ผ่อนการเทียบ "ราคาทำ new extreme" ให้คลาดได้กี่ ATR
-# (backtest_replay --div-price-tol=X) 0.0 = เทียบเป๊ะแบบเดิม
-#
-# ที่มา: ฝั่ง RSI มี tolerance อยู่แล้ว (DIV_STALL_THRESHOLD = "RSI แทบไม่ขยับก็นับให้") และ
-# การหา swing เองก็ผ่อนได้ 0.22 ATR (SWING_TOLERANCE) แต่การเทียบราคาในด่าน divergence
-# เป็นจุดเดียวที่ยังเทียบแบบ strict — ต่างกัน 0.03% ก็ปัดตก
-# เคสที่ทำให้เห็น (USDJPYm 2026-09): low 152.882 -> 152.933 (สูงกว่าเดิม 0.05 เยน = 0.03%
-# = double bottom ในทางปฏิบัติ) แต่ RSI 23.0 -> 32.0 ขึ้น 9 แต้ม = แรงขายหมดชัดเจน
-# ตกด้วยเงื่อนไข price_ll อย่างเดียว
-#
-# นับบน 800 แท่ง 4H ทุก symbol เฉพาะเคสที่ RSI+โซนผ่านแล้ว เหลือติดแค่ราคา:
-#   เจอตอนนี้ 56 ครั้ง | ผ่อน 0.22 ATR +7 ครั้ง (+12%) | ผ่อน 0.5 ATR +18 ครั้ง (+45%)
-#
-# ⚠️ ต่างจากการเปิด wick (ดู DIV_WICK_WHEN_TICK_VOLUME) ตรงกลไก: ตัวนี้ **ไม่แตะรายการ swing**
-#    _find_spacing_partner จับคู่จุดเดิมเป๊ะ จึงเพิ่มได้อย่างเดียว ทำ divergence เดิมหายไม่ได้
-#
-# 🟡 2026-09-13: **ทดสอบที่ 0.5 ATR แล้ว — เสมอตัว ไม่เอา คงไว้ที่ 0**
-#   replay 730 วัน 6 symbol (GBP ข้าม ไม่มีเคสเฉียดเลย): +35.40R -> +34.62R  (ΔR -0.78)
-#   XAU +1.46 | EUR +0.88 | US500 +0.15 | USDJPY 0.00 | BTC -1.01 | ETH -2.26
-#
-#   คำทำนายเชิงกลไกข้างบน **ถูกยืนยันแล้ว**:
-#     ไม้เดิมหายไป 0 ไม้   (ต่างจาก wick ที่ทำไม้ชนะเดิมหาย 5 ไม้)
-#     ไม้ Scoring ไม่ขยับเลย (29/29, 24/24, 22/22, 16/16, 30/30, 31/31)
-#     ได้ไม้ Reversal ใหม่ 7 ไม้ รวม -0.78R  (ชนะ 3 แพ้ 4)
-#
-#   เหตุผลที่ไม่เอา: ไม้ที่เพิ่มมาเป็นการโยนหัวก้อย -0.11R ต่อไม้ จาก 7 ไม้ = แยกจากศูนย์ไม่ได้
-#   (ดู memory เรื่องผลต่าง 2-4R คือ noise) ไม่ใช่เพราะมันอันตราย — ตัวนี้ปลอดภัยกว่า wick มาก
-#   ถ้าจะรื้อมาดูใหม่ตอนมีไม้จริงเยอะขึ้น ธงยังอยู่ ใช้ได้เลย
-#
-#   หมายเหตุ: สแกนเจอเคสเฉียด 18 ครั้ง แต่กลายเป็นไม้จริงแค่ 7 — ที่เหลือตกด่านอื่นต่อ
-#   (regime ต้องเป็น REVERSAL-READY + Key Level + สกอร์การ์ด 7/10 + ช่องว่าง)
-# ทดสอบซ้ำ: ./run_wine.sh backtest_replay.py XAUUSDm 730 --div-price-tol=0.5 --log-cuts
-DIV_PRICE_TOLERANCE_ATR = 0.0
+# 2026-09-13: ลองผ่อนการเทียบ "ราคาทำ new extreme" ให้คลาดได้ 0.5 ATR — **เสมอตัว ถอดทิ้งแล้ว**
+# เหตุผลที่ลอง: ฝั่ง RSI ผ่อนได้อยู่แล้ว (DIV_STALL_THRESHOLD) และการหา swing ผ่อนได้ 0.22 ATR
+# (SWING_TOLERANCE) เหลือการเทียบราคาเป็นจุดเดียวที่ยัง strict — ต่างกัน 0.03% ก็ปัดตก
+# ผล replay 730 วัน 6 symbol: +35.40R -> +34.62R (ΔR -0.78) ได้ไม้ Reversal ใหม่ 7 ไม้ ชนะ 3
+# แพ้ 4 = โยนหัวก้อย และ **ไม้เดิมหายไป 0 ไม้** (ต่างจาก wick ด้านล่างที่ทำไม้ชนะเดิมหาย 5 ไม้
+# เพราะมันไปแตะรายการ swing) ถอดโค้ดออกเพราะไม่มี edge — ถ้าจะรื้อมาดูใหม่ ดู commit 45a4e8c
 
 # Min spacing / max lookback (2026-07-25) — swing point ที่ผ่านเกณฑ์อาจอยู่ติดกันเกินไป
 # (window หา swing overlap กัน) โดยเฉพาะ XAU ที่เพิ่งเปิด volume OR wick ratio: backtest
@@ -257,44 +230,11 @@ DIV_MAX_LOOKBACK_BARS = 180
 # 2026-07-23 — comment ตรงนั้นค้างอยู่ ยังไม่ได้แก้เพราะรอผลรอบนี้ก่อนว่าจะเอาแบบไหน)
 DIV_SWING_VOL_FILTER  = True
 
-# DIV_WICK_WHEN_TICK_VOLUME: ให้ symbol ที่ "ไม่มี real volume" ได้ OR-logic wick ratio ใน
-# check_divergence เหมือนที่ XAU ได้อยู่แล้ว (backtest_replay --div-wick-tickvol)
-#
-# ที่มา: เงื่อนไขในโค้ดเขียนว่า `is_btc = ไม่ใช่ XAU/GOLD` แล้วให้ wick fallback เฉพาะตอน
-# not is_btc — ชื่อตัวแปรหลอก เพราะจริงๆ มันครอบ BTC/ETH/USDJPY/EUR/GBP/US500 ทั้งหมด
-# เหตุผลที่ comment ให้ไว้คือ "BTC ใช้ volume อย่างเดียวได้เพราะมี real volume จาก Bitstamp
-# เชื่อถือได้" ซึ่งใช้ได้กับ BTC/ETH เท่านั้น — binance.BITSTAMP_MAP มีแค่ BTC/ETH/XRP
-# ส่วน USDJPY/EUR/GBP/US500 ใช้ tick_volume ล้วน (ล็อกจริงพิมพ์ "ไม่รู้จัก 'USDJPYm' —
-# ใช้ tick_volume") จึงเดินอยู่บน path ที่ comment เดียวกันบันทึกว่าเคยวัดแล้ว
-# "กรอง volume แบบ AND เดี่ยวๆ ตรวจ divergence ไม่เจอเลย 0%"
-#
-# ธงนี้ **ไม่แตะ BTC/ETH** (มี real volume จริง) และไม่เปลี่ยน XAU (ได้ wick อยู่แล้ว)
-# ผลจึงเห็นเฉพาะ 4 symbol ที่ใช้ tick_volume
-#
-# 🔴 2026-09-13: **ทดสอบแล้ว แย่ลงหนัก — คงไว้ที่ False** (replay 730 วัน, 4 symbol)
-#   baseline   96 ไม้ +17.07R   |   --div-wick-tickvol  100 ไม้ +6.60R   (ΔR -10.46)
-#   USDJPY -2.89 | GBP -5.90 | US500 -1.55 | EUR -0.13  (แย่ลงทั้ง 4 ตัว)
-#
-# สิ่งที่ยืนยันได้ (ข้อดีข้อเดียว): **ไม่ได้แค่ย้ายไม้จาก Scoring มา Reversal** — จำนวนไม้
-# Scoring เท่าเดิมเป๊ะทุก symbol (22/22, 16/16, 25/25, 24/24) ไม่มีไม้ Scoring หายหรือเพิ่ม
-# ข้อกังวลที่จดไว้ที่ reversal.py:87 จึงไม่ใช่สาเหตุของรอบนี้
-#
-# สาเหตุจริง — **การผ่อนตัวกรองตรวจจับไม่ได้เพิ่มอย่างเดียว มันไปแทนที่ของเดิมด้วย**:
-#   ได้ไม้ Reversal ใหม่  9 ไม้  -4.74R  โดน SL 7/9 (78%)
-#   เสียไม้ Reversal เดิม 5 ไม้  +5.72R  ชนะ 5/5 (100%, จบด้วย TP 4 ไม้)
-# swing ที่ผ่านด้วย wick (ไม่มี volume ยืนยัน) เข้าไปเปลี่ยนว่า _find_spacing_partner จะจับคู่
-# จุดไหน divergence ที่เคยเจอด้วย swing ที่ volume ยืนยันจึงถูกเบียดหาย = แลกไม้ชนะล้วน 5 ไม้
-# ไปกับไม้แพ้ 7 ใน 9 ไม้
-#
-# 👉 บทเรียน: อย่ามองการคลายด่านตรวจจับว่าเป็น superset ของเดิม ต้องเทียบไม้ทีละตัวเสมอว่า
-#    "ของเดิมหายไปไหม" ไม่ใช่ดูแค่จำนวนไม้รวมหรือ TotalR
-# ทดสอบซ้ำ: ./run_wine.sh backtest_replay.py GBPUSDm 730 --div-wick-tickvol --log-cuts
-DIV_WICK_WHEN_TICK_VOLUME = False
-
-# symbol ที่มีแหล่ง real volume จริง — อ่านจาก binance.py จุดเดียว ไม่ hardcode ซ้ำ
-def _has_real_volume(symbol: str) -> bool:
-    from binance import BITSTAMP_MAP, YFINANCE_MAP
-    return symbol in BITSTAMP_MAP or symbol in YFINANCE_MAP
+# 2026-09-13: ลองให้ symbol ที่ใช้ tick_volume (USDJPY/EUR/GBP/US500) ได้ wick OR-logic
+# เหมือน XAU — **แย่ลง -10.46R ถอดทิ้งแล้ว** (96 ไม้ +17.07R -> 100 ไม้ +6.60R, แย่ลงทั้ง 4 ตัว)
+# ยอดรวมซ่อนสาเหตุ: ได้ไม้ใหม่ 9 ไม้ -4.74R (โดน SL 7/9) แต่ **เสียไม้เดิม 5 ไม้ +5.72R ที่ชนะ
+# 5/5** — swing ที่ผ่านด้วย wick ไปเปลี่ยนว่า _find_spacing_partner จับคู่จุดไหน divergence เดิม
+# จึงถูกเบียดหาย = การคลายด่านตรวจจับไม่ใช่ superset ของเดิม (ดู commit dfd830a)
 
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
@@ -513,14 +453,6 @@ def calc_rsi(series: pd.Series, period: int = DIV_RSI_PERIOD) -> pd.Series:
     return _calc_rsi(series, period)
 
 
-def _price_tol(df: pd.DataFrame, idx: int) -> float:
-    """ระยะที่ยอมให้ราคาคลาดได้ตอนเทียบ new extreme — ดู DIV_PRICE_TOLERANCE_ATR
-    คืน 0.0 เมื่อปิด (ค่าปกติ) เพื่อให้ผลเทียบเท่ากับ strict เป๊ะ ไม่ต้องคำนวณ ATR เปล่าๆ"""
-    if DIV_PRICE_TOLERANCE_ATR <= 0:
-        return 0.0
-    atr = calc_atr(df).iloc[idx]
-    return 0.0 if pd.isna(atr) else float(atr) * DIV_PRICE_TOLERANCE_ATR
-
 
 def _find_spacing_partner(points: list[int]) -> int | None:
     """หาจุดก่อนหน้า (h1) ที่ห่างจากจุดล่าสุด (points[-1]) อย่างน้อย DIV_MIN_SPACING_BARS แท่ง
@@ -552,13 +484,10 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     ไม่เกิดซ้ำ (wick ช่วยกู้จุดที่ volume คนเดียวมองไม่เห็น)
     ไม่ส่ง symbol มา (None) จะ fallback ปิด volume filter เหมือนเดิมทุกกรณี
 
-    ⚠️ 2026-09-13: เหตุผลเดิมที่จดไว้ตรงนี้ ("BTC ใช้ volume อย่างเดียวเพราะมี real volume จาก
-    Bitstamp เชื่อถือได้") **ใช้อธิบายเงื่อนไขจริงไม่ได้** — เงื่อนไขในโค้ดแยกด้วย "ใช่ทองไหม"
-    ไม่ใช่ "มี real volume ไหม" สองอย่างนี้ไม่ตรงกัน: BITSTAMP_MAP มีแค่ BTC/ETH/XRP ส่วน
-    USDJPY/EUR/GBP/US500 ใช้ tick_volume ล้วน และ **XAU เองก็ไม่มี real volume เหมือนกัน**
-    (yfinance GC=F พังที่ 4H — ดู binance.py) แต่วัดแล้วเปิด wick ให้ 4 ตัวที่ไม่มี real volume
-    ทำให้แย่ลง -10.46R (ดู DIV_WICK_WHEN_TICK_VOLUME) จึงคงพฤติกรรมเดิมไว้
-    = เหตุผลที่เคยเขียนผิด แต่พฤติกรรมถูก
+    ⚠️ 2026-09-13: เงื่อนไขแยกด้วย "ใช่ทองไหม" ไม่ใช่ "มี real volume ไหม" — และ XAU เองก็
+    ไม่มี real volume เหมือนกัน (BITSTAMP_MAP มีแค่ BTC/ETH/XRP) เหตุผลเดิมที่เคยจดไว้ว่า
+    "BTC ใช้ volume อย่างเดียวได้เพราะมี real volume" จึงอธิบายเงื่อนไขจริงไม่ได้ แต่วัดแล้ว
+    การเปิด wick ให้ตัวที่ใช้ tick_volume ทำให้แย่ลง -10.46R จึงคงพฤติกรรมเดิมไว้
 
     Soft divergence (OR-logic): เปิดให้ **ทุก symbol ที่ส่งชื่อมา** (เงื่อนไขจริงคือ
     `bool(symbol)` — เห็นที่ soft_stall ด้านล่าง) เดิม comment ตรงนี้เขียนว่า "เปิดทั้ง BTC และ
@@ -569,16 +498,11 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     ยังเล็ก ไม่ได้ผ่าน reversal scorecard filter เต็มรูปแบบ ควร optimize/ยืนยันซ้ำทีหลัง
     นอกจาก RSI Lower High/Higher Low เป๊ะ (strict) ยังนับเป็น divergence ได้ถ้า RSI แทบไม่ขยับ
     ตามราคา (ไม่เกิน DIV_STALL_THRESHOLD แต้มในทิศตรงข้าม)"""
-    # 2026-09-13: เดิมเขียนกลับด้านเป็น `is_btc = ไม่ใช่ XAU/GOLD` ซึ่งชื่อหลอก — มันเป็นจริง
-    # กับ BTC/ETH/USDJPY/EUR/GBP/US500 ทั้งหมด ไม่ใช่แค่ BTC เขียนเป็นบวกให้ตรงกับสิ่งที่
-    # เงื่อนไขทำจริง (พฤติกรรมเหมือนเดิมเป๊ะ ดูเหตุผลเต็มใน docstring)
+    # 2026-09-13: เดิมชื่อ is_btc เขียนกลับด้าน (= ไม่ใช่ XAU/GOLD) ซึ่งหลอก
     is_gold = bool(symbol) and ("XAU" in symbol.upper() or "GOLD" in symbol.upper())
     vol_multiplier = swing_vol_multiplier(symbol) if symbol else 0.0
-    # ทองได้ volume OR wick ratio เหมือน check_structure/check_key_level (2026-07-25)
-    # ที่เหลือได้ volume อย่างเดียว — DIV_WICK_WHEN_TICK_VOLUME (ปกติ False) คือธงทดลองที่
-    # เคยลองผ่อนให้ตัวที่ใช้ tick_volume แล้ววัดได้ว่าแย่ลง
-    _use_wick = is_gold or (DIV_WICK_WHEN_TICK_VOLUME and not _has_real_volume(symbol))
-    wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and _use_wick) else None
+    # ทองได้ volume OR wick ratio เหมือน check_structure/check_key_level ที่เหลือ volume ล้วน
+    wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and is_gold) else None
     if not DIV_SWING_VOL_FILTER:          # โหมดทดลอง — ดู comment ที่ตัวแปรนั้น
         vol_multiplier, wick_ratio_min = 0.0, None
     rsi = calc_rsi(df["close"])
@@ -604,9 +528,7 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
         h2 = highs[-1]
         fresh   = (last_idx - h2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[h1] >= DIV_ZONE_OVERBOUGHT
-        # ผ่อนได้ตาม DIV_PRICE_TOLERANCE_ATR (ปกติ 0 = เทียบเป๊ะแบบเดิม)
-        _tol = _price_tol(df, h2)
-        price_hh = df["high"].iloc[h2] > df["high"].iloc[h1] - _tol
+        price_hh = df["high"].iloc[h2] > df["high"].iloc[h1]
         rsi_diff = rsi.iloc[h2] - rsi.iloc[h1]
         strict_lh = rsi_diff < 0
         soft_stall = bool(symbol) and 0 <= rsi_diff <= DIV_STALL_THRESHOLD
@@ -632,8 +554,7 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
         l2 = lows[-1]
         fresh   = (last_idx - l2) <= DIV_MAX_AGE_BARS
         zone_ok = rsi.iloc[l1] <= DIV_ZONE_OVERSOLD
-        _tol = _price_tol(df, l2)
-        price_ll = df["low"].iloc[l2] < df["low"].iloc[l1] + _tol
+        price_ll = df["low"].iloc[l2] < df["low"].iloc[l1]
         rsi_diff = rsi.iloc[l1] - rsi.iloc[l2]
         strict_hl = rsi_diff < 0
         soft_stall = bool(symbol) and 0 <= rsi_diff <= DIV_STALL_THRESHOLD

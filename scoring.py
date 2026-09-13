@@ -46,13 +46,6 @@ DISABLED_CRITERIA: tuple = ()
 # ไว้ให้ backtest_replay.py --legacy-sl ใช้เทียบ
 EXEC_SL_ATR_MULT = 2.0
 
-# ค่าทับของด่าน R:R ขั้นต่ำ — backtest_replay.py --min-rr ตั้งให้ (None = ใช้ config.MIN_RR_HARD_BLOCK)
-#
-# ⚠️ ตัวนี้ทับ **เฉพาะด่านเข้าไม้** ไม่แตะสูตร fallback TP ที่อิง MIN_RR_HARD_BLOCK เหมือนกัน
-# (ดูราวบรรทัด 376) โดยตั้งใจ — ถ้าทับทั้งสองที่ การทดลอง "ยกด่าน R:R" จะขยับ TP ของไม้ fallback
-# ตามไปด้วย แล้วแยกไม่ออกว่าผลที่เห็นมาจากการคัดไม้ หรือมาจากการเลื่อน TP
-# (เป็นกับดักเดียวกับที่ f380724 แยก MIN_RR ออกจากสูตร fallback TP มาแล้วรอบหนึ่ง)
-_MIN_RR_OVERRIDE = None
 
 # k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
 # <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
@@ -455,10 +448,9 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     # Hard block: กันแค่ไม่ให้เสี่ยงมากกว่าได้ (R:R < 1) — ไม่สนคะแนนรวม
     # ส่วน "R:R ดีจริง" (>= MIN_RR) ยังต้องผ่านสกอร์การ์ดแยกต่างหากด้านบน (WEIGHT_RR)
-    min_rr_gate = MIN_RR_HARD_BLOCK if _MIN_RR_OVERRIDE is None else _MIN_RR_OVERRIDE
-    if rr < min_rr_gate - 1e-9 and not force:
+    if rr < MIN_RR_HARD_BLOCK - 1e-9 and not force:
         raise ValueError(
-            f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {min_rr_gate}  — ห้ามเข้า trade"
+            f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_HARD_BLOCK}  — ห้ามเข้า trade"
         )
 
     # Hard block: R:R สูงผิดปกติ (> MAX_RR_HARD_BLOCK) มักมาจาก Fibonacci TP ยืดไกลเกินจริง
