@@ -226,6 +226,14 @@ cut_log = []
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
+
+# --rev-min-score=N : ทับ reversal.MIN_SCORE_REVERSAL (ปกติ 7/10) — คู่กับ --min-score ของ Scoring
+# หมายเหตุโครงสร้าง: regime REVERSAL-READY บังคับ Key Level + Divergence + ADX peak โค้งลง
+# อยู่แล้ว = 2+3+1 = 6 แต้มฟรีจาก 7 ที่ต้องการ สกอร์การ์ดจึงตัดจริงแค่ 3% ของรอบที่ถึงมือมัน
+# (80/2650 บน 7 symbol) การตั้ง 0 จึงเป็นการปลดด่านที่แทบไม่ได้กรองอะไรอยู่แล้ว
+_rms_score_arg = next((a for a in sys.argv if a.startswith("--rev-min-score=")), None)
+if _rms_score_arg:
+    reversal.MIN_SCORE_REVERSAL = float(_rms_score_arg.split("=")[1])
 _smr_arg = next((a for a in sys.argv if a.startswith("--min-rr=")), None)
 if _smr_arg:
     scoring._MIN_RR_OVERRIDE = float(_smr_arg.split("=")[1])
@@ -775,6 +783,8 @@ if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
 if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
+if _rms_score_arg:
+    _tag += f"_revminscore{reversal.MIN_SCORE_REVERSAL:g}"
 if _smr_arg:
     _tag += f"_minrr{scoring._MIN_RR_OVERRIDE:g}"
 if slot_per_strategy != config.SLOT_PER_STRATEGY:          # ติด tag เฉพาะรอบที่สวนค่าในระบบจริง
