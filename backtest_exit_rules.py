@@ -44,7 +44,8 @@ BASE_TAG = _b.split("=", 1)[1] if _b else ""
 LIVE_SIZING = {"RULE_1R_KEEP": em.RULE_1R_KEEP, "RULE_HOT_KEEP": em.RULE_HOT_KEEP,
                "RULE_HALFWAY_KEEP": em.RULE_HALFWAY_KEEP}
 LIVE_TREND = {"TREND_CHECK_KEEP_BY_CONSEC": dict(em.TREND_CHECK_KEEP_BY_CONSEC)}
-LIVE_SLOW = {"SLOW_TRADE_DAYS": em.SLOW_TRADE_DAYS, "SLOW_TRADE_R": em.SLOW_TRADE_R}
+LIVE_SLOW = {"SLOW_TRADE_DAYS": em.SLOW_TRADE_DAYS, "SLOW_TRADE_R": em.SLOW_TRADE_R,
+             "SLOW_TRADE_KEEP": em.SLOW_TRADE_KEEP}
 
 SETS = {
     # ปิดกฎปิดบางส่วนทีละตัวและพร้อมกัน (100 = ไม่ตัดเลย)
@@ -81,6 +82,50 @@ SETS = {
         "10 วัน":   {"SLOW_TRADE_DAYS": 10},
         "14 วัน":   {"SLOW_TRADE_DAYS": 14},
         "ปิดกฎ":    {"SLOW_TRADE_DAYS": 9999},
+    },
+    # ตัดเท่าไหร่ตอนกฎยิง (ของจริง 50) — keep=0 คือ **กฎคนละตัว** เพราะปิดไม้หมดแล้วช่องว่างจริง
+    # ⚠️ เครื่องจำลองไม่มีช่อง จึงเห็นแต่ "สิ่งที่เสียไปจากการปิดไม้" ไม่เห็น "สิ่งที่ช่องว่างได้มา"
+    #    ค่าของช่องวัดแยกไว้แล้วที่ backtest_blocked_value --min-age=72 (+3.79R / 2 ปี / 7 symbol
+    #    ตัด 2 ไม้ใหญ่สุดเหลือ −2.01R) เอามาบวกเองตอนสรุป
+    "slowkeep": {
+        "control":  LIVE_SLOW,
+        "ปิด 100%": {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0},
+    },
+    # ปิด 100% แต่เลื่อนวันออกไป — รวมสองแกนที่เคยวัดแยกกัน (วัน x ขนาดที่ตัด)
+    # เหตุผล: ปิดเต็มไม้ที่ 3 วันแพ้เพราะไปตัดไม้ปกติ (71% ของไม้ถือเกิน 3 วัน) ถ้าเลื่อนให้พ้น
+    # จังหวะธรรมชาติของระบบ (มัธยฐาน 5.2 วัน เฉลี่ย 7.6) มันจะกลายเป็น "ตัดไม้ที่ตายจริง" ไหม
+    # ทำให้กฎ "แม่นขึ้น" แทนที่จะเอาออก — แกนที่สามที่ไม่เคยแตะ: ยิงใส่ไม้แบบไหน
+    # ที่มา: ไม้ที่กฎยิงใส่ AvgR +0.118 เทียบไม้ที่ไม่โดน +0.201 = จับถูกทางแต่จาง เพราะเกณฑ์
+    # "ต่ำกว่า 0.5R" เหมารวมไม้ที่ติดลบจริง (ควรตัด) กับไม้ที่ได้ +0.3R แล้วค่อย ๆ ไป (ไม่ควรตัด)
+    "slowaim": {
+        "control":       LIVE_SLOW,
+        "R<0":           {**LIVE_SLOW, "SLOW_TRADE_R": 0.0},
+        "เหลือ75%":      {**LIVE_SLOW, "SLOW_TRADE_KEEP": 75},
+        "R<0+เหลือ75%":  {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 75},
+    },
+    # ช่องสุดท้ายของตาราง: ตัดหนักขึ้นแต่เฉพาะไม้ที่ติดลบจริง — ต่างจาก "ปิด 100%" ที่ R<0.5
+    # (ได้ −6.49R) ตรงที่ไม่ไปฆ่าไม้ที่กำไรอยู่แต่ไปช้า  และควร **ลด** ไม้ขาดทุนเต็ม 1R ไม่ใช่เพิ่ม
+    "slowaim2": {
+        "control":        LIVE_SLOW,
+        "R<0+ปิด100%":    {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 0},
+        "R<0+เหลือ25%":   {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 25},
+    },
+    # กวาดแกน "วัน" ใหม่ บนกฎที่เล็งแม่นแล้ว (ตัดเฉพาะไม้ติดลบ ตัดทั้งไม้)
+    # ⚠️ การกวาดวันรอบก่อน ๆ ทำบนกฎที่เล็งมั่ว (ตัดทั้งไม้ที่ติดลบและไม้ที่กำไรช้า) ผลจึงบอกได้
+    # แค่ "ยิงน้อยลงดีกว่า" ซึ่งจริงเสมอสำหรับกฎที่เล็งมั่ว ไม่ว่าเส้นวันจะอยู่ตรงไหน
+    # รอบนี้ถามคำถามที่มีคำตอบจริง: ไม้ที่ติดลบอยู่ ควรให้เวลากี่วันก่อนตัดทิ้ง
+    "slowaim3": {
+        "control":   LIVE_SLOW,
+        "R<0@3วัน":  {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 3},
+        "R<0@5วัน":  {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 5},
+        "R<0@7วัน":  {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 7},
+    },
+    "slowkeep2": {
+        "control":     LIVE_SLOW,
+        "100%@5วัน":   {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 5},
+        "100%@7วัน":   {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 7},
+        "100%@10วัน":  {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 10},
+        "100%@14วัน":  {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 14},
     },
 }
 if SET not in SETS:

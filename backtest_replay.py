@@ -308,6 +308,16 @@ if climax_in_profit:
 _hwk_arg = next((a for a in sys.argv if a.startswith("--rule-halfway-keep=")), None)
 if _hwk_arg:
     em.RULE_HALFWAY_KEEP = float(_hwk_arg.split("=")[1])
+# --slow-r / --slow-days / --slow-keep : กฎ slow trade (ถือครบ N วันแล้วยังไม่ถึง R -> เหลือ keep%)
+# analyze_position อ่านทั้งสามค่าจากโมดูลตอนถูกเรียกทุกครั้ง การ set ตรงนี้จึงมีผลทันที
+#   --slow-r=0     = ตัดเฉพาะไม้ที่ **ติดลบ** ที่วันที่ N (เลิกยุ่งกับไม้ที่กำไรอยู่แต่ไปช้า)
+#   --slow-keep=0  = ปิดไม้ 100% (คืนช่องถือไม้จริง ต่างจาก 50 ที่ช่องยังไม่ว่าง)
+for _flag, _attr, _cast in (("--slow-r=",     "SLOW_TRADE_R",    float),
+                            ("--slow-days=",  "SLOW_TRADE_DAYS", float),
+                            ("--slow-keep=",  "SLOW_TRADE_KEEP", float)):
+    _a = next((a for a in sys.argv if a.startswith(_flag)), None)
+    if _a:
+        setattr(em, _attr, _cast(_a.split("=", 1)[1]))
 # ปิดกฎ trend invalidation: คง code path เดิมไว้ทุกบรรทัด แค่ให้ทุกระดับความต่อเนื่องคืน 100%
 # ปิดกฎ structure break: patch ที่ตัวฟังก์ชันเลย — analyze_position เรียกผ่านชื่อใน module
 # globals ทุกครั้ง การแทนที่ตรงนี้จึงมีผลทันทีโดยไม่ต้องแก้ exit_monitor.py
@@ -845,6 +855,11 @@ if _hotk_arg:
     _tag += f"_hotkeep{em.RULE_HOT_KEEP:g}"
 if _hwk_arg:
     _tag += f"_hwkeep{em.RULE_HALFWAY_KEEP:g}"
+for _flag, _attr, _short in (("--slow-r=",    "SLOW_TRADE_R",    "slowr"),
+                             ("--slow-days=", "SLOW_TRADE_DAYS", "slowd"),
+                             ("--slow-keep=", "SLOW_TRADE_KEEP", "slowkeep")):
+    if any(a.startswith(_flag) for a in sys.argv):
+        _tag += f"_{_short}{getattr(em, _attr):g}"
 if no_trend_inval:
     _tag += "_notrendinval"
 if "--structure-break" in sys.argv and not no_struct_break:
