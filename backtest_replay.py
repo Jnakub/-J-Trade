@@ -107,6 +107,9 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
      --div-no-volume  หา swing สำหรับ divergence โดยไม่กรอง volume/wick
                  สองตัวนี้คลายด่าน Divergence ซึ่งเป็นด่านที่ตัดโอกาส Reversal ทิ้งมากที่สุด
                  (มีผลกับ regime ด้วย: REVERSAL-WATCH จะกลายเป็น REVERSAL-READY มากขึ้น)
+     --max-hold=N  ทับ exit_monitor.MAX_HOLD_DAYS (ปกติ 30) — เพดานเวลาถือไม้ 0 = ปิดเพดาน
+                 เพดานนี้เคยวัดตัวเองไม่ได้: backtest ตั้งเลขไว้เองตั้งแต่ก่อนมันเข้าระบบจริง
+                 ทุกรอบที่เคยรันจึงสมมติว่ามีเพดานอยู่แล้ว (ไฟล์ผลติด tag _nomaxhold / _maxholdN)
 """
 import re
 import sys
@@ -137,6 +140,18 @@ REGIME_REVERSAL = ("REVERSAL-READY",)
 # เพดานถือไม้ — 2026-09-14: อ่านจาก exit_monitor แทนการตั้งเลขเอง เพราะเพดานนี้เข้าระบบจริงแล้ว
 # (เดิมมีแต่ใน backtest ตั้งไว้กันไม้ค้างกินเวลารัน = backtest กับระบบจริงทำคนละอย่าง)
 # ตั้งค่าที่ exit_monitor.MAX_HOLD_DAYS ที่เดียว ที่นี่แค่ตามมัน
+#
+# --max-hold=N : ทับเพดานเฉพาะรอบนี้ (0 = ปิดเพดาน ปล่อยไม้เดินจนกว่าจะชน SL/TP/กฎอื่น)
+# มีไว้เพราะเพดานนี้ **วัดตัวเองไม่ได้มาตลอด** — backtest ตั้งเลขนี้ไว้เองตั้งแต่ก่อนมันเข้าระบบ
+# จริง ทุกรอบที่รันจึงสมมติว่ามีเพดานอยู่แล้ว ไม่มีรอบไหนเทียบกับ "ไม่มีเพดาน" ได้เลย หลักฐาน
+# เดียวที่เคยมีมาจาก backtest_trade_sim ซึ่ง **มองไม่เห็นช่องถือไม้** = มองไม่เห็นต้นทุนหลักของ
+# การไม่มีเพดาน (ไม้ที่ไม่ถูกปิดครองช่องต่อ มัธยฐาน 37 วัน) ต้องผ่านตรงนี้เท่านั้นถึงจะวัดครบ
+# ต้อง set ทั้งสองที่: em.MAX_HOLD_DAYS คุมข้อ 0 ของ checklist (analyze_position อ่านตอนถูกเรียก)
+# ส่วนตัวล่างคุมการปิดไม้ของ step_position เอง
+_mh_arg = next((a for a in sys.argv if a.startswith("--max-hold=")), None)
+if _mh_arg:
+    # 0 = ปิดเพดาน — ใช้เลขใหญ่แทน inf เพราะ timedelta(days=inf) โยน OverflowError
+    em.MAX_HOLD_DAYS = float(_mh_arg.split("=", 1)[1]) or 1e6
 MAX_HOLD_DAYS   = em.MAX_HOLD_DAYS
 
 
@@ -867,6 +882,8 @@ if "--structure-break" in sys.argv and not no_struct_break:
     _tag += "_structbreak"
 if _runup_arg:
     _tag += f"_runup{max_runup:g}"
+if _mh_arg:
+    _tag += "_nomaxhold" if MAX_HOLD_DAYS >= 1e6 else f"_maxhold{MAX_HOLD_DAYS:g}"
 if log_cuts and cut_log:
     pd.DataFrame(cut_log).to_csv(f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
