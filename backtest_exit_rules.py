@@ -44,6 +44,7 @@ BASE_TAG = _b.split("=", 1)[1] if _b else ""
 LIVE_SIZING = {"RULE_1R_KEEP": em.RULE_1R_KEEP, "RULE_HOT_KEEP": em.RULE_HOT_KEEP,
                "RULE_HALFWAY_KEEP": em.RULE_HALFWAY_KEEP}
 LIVE_TREND = {"TREND_CHECK_KEEP_BY_CONSEC": dict(em.TREND_CHECK_KEEP_BY_CONSEC)}
+LIVE_SLOW = {"SLOW_TRADE_DAYS": em.SLOW_TRADE_DAYS, "SLOW_TRADE_R": em.SLOW_TRADE_R}
 
 SETS = {
     # ปิดกฎปิดบางส่วนทีละตัวและพร้อมกัน (100 = ไม่ตัดเลย)
@@ -60,6 +61,26 @@ SETS = {
         "ปิดทั้งกฎ":      {"TREND_CHECK_KEEP_BY_CONSEC": {1: 100, 2: 100, 3: 100}},
         "ตัดขาระดับ100": {"TREND_CHECK_KEEP_BY_CONSEC": {1: 75, 2: 50, 3: 100}},
         "เหลือแต่ระดับ100": {"TREND_CHECK_KEEP_BY_CONSEC": {1: 100, 2: 100, 3: 0}},
+    },
+    # กฎ slow trade: ถือครบ SLOW_TRADE_DAYS วันแล้วยังไม่ถึง SLOW_TRADE_R -> base_keep = 50%
+    # ⚠️ ตัว 50% **hardcode อยู่ในโค้ด** (analyze_position: elif slow_trade: base_keep_pct = 50)
+    # ไม่มีค่าคงที่ให้ทับ จึงทดสอบได้แค่ "เมื่อไหร่กฎยิง" ไม่ใช่ "ยิงแล้วตัดเท่าไหร่"
+    # ปิดกฎ = ตั้ง SLOW_TRADE_DAYS สูงจนไม้ทุกตัวปิดไปก่อน (ไม่ต้องแตะ production)
+    "slow": {
+        "control": LIVE_SLOW,
+        "ปิดกฎ":   {"SLOW_TRADE_DAYS": 9999},
+        "5 วัน":   {"SLOW_TRADE_DAYS": 5},
+        "7 วัน":   {"SLOW_TRADE_DAYS": 7},
+        "R0.2":    {**LIVE_SLOW, "SLOW_TRADE_R": 0.2},
+    },
+    # ที่มา: ไม้ Scoring ถือจริงมัธยฐาน 5.2 วัน เฉลี่ย 7.6 วัน และ 71% ถือเกิน 3 วัน — เกณฑ์ 3 วัน
+    # จึงยิงใส่ไม้ปกติ 60% ของทั้งหมด ไม่ใช่ "ไม้ที่ตายแล้ว" ตามเจตนาเดิม  ชุดนี้ถามว่าถ้าเลื่อน
+    # ให้พ้นจังหวะธรรมชาติของระบบไปเลย มันกลับมาเป็นตาข่ายที่มีประโยชน์ไหม
+    "slow2": {
+        "control":  LIVE_SLOW,
+        "10 วัน":   {"SLOW_TRADE_DAYS": 10},
+        "14 วัน":   {"SLOW_TRADE_DAYS": 14},
+        "ปิดกฎ":    {"SLOW_TRADE_DAYS": 9999},
     },
 }
 if SET not in SETS:
