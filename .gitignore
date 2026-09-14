@@ -20,6 +20,14 @@ __pycache__/
 criteria_samples_*.csv
 replay_trades_*.csv
 replay_cuts_*.csv
+# backtest_replay.py --log-blocked
+replay_blocked_*.csv
+# backtest_exit_rules.py
+exit_rules_*.csv
+# backtest_entry_lead.py
+entry_lead_*.csv
+# backtest_blocked_value.py
+blocked_value_*.csv
 
 # ไฟล์ที่ Wine สร้างทิ้งไว้ตอนรัน python ผ่าน run_wine.sh
 msedgewebview2.dxvk-cache
