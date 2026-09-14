@@ -14,10 +14,20 @@
 ⚠️ สิ่งที่ตัวเลขนี้ไม่ใช่:
   - ไม่ใช่ "กำไรที่จะได้ถ้าเปิดช่องที่สอง" — การถือ 2 ไม้พร้อมกันต่อ symbol = เสี่ยง 2 เท่า
     ต้องคิด sizing ใหม่ ไม่ใช่บวก R ตรง ๆ (ดู comment ที่ config.SLOT_PER_STRATEGY)
-  - ไม่ใช่ต้นทุนของกฎ exit ตัวใดตัวหนึ่ง — เป็นค่าของ "ช่อง" โดยรวม ถ้าจะโยงกับกฎไหน ต้องดูว่า
-    กฎนั้นทำให้ไม้ออกเร็วขึ้นกี่ชั่วโมง แล้วมีไม้เงากี่ตัวตกอยู่ในช่วงเวลานั้น
+  - 🔴 **ไม่ใช่คำตอบของ "ถือไม้นานขึ้นทำให้เสียโอกาสเท่าไหร่"** — โหมด default ต่อคิวจากสัญญาณ
+    แรกสุด ซึ่งมักเกิดในชั่วโมงแรกหลังไม้จริงเปิด ไม้เงาตัวนั้นก็ถือยาวต่อไปแล้วกลืนสัญญาณ
+    ช่วงหลังไปด้วย ตัวเลข "ไม้เงาที่เกิดหลัง 3 วัน" จากโหมดนี้จึงต่ำกว่าความจริงมาก
+    (วัดจริง 2026-09-14: ต่อคิวได้ 7 ไม้ แต่ข้อมูลดิบมี 136 ช่วงสัญญาณ)
+    ถามคำถามนั้นด้วย --min-age=72 ซึ่งเริ่มต่อคิวจากสัญญาณที่ช่องถูกครองมาแล้วเกิน N ชม.
+    = จำลองว่า "ถ้าไม้แรกออกตอนชั่วโมงที่ N พอดี ช่องที่ว่างจะได้อะไร"
 
-ใช้: ./run_wine.sh backtest_blocked_value.py BTCUSDm
+ผลที่วัดไว้ (7 symbol 730 วัน, base หลังปิดกฎ 1R/halfway/trend):
+  default (ช่องที่สอง)  172 ไม้ +30.36R — แต่ 86% เปิดใน 4 ชม.แรก = เข้าซ้ำ move เดิม
+  --min-age=72          62 ไม้  +3.79R — บวก 3/7 symbol ตัด 2 ไม้ใหญ่สุดออกเหลือ −2.01R
+                        (XAU +5.58 · ETH +5.38 · EUR +1.20 · USDJPY −0.37 · US500 −2.05 ·
+                         GBP −2.30 · BTC −3.65)
+
+ใช้: ./run_wine.sh backtest_blocked_value.py BTCUSDm [--min-age=72]
 """
 import sys
 
@@ -35,9 +45,17 @@ _d = next((a for a in sys.argv if a.startswith("--days=")), None)
 DAYS = int(_d.split("=", 1)[1]) if _d else 730
 _t = next((a for a in sys.argv if a.startswith("--tag=")), None)
 TAG = _t.split("=", 1)[1] if _t else ""
+# --min-age=N : นับเฉพาะสัญญาณที่ช่องถูกครองมาแล้วเกิน N ชม. (ดู 🔴 ใน docstring)
+_a = next((a for a in sys.argv if a.startswith("--min-age=")), None)
+MIN_AGE = float(_a.split("=", 1)[1]) if _a else 0.0
 
 b = pd.read_csv(f"replay_blocked_{symbol}{TAG}.csv", parse_dates=["time", "ไม้ที่ครองช่องอยู่"])
 b = b.sort_values("time").reset_index(drop=True)
+if MIN_AGE:
+    b["_age"] = (b.time - b["ไม้ที่ครองช่องอยู่"]).dt.total_seconds() / 3600
+    _before = len(b)
+    b = b[b._age > MIN_AGE].reset_index(drop=True)
+    print(f"{symbol}: --min-age={MIN_AGE:g} ชม. -> เหลือ {len(b)} รอบ จาก {_before}", flush=True)
 print(f"{symbol}: สัญญาณเงา {len(b)} รอบ "
       f"({b.strategy.value_counts().to_dict()})", flush=True)
 
@@ -61,9 +79,9 @@ for _, s in b.iterrows():
 
 mt5.shutdown()
 d = pd.DataFrame(rows)
-d.to_csv(f"blocked_value_{symbol}.csv", index=False)
+d.to_csv(f"blocked_value_{symbol}{'_age'+str(int(MIN_AGE)) if MIN_AGE else ''}.csv", index=False)
 
-print(f"\n=== {symbol} — ค่าของช่องที่สอง ===")
+print(f"\n=== {symbol} — ค่าของช่อง" + (f" (เริ่มนับหลังช่องถูกครอง {MIN_AGE:g} ชม.)" if MIN_AGE else "ที่สอง") + " ===")
 if not len(d):
     print("  ไม่มีไม้เงาที่เดินได้เลย")
     sys.exit()
