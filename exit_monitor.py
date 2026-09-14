@@ -80,6 +80,21 @@ STRUCTURE_TOLERANCE   = 0.22   # 2026-07-24: เปลี่ยนจาก 0.25
 #    ไม้ที่ระบบเห็นแต่เข้าไม่ได้ในช่วงนั้นไม่ได้ดีกว่าค่าเฉลี่ยเลย
 # ⚠️ อย่าอ่านเลยไปกว่านี้: นี่คือค่าของช่วง "หลัง 3 วัน" เท่านั้น ไม่ได้แปลว่าการออกเร็วขึ้นใน
 #    ช่วงอื่นไม่มีค่า และไม่ได้พูดถึงกฎที่ปิดไม้ด้วยเหตุผลอื่น (structure break / invalidation)
+# เพดานเวลาถือไม้ — ครบแล้วปิด 100% ไม่สนว่า R เท่าไหร่
+# 2026-09-14: **เพิ่งเพิ่มเข้าระบบจริง** ก่อนหน้านี้มีแต่ใน backtest (backtest_replay.MAX_HOLD_DAYS
+# = 30 ใส่ไว้กันไม้ค้างกินเวลารัน) ระบบจริงไม่มีเพดานเวลาเลย = **ระบบจริงกับ backtest ทำคนละอย่าง
+# มาตลอด** ทุกตัวเลขที่ใช้ตัดสินใจคิดบนสมมติฐานว่ามีเพดานนี้ การใส่จึงเป็นการทำให้ตรงกัน
+# ไม่ใช่การเพิ่มกฎใหม่ — และ backtest วัดผลของมันไม่ได้ เพราะ backtest สมมติว่ามีอยู่แล้ว
+# หลักฐานที่มี: จำลองไม้ 6 ไม้ที่เคยชนเพดานนี้ใน 730 วัน 7 symbol โดยปล่อยให้เดินต่อถึง 180 วัน
+#   มีเพดาน 30 วัน  +2.27R   |   ปล่อยยาว  +0.41R   (แย่ลง 5 จาก 6 ไม้)
+#   ถือจริงถ้าไม่มีเพดาน: มัธยฐาน 37 วัน ยาวสุด 55 วัน
+#   ไม้พวกนี้ MFE สูงมาก (2.04 / 2.11 / 1.57 / 3.38R) แต่จบที่ BE/SL = ถูกทางแล้วคายกำไรคืนหมด
+# ⚠️ 6 ไม้คือ sample ที่เล็กมาก ตัวเลข +1.86R ที่ต่างกันจึงไม่ใช่เหตุผลหลักที่ใส่กฎนี้
+#    เหตุผลหลักคือความสอดคล้องระหว่างระบบจริงกับเครื่องมือที่ใช้ตัดสินใจ
+# 🔴 ถ้าแก้ค่านี้ ต้องแก้ backtest_replay.MAX_HOLD_DAYS และ backtest_trade_sim.MAX_HOLD_DAYS
+#    ให้ตรงกันด้วย ไม่งั้นจะกลับไปวัดคนละระบบกับที่รันจริงอีก
+MAX_HOLD_DAYS         = 30
+
 SLOW_TRADE_DAYS       = 3
 # 2026-09-14: 0.5 -> 0.0 = **ตัดเฉพาะไม้ที่ติดลบจริงที่วันที่ 3** เลิกยิงใส่ไม้ที่กำไรอยู่แต่ไปช้า
 # เหตุผลหลักไม่ใช่ตัวเลข แต่คือกฎเดิมไม่ตรงกับเจตนาตัวเอง: มันประกาศว่า "ยังไม่วิ่งใน 3 วัน =
@@ -728,8 +743,9 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     post_news_no_profit = has_recent_news and pnl_pct <= 0
     ge1r             = r_multiple is not None and r_multiple >= 1.0
     slow_trade       = time_held_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
+    hold_cap         = time_held_days >= MAX_HOLD_DAYS
 
-    invalidated = trend_broken_full or structure_broken or post_news_no_profit
+    invalidated = trend_broken_full or structure_broken or post_news_no_profit or hold_cap
     if trend_broken_full or structure_broken:
         final_decision = ("ออก 100% ทันที — Trend/Structure พัง", RED)
     elif post_news_no_profit:
@@ -751,6 +767,10 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                     f"ออก {100 - trend_keep_pct}% = เตือนภัย (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)" if trend_broken_partial else ""),
          "severity": "red" if trend_broken_full else "yellow",
          "note": trend_info["reason"]},
+        {"no": 0, "q": f"ถือมาครบ {MAX_HOLD_DAYS:g} วันแล้ว?", "answer": hold_cap,
+         "action": f"ออก 100% = ชนเพดานเวลา ({time_held_days:.0f} วัน)" if hold_cap else "",
+         "severity": "red",
+         "note": "ปิดโดยไม่สนว่า R เท่าไหร่ — ดู comment ที่ MAX_HOLD_DAYS"},
         {"no": 2, "q": "Structure ที่ใช้เข้าพังแล้ว?",                 "answer": structure_broken,
          "action": "ออก 100% = Structure broken" if structure_broken else "",
          "severity": "red",

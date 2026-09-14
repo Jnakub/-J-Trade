@@ -134,9 +134,10 @@ REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH", "TREND แ�
 REGIME_TREND    = ("TREND",)   # 2026-08-31: "TREND แรงจัด" ย้ายไป NO_TRADE — ดูเหตุผลใน scheduler.py
 REGIME_REVERSAL = ("REVERSAL-READY",)
 
-# เพดานถือไม้ของ backtest เอง — ระบบจริงไม่มีเพดานเวลา (กฎ slow-trade ตัดแค่ 50%) ตั้งไว้กัน
-# ไม้ค้างกินเวลารันเท่านั้น ถ้ามีไม้ชนเพดานบ่อยแปลว่าต้องขยาย
-MAX_HOLD_DAYS   = 30
+# เพดานถือไม้ — 2026-09-14: อ่านจาก exit_monitor แทนการตั้งเลขเอง เพราะเพดานนี้เข้าระบบจริงแล้ว
+# (เดิมมีแต่ใน backtest ตั้งไว้กันไม้ค้างกินเวลารัน = backtest กับระบบจริงทำคนละอย่าง)
+# ตั้งค่าที่ exit_monitor.MAX_HOLD_DAYS ที่เดียว ที่นี่แค่ตามมัน
+MAX_HOLD_DAYS   = em.MAX_HOLD_DAYS
 
 
 class SimPos:

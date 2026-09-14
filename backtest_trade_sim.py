@@ -25,7 +25,8 @@ from config import MT5_TIMEFRAMES
 from scoring import get_ohlcv
 import exit_monitor as em
 
-MAX_HOLD_DAYS = 30        # ตรงกับ backtest_replay — กันไม้ค้างกินเวลารัน
+# เพดานถือไม้ — อ่านจาก exit_monitor (เข้าระบบจริงแล้วตั้งแต่ 2026-09-14) ตั้งค่าที่นั่นที่เดียว
+MAX_HOLD_DAYS = em.MAX_HOLD_DAYS
 
 
 class SimPos:
