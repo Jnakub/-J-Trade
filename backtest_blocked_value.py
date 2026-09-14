@@ -1,0 +1,79 @@
+"""backtest_blocked_value.py — ค่าเสียโอกาสของการถือช่องไว้ (ไม้ที่ระบบไม่ได้เปิดเพราะช่องไม่ว่าง)
+
+รับไฟล์ replay_blocked_<symbol>.csv ที่ backtest_replay.py --log-blocked สร้างไว้ (ทุกรอบสแกน
+ที่ผ่านด่านครบทุกด่านแล้วแต่ช่องถือไม้ไม่ว่าง) แล้วเดินไม้เงาพวกนั้นด้วยเครื่องจำลองตัวเดียว
+กับที่ใช้ทั้งโปรเจกต์ — ได้คำตอบตรง ๆ ว่า **"ถ้ามีช่องที่สองจะได้กี่ไม้ กี่ R"**
+
+ทำไมต้องมี: ทุกกฎที่ "ออกเร็วขึ้น" (slow trade, trend invalidation, กฎปิดบางส่วน) มีเหตุผล
+ข้อเดียวกันคือคืนช่องให้ไม้ถัดไป แต่ไม่มีเครื่องมือไหนในโปรเจกต์เคยวัดว่าช่องนั้นมีค่าเท่าไหร่
+— replay รายตัวข้ามรอบที่ช่องไม่ว่าง *ก่อน* คิดสัญญาณ จึงไม่เคยรู้ว่ารอบพวกนั้นมีของหรือเปล่า
+
+การต่อคิว: ไม้เงาที่เกิดระหว่างที่ไม้เงาตัวก่อนยังถืออยู่ **ถูกข้าม** เหมือนช่องจริง ไม่งั้นจะได้
+ไม้ทับซ้อนกันเป็นสิบและตัวเลขเฟ้อ
+
+⚠️ สิ่งที่ตัวเลขนี้ไม่ใช่:
+  - ไม่ใช่ "กำไรที่จะได้ถ้าเปิดช่องที่สอง" — การถือ 2 ไม้พร้อมกันต่อ symbol = เสี่ยง 2 เท่า
+    ต้องคิด sizing ใหม่ ไม่ใช่บวก R ตรง ๆ (ดู comment ที่ config.SLOT_PER_STRATEGY)
+  - ไม่ใช่ต้นทุนของกฎ exit ตัวใดตัวหนึ่ง — เป็นค่าของ "ช่อง" โดยรวม ถ้าจะโยงกับกฎไหน ต้องดูว่า
+    กฎนั้นทำให้ไม้ออกเร็วขึ้นกี่ชั่วโมง แล้วมีไม้เงากี่ตัวตกอยู่ในช่วงเวลานั้น
+
+ใช้: ./run_wine.sh backtest_blocked_value.py BTCUSDm
+"""
+import sys
+
+import pandas as pd
+import MetaTrader5 as mt5
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from mt5_connect import connect
+from backtest_trade_sim import TradeSim
+
+symbol = sys.argv[1] if len(sys.argv) > 1 else "BTCUSDm"
+_d = next((a for a in sys.argv if a.startswith("--days=")), None)
+DAYS = int(_d.split("=", 1)[1]) if _d else 730
+_t = next((a for a in sys.argv if a.startswith("--tag=")), None)
+TAG = _t.split("=", 1)[1] if _t else ""
+
+b = pd.read_csv(f"replay_blocked_{symbol}{TAG}.csv", parse_dates=["time", "ไม้ที่ครองช่องอยู่"])
+b = b.sort_values("time").reset_index(drop=True)
+print(f"{symbol}: สัญญาณเงา {len(b)} รอบ "
+      f"({b.strategy.value_counts().to_dict()})", flush=True)
+
+connect()
+sim = TradeSim(symbol, days=DAYS)
+
+rows, busy_until = [], None
+for _, s in b.iterrows():
+    if busy_until is not None and s.time < busy_until:
+        continue                                   # ช่องที่สองยังไม่ว่าง — ข้ามเหมือนของจริง
+    r = sim.run(s.direction, s.entry, s.sl0, s.tp0, s.pinned_swing,
+                s.pinned_atr_entry, s.time, s.strategy)
+    if r is None:
+        continue
+    busy_until = r["exit_time"]
+    rows.append({"time": s.time, "direction": s.direction, "strategy": s.strategy,
+                 "entry": s.entry, "R": r["R"], "how": r["how"], "MFE": r["MFE"],
+                 "exit_time": r["exit_time"],
+                 "ชม.ที่ช่องถูกครองมาแล้ว": round(
+                     (s.time - s["ไม้ที่ครองช่องอยู่"]).total_seconds() / 3600, 1)})
+
+mt5.shutdown()
+d = pd.DataFrame(rows)
+d.to_csv(f"blocked_value_{symbol}.csv", index=False)
+
+print(f"\n=== {symbol} — ค่าของช่องที่สอง ===")
+if not len(d):
+    print("  ไม่มีไม้เงาที่เดินได้เลย")
+    sys.exit()
+print(f"  ไม้เงาที่ได้จริงหลังต่อคิว {len(d)} ไม้ (จาก {len(b)} รอบที่เข้าเงื่อนไข)")
+print(f"  Total R {d.R.sum():+.2f}   WR {(d.R>0).mean()*100:.1f}%   AvgR {d.R.mean():+.3f}")
+for st, g in d.groupby("strategy"):
+    print(f"    {st:<9} {len(g)} ไม้  {g.R.sum():+.2f}R  WR {(g.R>0).mean()*100:.0f}%")
+print(f"  วิธีออก: {d.how.value_counts().to_dict()}")
+print(f"  ช่องถูกครองมาแล้วตอนสัญญาณเกิด: มัธยฐาน {d['ชม.ที่ช่องถูกครองมาแล้ว'].median():.0f} ชม. "
+      f"(ควอไทล์ {d['ชม.ที่ช่องถูกครองมาแล้ว'].quantile(.25):.0f}-{d['ชม.ที่ช่องถูกครองมาแล้ว'].quantile(.75):.0f})")
+_e = d[d["ชม.ที่ช่องถูกครองมาแล้ว"] <= 72]
+print(f"  เฉพาะที่ช่องถูกครองมา <= 72 ชม. (ช่วงที่กฎ slow trade เอื้อมถึง): "
+      f"{len(_e)} ไม้ {_e.R.sum():+.2f}R")

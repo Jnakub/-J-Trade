@@ -218,6 +218,12 @@ max_sl_atr = float(_msa_arg.split("=")[1]) if _msa_arg else None
 # ไม่เปลี่ยนพฤติกรรมอะไรเลย แค่เขียน log เพิ่ม
 log_cuts = "--log-cuts" in sys.argv
 cut_log = []
+# --log-blocked : รอบที่ข้ามเพราะ "ช่องไม่ว่าง" ให้เดินด่านที่เหลือต่อจนสุด แล้วบันทึกไว้ว่า
+# ถ้าช่องว่างรอบนั้นจะได้ไม้อะไร (ไม่เปิดไม้จริง ผลของ replay จึงไม่เปลี่ยนแม้แต่ไม้เดียว)
+# ไว้ตอบคำถามที่ไม่มีเครื่องมือไหนตอบได้: **ค่าเสียโอกาสของการถือช่องไว้นาน** ซึ่งเป็น
+# เหตุผลเดียวที่กฎอย่าง slow trade มีอยู่ — เอาไฟล์ผลไปเดินต่อด้วย backtest_blocked_value.py
+log_blocked = "--log-blocked" in sys.argv
+blocked_log = []
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -555,9 +561,18 @@ for n, row in enumerate(clock.to_dict("records")):
 
     # กลยุทธ์ที่ regime รอบนี้จะเปิด (ไม่มีทางเกิดพร้อมกัน — regime เป็นตัวเลือกให้ตัวเดียว)
     _want = "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None)
+    _shadow = False
     if _want is not None and slot_of(_want) in _occupied:
         note("ถือไม้อยู่แล้ว (ช่องไม่ว่าง)"); fate("ถือไม้อื่นอยู่")
-        continue
+        # --log-blocked: เดินด่านที่เหลือต่อเพื่อดูว่า "ถ้าช่องว่าง รอบนี้จะได้ไม้ไหม" แล้ว
+        # บันทึกไว้เป็นสัญญาณเงา (ไม่เปิดไม้จริง ไม่แตะ positions/trades/daily_r เลย)
+        if not log_blocked:
+            continue
+        _shadow = True
+        # ไม้ที่ครองช่องอาจเพิ่งถูก step_position ปิดไปในชั่วโมงนี้เอง (ระบบจริงก็ไม่เปิดไม้ใหม่
+        # ในรอบเดียวกันอยู่แล้ว) — เก็บเวลาไว้ตอนนี้ ไม่ใช่ตอนท้ายลูปที่ dict อาจว่างแล้ว
+        _blk = positions.get(slot_of(_want))
+        _blocker_time = _blk["time"] if _blk else None
 
     if daily_r.get(now.date(), 0.0) <= -max_daily_loss_r:  # ด่าน 3
         note("daily loss guard"); fate("daily loss guard")
@@ -702,6 +717,19 @@ for n, row in enumerate(clock.to_dict("records")):
     # รายเกณฑ์ ซึ่งได้ค่าจาก scoring.py "ณ วันที่วิเคราะห์" ไม่ใช่ตัวที่กรองไม้นี้จริงตอน replay
     # (ถ้าสกอร์การ์ดถูกแก้ระหว่างนั้น ตัวเลขจะไม่ตรงกับไม้ที่ได้มาโดยที่ไม่มีอะไรฟ้อง)
     # ชื่อคอลัมน์ = ชื่อเกณฑ์ตรงๆ ฝั่ง Scoring/Reversal คนละชุด อีกฝั่งจึงเป็นค่าว่าง
+    _pin = (sl + scoring.EXEC_SL_ATR_MULT * atr_entry if (atr_entry and direction == "Long")
+            else (sl - scoring.EXEC_SL_ATR_MULT * atr_entry if atr_entry else sl))
+
+    # --log-blocked: รอบนี้ช่องไม่ว่าง — บันทึกเป็นสัญญาณเงาแล้วไปต่อ ไม่เปิดไม้จริง
+    if _shadow:
+        blocked_log.append({"symbol": symbol, "time": now, "direction": direction,
+                            "strategy": strategy, "regime": regime, "entry": entry,
+                            "sl0": sl, "tp0": tp, "pinned_swing": _pin,
+                            "pinned_atr_entry": atr_entry,
+                            "ช่องที่ไม่ว่าง": slot_of(strategy),
+                            "ไม้ที่ครองช่องอยู่": _blocker_time})
+        continue
+
     positions[slot_of(strategy)] = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
            # tp0 = TP ที่ส่งจริงตอนเข้า (ผ่านเพดานแล้ว)  tp_fib = ที่ Fibonacci ให้ก่อนเพดาน
            # สองค่านี้ต่างกันเมื่อไม้นั้นโดนเพดานดึงเข้า — ดู comment ที่จุดคำนวณ tp_fib
@@ -709,8 +737,7 @@ for n, row in enumerate(clock.to_dict("records")):
            **{name: bool(ok) for name, ok, _ in criteria},
            "booked": 0.0, "rem": 1.0, "cuts": 0,
            # pinned_swing = SL โครงสร้าง (ถอย exec_sl กลับด้วยตัวคูณเดียวกับที่ขยับออกไป)
-           "pinned_swing": sl + scoring.EXEC_SL_ATR_MULT * atr_entry if (atr_entry and direction == "Long")
-                           else (sl - scoring.EXEC_SL_ATR_MULT * atr_entry if atr_entry else sl),
+           "pinned_swing": _pin,
            "pinned_atr_entry": atr_entry}
 
     if n % 2000 == 0:
@@ -827,5 +854,9 @@ if _runup_arg:
 if log_cuts and cut_log:
     pd.DataFrame(cut_log).to_csv(f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
+if log_blocked:
+    pd.DataFrame(blocked_log).to_csv(f"replay_blocked_{symbol}{_tag}.csv", index=False)
+    print(f"  เขียนสัญญาณเงา {len(blocked_log)} รอบลง replay_blocked_{symbol}{_tag}.csv "
+          f"(รอบที่ผ่านทุกด่านแต่ช่องไม่ว่าง)")
 t.to_csv(f"replay_trades_{symbol}{_tag}.csv", index=False)
 print(f"  เขียนไม้ทั้งหมดลง replay_trades_{symbol}{_tag}.csv")
