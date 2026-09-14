@@ -28,6 +28,8 @@ exit_rules_*.csv
 entry_lead_*.csv
 # backtest_blocked_value.py
 blocked_value_*.csv
+# backtest_mfe.py
+mfe_trades*.csv
 
 # ไฟล์ที่ Wine สร้างทิ้งไว้ตอนรัน python ผ่าน run_wine.sh
 msedgewebview2.dxvk-cache
