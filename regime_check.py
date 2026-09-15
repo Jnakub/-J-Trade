@@ -655,7 +655,7 @@ def get_regime(symbol: str, as_of=None) -> dict:
 
     as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ — as_of=datetime = จำลอง regime ณ เวลานั้นในอดีต
     (ผ่าน bars.get_bars ที่ตัดแท่งอนาคตออกให้แล้ว) เพิ่ม 2026-08-27 เพราะ scheduler.py กรอง
-    ไม่ให้เปิดไม้เลยถ้า regime อยู่ใน REGIME_NO_TRADE (CHOPPY/เขตเทา/REVERSAL-WATCH) แต่
+    ไม่ให้เปิดไม้เลยถ้า regime อยู่ใน config.REGIME_NO_TRADE (ดูรายชื่อที่นั่น — อย่าคัดลอกมาเขียนซ้ำ) แต่
     backtest ที่ผ่านมาทั้งหมดไม่เคยใส่ตัวกรองนี้ — วัดคุณภาพสัญญาณบนชุดไม้ที่ระบบจริงไม่ได้
     เทรดด้วยซ้ำ ทำให้ตัวเลขที่ได้ไม่ใช่ของระบบจริง"""
     # 4H — ADX ไม่ต้องพึ่ง volume | ขอบแท่งเลื่อนตาม ADX_BAR_OFFSET_H ให้ตรง TradingView

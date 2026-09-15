@@ -34,8 +34,10 @@ from swing import calc_atr
 from trend_flip import compute_trend_regime
 from regime_check import get_regime
 
-# ต้องตรงกับ scheduler.REGIME_NO_TRADE — regime พวกนี้ scheduler จะ SKIP ไม่เปิด scorecard เลย
-REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH")
+# regime พวกนี้ scheduler จะ SKIP ไม่เปิด scorecard เลย — อ่านจาก config ที่เดียว
+# 2026-09-15: เดิมเป็นสำเนา literal ที่ **ค้างไว้ 3 ตัว** ตั้งแต่ "TREND แรงจัด" ถูกย้ายเข้า
+# NO_TRADE (2026-08-31) = ไฟล์นี้วัดเกณฑ์บนไม้ที่ระบบจริงไม่เทรดอยู่ 2 สัปดาห์
+from config import REGIME_NO_TRADE
 
 symbol = sys.argv[1] if len(sys.argv) > 1 else "BTCUSDm"
 days   = int(sys.argv[2]) if len(sys.argv) > 2 else 730

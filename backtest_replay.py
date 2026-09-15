@@ -137,9 +137,8 @@ from regime_check import get_regime
 import exit_monitor as em
 import reversal
 
-REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH", "TREND แรงจัด")   # ตรงกับ scheduler.py
-REGIME_TREND    = ("TREND",)   # 2026-08-31: "TREND แรงจัด" ย้ายไป NO_TRADE — ดูเหตุผลใน scheduler.py
-REGIME_REVERSAL = ("REVERSAL-READY",)
+# อ่านจาก config ที่เดียว (2026-09-15) — เดิมเป็นสำเนา literal พร้อม comment "ตรงกับ scheduler.py"
+from config import REGIME_NO_TRADE, REGIME_TREND, REGIME_REVERSAL
 
 # เพดานถือไม้ — 2026-09-14: อ่านจาก exit_monitor แทนการตั้งเลขเอง เพราะเพดานนี้เข้าระบบจริงแล้ว
 # (เดิมมีแต่ใน backtest ตั้งไว้กันไม้ค้างกินเวลารัน = backtest กับระบบจริงทำคนละอย่าง)

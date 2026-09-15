@@ -683,9 +683,12 @@ RSI_REBOUND_MIN_TOUCHES   = 1    # ต้องแตะ+เด้งอย่�
 #   1. scoring.TREND_FLIP_K        — รัน backtest_trend_flip_ksweep.py หา k (ไม่มี = bias None = SKIP ตลอด)
 #   2. swing.swing_vol_multiplier  — default 1.9x
 #   3. swing.swing_wick_ratio_min  — default 0.5
-#   4. regime_check.ADX_BAR_OFFSET_H — default 0 ⚠️ ต้องเทียบกับจอ TradingView เอง ไม่งั้น ADX
+#   4. bars.BAR_OFFSET_H           — default 0 ⚠️ ต้องเทียบกับจอ TradingView เอง ไม่งั้น ADX
 #      ที่ระบบเห็นจะไม่ตรงกับที่คุณดู และอาจตัดสิน regime คนละแบบ (ดูคำอธิบายเต็มในไฟล์นั้น)
+#      (regime_check.ADX_BAR_OFFSET_H เป็นชื่อเก่าที่ re-export ไว้เฉยๆ บ้านจริงอยู่ที่ bars.py)
 #   5. COOLDOWN_HOURS_BY_SYMBOL ด้านล่าง
+#   6. SPREAD_PCT_BY_SYMBOL ด้านบน — **ไม่มีค่า = backtest_replay หยุดทันทีพร้อมบอกค่าที่ตลาดให้**
+#      (ตั้งใจให้ดังแบบนั้น ดีกว่าเดาต้นทุนเงียบๆ) วัดด้วย mt5.symbol_info ตอนตลาดปกติ
 #
 # 2026-08-12: เพิ่ม US500m (S&P500 index, Exness suffix m) — ครบทั้ง 5 ช่องแล้ว: k=0.20,
 # vol=2.0x, wick=0.6, ADX offset=2, cooldown 48 ชม. (ดูรายละเอียด/ที่มาของแต่ละค่าในไฟล์นั้นๆ)
@@ -714,6 +717,18 @@ RSI_REBOUND_MIN_TOUCHES   = 1    # ต้องแตะ+เด้งอย่�
 # ETHUSDm **เก็บไว้** ทั้งที่ทำได้ -1.05R: ต้นทุน 0.008R/ไม้ = ปกติ ไม่มีเหตุผลเชิงกลไกรองรับ
 # การตัด (ตัดออกได้ +1.05R และ WR 49.7->52.1% แต่นั่นคือ curve fitting ล้วนๆ)
 SYMBOLS = ["BTCUSDm", "XAUUSDm", "ETHUSDm", "USDJPYm", "US500m", "EURUSDm", "GBPUSDm"]
+
+# ---------------------------------------------------------------------------
+# Regime: กลุ่มไหนเทรดได้ กลุ่มไหนไม่เทรด — **แหล่งเดียวของทั้งระบบ**
+# ---------------------------------------------------------------------------
+# 2026-09-15: ย้ายมารวมที่นี่ เดิมประกาศซ้ำเป็น literal ใน scheduler.py / backtest_replay.py /
+# backtest_criteria.py พร้อม comment ว่า "ต้องตรงกัน" — แล้วมัน**ไม่ตรงจริง**: ตอนย้าย
+# "TREND แรงจัด" เข้า NO_TRADE (2026-08-31) แก้ไปแค่ 2 ไฟล์ backtest_criteria.py ค้างที่ 3 ตัว
+# อยู่ 2 สัปดาห์ = มันวัดคุณภาพเกณฑ์บนไม้ที่ระบบจริงไม่เทรด โดยไม่มี error ใดๆ
+# เหตุผลและหลักฐานของการย้าย "TREND แรงจัด" อยู่ที่ scheduler.py (พร้อมข้อจำกัดของหลักฐาน)
+REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH", "TREND แรงจัด")
+REGIME_TREND    = ("TREND",)
+REGIME_REVERSAL = ("REVERSAL-READY",)
 
 # ---------------------------------------------------------------------------
 # ต้นทุน spread ที่ backtest ใช้ — % ของราคา (ขาเข้า+ออก ~1 ครั้ง)

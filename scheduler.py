@@ -55,10 +55,8 @@ print = tee_print(log)   # เขียนทุกอย่างที่ prin
 # regime มี 4 กลุ่มให้เลือกมอง ปรับ multiple comparison แล้วโอกาสเกิดเองอยู่ราว 16%
 # **ยังไม่ได้ทดสอบ out-of-sample เลย** (XAU/ETH/XRP/US500 ยังไม่ได้รันด้วย --skip-regime)
 # 👉 เฝ้าดูผลจริงใกล้ชิด — ถอยกลับ = ย้าย "TREND แรงจัด" กลับไป REGIME_TREND (แก้ที่นี่
-#    และที่ backtest_replay.py ให้ตรงกัน)
-REGIME_NO_TRADE = ("CHOPPY", "เขตเทา", "REVERSAL-WATCH", "TREND แรงจัด")
-REGIME_TREND    = ("TREND",)
-REGIME_REVERSAL = ("REVERSAL-READY",)
+#    ที่ config.REGIME_NO_TRADE ที่เดียว — ทุกไฟล์อ่านจากที่นั่น ไม่มีสำเนาให้ลืมแก้อีกแล้ว)
+from config import REGIME_NO_TRADE, REGIME_TREND, REGIME_REVERSAL   # noqa: E402  (ดู config)
 
 INTERVAL_SECONDS = 3600   # เช็คทุก 1 ชั่วโมง
 
