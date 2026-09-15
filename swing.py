@@ -9,6 +9,21 @@ from indicators import calc_atr, calc_di   # re-exported เพื่อไม�
 # backtest_replay.py ตั้งค่านี้เฉพาะรอบที่รันด้วย --sl-guard-legacy ไว้เทียบว่าการแก้คุ้มไหม
 USE_ENTRY_AS_CURRENT_PRICE = True
 
+# ความสดของ swing ใน collapse_swing_runs — None = พฤติกรรมเดิมเป๊ะ (จุดที่สุดขั้วที่สุดชนะเสมอ
+# ไม่ว่าจะเก่าแค่ไหน) ตัวเลข = ยอมให้ "จุดล่าสุดของรัน" ชนะได้ถ้ามันแพ้จุดสุดขั้วไม่เกิน
+# ATR(ที่จุดล่าสุด) × ค่านี้
+# 2026-09-15: เพิ่มเพื่อทดลองตามข้อสังเกตของผู้ใช้ว่า "ความสดของ swing ก็สำคัญ ไม่ใช่แค่สุดขั้ว"
+# วัดความถี่ก่อนเขียน (7 symbol 4H 1000 แท่ง): 521 run · มี >1 จุด 241 (46%) · **จุดเก่าชนะ
+# จุดล่าสุด 134 ครั้ง (26% ของทุก run)** · ระยะที่จุดล่าสุดแพ้ มัธยฐาน 0.58 ATR เฉลี่ย 1.23 สูงสุด 7.15
+# ที่ 0.22 ATR จะสลับ 41% ของเคสนั้น · ที่ 0.5 ATR สลับ 49%
+# ⚠️ ค่า 0 **ไม่ใช่** no-op: ตอนนี้ max()/min() คืนตัวแรกเมื่อราคาเท่ากัน = จุดเก่าชนะเคสเสมอ
+#    พอตั้ง 0 เงื่อนไข "แพ้ <= 0" จะจริงทันทีบนเคสเสมอและสลับไปใช้จุดล่าสุด ตัวตรวจ identity
+#    ของสวิตช์นี้จึงเป็น None เท่านั้น
+# ⚠️ กระทบ 6 จุดพร้อมกัน (SL/TP · structure · confirmation · ATR trailing anchor · structure
+#    break · regime) แยกวัดทีละขาไม่ได้ในรอบเดียว — และมันเปลี่ยนระยะ SL = เปลี่ยน R:R =
+#    เปลี่ยนชุดไม้ ต้องวัดด้วย backtest_replay เต็มเท่านั้น (backtest_exit_rules ใช้ไม่ได้)
+SWING_RECENCY_TOL_ATR = None
+
 
 # 2026-08-13: ลบ has_rejection() / _rejection_ok() ทิ้ง — ทั้งคู่ไม่มีใครเรียกเลย (ตรวจทั้ง repo
 # แล้ว) แต่ scoring.py ยังพิมพ์ `sl_info.get('rejection', '-')` อยู่ ทั้งที่ find_sl_from_structure
@@ -192,6 +207,9 @@ def collapse_swing_runs(swing_highs: list[int], swing_lows: list[int],
     ไม่ใช้กับ check_key_level (จงใจนับทุกจุดแยกเพื่อ cluster เป็นโซน) หรือ
     check_divergence (จงใจเทียบจุดดิบ 2 จุดล่าสุดตามนิยาม divergence คลาสสิก)
 
+    SWING_RECENCY_TOL_ATR (ปกติ None = ปิด): ถ้าตั้งเป็นตัวเลข จุด "ล่าสุดของรัน" จะชนะแทน
+    ถ้ามันแพ้จุดสุดขั้วไม่เกิน ATR × ค่านั้น — ดูเหตุผลและตัวเลขความถี่ที่ตัวแปรนั้น
+
     คืน (clean_highs, clean_lows) — สลับ High/Low จริงเสมอ ไม่มี type เดียวกันติดกัน 2 ครั้ง"""
     points = sorted(
         [(i, "H") for i in swing_highs] + [(i, "L") for i in swing_lows],
@@ -200,6 +218,10 @@ def collapse_swing_runs(swing_highs: list[int], swing_lows: list[int],
     if not points:
         return [], []
 
+    # ATR คำนวณครั้งเดียวต่อการเรียก และเฉพาะตอนเปิดสวิตช์ — ฟังก์ชันนี้ถูกเรียกทุกรอบสแกน
+    # จาก 6 จุด รอบที่ไม่ได้ทดลองจึงต้องไม่จ่ายค่า calc_atr เลย
+    _atr = calc_atr(df) if SWING_RECENCY_TOL_ATR is not None else None
+
     def pick_extreme(run):
         idx_list = [i for i, _ in run]
         kind = run[0][1]
@@ -207,6 +229,13 @@ def collapse_swing_runs(swing_highs: list[int], swing_lows: list[int],
             best = max(idx_list, key=lambda i: df["high"].iloc[i])
         else:
             best = min(idx_list, key=lambda i: df["low"].iloc[i])
+        if _atr is not None and len(idx_list) > 1:
+            latest = idx_list[-1]
+            if latest != best:
+                col  = "high" if kind == "H" else "low"
+                lost = abs(df[col].iloc[best] - df[col].iloc[latest])
+                if lost <= _atr.iloc[latest] * SWING_RECENCY_TOL_ATR:
+                    best = latest          # แพ้ไม่มาก แต่สดกว่า -> เอาจุดล่าสุด
         return (best, kind)
 
     clean = []

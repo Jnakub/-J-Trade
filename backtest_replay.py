@@ -291,6 +291,17 @@ sl_guard_legacy = "--sl-guard-legacy" in sys.argv
 if sl_guard_legacy:
     _swing_mod.USE_ENTRY_AS_CURRENT_PRICE = False
 
+# --swing-recency=X : ให้ collapse_swing_runs เลือก "จุดล่าสุดของรัน" แทน "จุดสุดขั้ว" ถ้าจุดล่าสุด
+# แพ้ไม่เกิน ATR × X — ทุก caller อ่านค่าจาก swing ตอนถูกเรียก การ set ตรงนี้จึงมีผลทันทีทั้ง 6 จุด
+# ⚠️ **เปลี่ยนชุดไม้** ไม่ใช่แค่ทางออก: ขยับ swing = ขยับ SL = เปลี่ยนระยะ 1R = เปลี่ยน R:R =
+# เปลี่ยนว่าไม้ไหนผ่าน MIN_RR_HARD_BLOCK  ห้ามวัดด้วย backtest_exit_rules/backtest_trade_sim
+# ⚠️ ทิศทางของมันทำให้ตัวเลขดูดีขึ้นเอง (จุดล่าสุดใกล้ราคากว่า -> SL แคบลง -> R:R ดีขึ้น ->
+# ผ่านด่านง่ายขึ้น = ได้ไม้เพิ่ม) ตอนอ่านผลต้องแยก direct/churn เสมอ อย่าอ่าน TotalR ตรงๆ
+# ⚠️ X=0 ไม่ใช่ no-op (เคสราคาเสมอจะสลับไปใช้จุดล่าสุด) ตัวตรวจ identity คือ "ไม่ใส่ธงนี้"
+_swr_arg = next((a for a in sys.argv if a.startswith("--swing-recency=")), None)
+if _swr_arg:
+    _swing_mod.SWING_RECENCY_TOL_ATR = float(_swr_arg.split("=", 1)[1])
+
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
     regime_check.DIV_SWING_VOL_FILTER = False
@@ -919,6 +930,8 @@ if live_spread:      # ผลรอบนี้ขึ้นกับเวลา
     _tag += "_livespread"
 if no_breakeven:
     _tag += "_nobe"
+if _swr_arg:
+    _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
 if log_cuts and cut_log:
     pd.DataFrame(cut_log).to_csv(f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
