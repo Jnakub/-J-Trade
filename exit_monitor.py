@@ -195,6 +195,22 @@ NEWS_POST_H       = 6         # ข่าวผ่านไปกี่ชั่
 # ข้างบนวัดในสภาพที่ไม่มีมัน ถ้าใส่กลับต้องวัดใหม่ทั้งหมด ไม่ใช่การลืม
 RULE_1R_TRIGGER      = 1.0
 RULE_1R_KEEP         = 100   # เดิม 50 — ดูบล็อกด้านบน
+
+# ── อีกครึ่งของกฎ 1R: เลื่อน SL ไป breakeven (checklist ข้อ 5) ────────────────────────────
+# 2026-09-15: เพิ่มสวิตช์นี้เพราะครึ่งนี้ **ไม่เคยถูกวัดแยก** — ตอนปิด RULE_1R_KEEP (2026-09-13)
+# ปิดไปแค่ครึ่ง "ตัดไม้ 50%" ส่วนครึ่ง "เลื่อน SL ไป entry" ยังเดินอยู่ (ย่อหน้าบนเขียนเตือนไว้เอง)
+# ก่อนมีสวิตช์นี้ค่า 1.0 กับจุดหมาย entry hardcode ทั้งคู่ จึงกวาดไม่ได้เลย
+#
+# ทำไมถึงต้องวัด: ครึ่งนี้คือที่มาของช่อง BE ทั้งหมด — 44 ไม้ MFE เฉลี่ย **1.66R** แต่จบรวม
+# **+4.3R** (วัด 2026-09-15 ด้วย backtest_mfe.py 7 symbol 200 ไม้) คืนกำไรที่เคยมีไป 68.7R
+# ซึ่งมากกว่าผลรวมทั้งระบบ (+46R) และมากกว่าทุกอย่างที่วัดได้ในสามวันก่อนหน้ารวมกัน
+# กลไก: พอ **close แท่ง 1H** ใดก็ตามอยู่เหนือ 1R -> SL ย้ายไปนั่งที่ entry ถาวร (ratchet ห้าม
+# ถอยกลับ) ราคาย่อกลับมาแตะเมื่อไหร่ก็ปิดที่ศูนย์ ไม่ว่าหลังจากนั้นมันจะวิ่งไปไหนต่อ
+#
+# False = ไม่บังคับ BE ปล่อยให้ ATR trailing คุม SL ตามสูตรของมันล้วนๆ (ซึ่งเลื่อนตามราคาอยู่แล้ว
+# แค่ไม่ผูกกับเลข 1R และไม่ล็อกที่ entry เป๊ะ) — ตอบคำถามว่า "ของที่มีอยู่แล้วทำหน้าที่นี้เองได้ไหม"
+# ⚠️ ปิดตัวนี้ = ไม้ที่เคยจบ BE ส่วนหนึ่งจะกลายเป็น −1R เต็ม MFE ไม่ใช่กำไรที่รออยู่
+BREAKEVEN_ENABLED    = True
 RSI_OVERBOUGHT       = 70
 RSI_OVERSOLD         = 30
 RULE_HOT_KEEP        = 75
@@ -758,6 +774,9 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     news_imminent = has_news and news_hours_left is not None and news_hours_left <= NEWS_IMMINENT_H
     post_news_no_profit = has_recent_news and pnl_pct <= 0
     ge1r             = r_multiple is not None and r_multiple >= 1.0
+    # ge1r = "ถึง 1R แล้วจริงไหม" (ข้อเท็จจริง ใช้แสดงผลเสมอ)  be_lock = "แล้วจะบังคับ BE ไหม"
+    # แยกสองอย่างนี้ออกจากกัน ไม่งั้นตอนปิดสวิตช์ checklist จะยังประกาศว่าขยับ SL ทั้งที่ไม่ได้ขยับ
+    be_lock          = ge1r and BREAKEVEN_ENABLED
     slow_trade       = time_held_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
     hold_cap         = time_held_days >= MAX_HOLD_DAYS
 
@@ -770,7 +789,7 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         final_decision = (f"ออก {100 - trend_keep_pct}% — {trend_info['reason']}", YELLOW)
     elif slow_trade:
         final_decision = ("ออก 50% (Time exit) — รอ setup ใหม่", YELLOW)
-    elif ge1r:
+    elif be_lock:
         final_decision = (f"ขยับ SL ไปจุด Entry (Breakeven) = {entry:,.3f}", YELLOW)
     else:
         final_decision = ("ถือต่อ — ยังไม่มี signal ให้ออก", GREEN)
@@ -804,7 +823,8 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
          "note": f"เจตนาเดิม: ถ้า setup ดี ราคาควรวิ่งภายใน {SLOW_TRADE_DAYS} วัน — ⚠️ ขัดกับข้อมูลจริง "
                  f"(71% ของไม้ Scoring ถือเกิน 3 วัน) ดู comment ที่ SLOW_TRADE_DAYS"},
         {"no": 5, "q": "กำไร >= 1R แล้ว? (ระยะกำไร = ระยะ SL)",       "answer": ge1r,
-         "action": f"ขยับ SL ไปจุด Entry (Breakeven) = {breakeven_str}" if ge1r else "",
+         "action": (f"ขยับ SL ไปจุด Entry (Breakeven) = {breakeven_str}" if be_lock else
+                    "ถึง 1R แล้ว แต่ BREAKEVEN_ENABLED = False — ปล่อยให้ ATR trailing คุม SL" if ge1r else ""),
          "severity": "yellow",
          "note": "ป้องกัน winner กลายเป็น loser — นี่คือขยับ SL ไม่ใช่การออก"},
         {"no": 6, "q": f"ข่าวสงบแล้ว ({NEWS_POST_H} ชม.) แต่ยังไม่กำไร?", "answer": post_news_no_profit,
@@ -923,10 +943,10 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                     desired_sl = sl
 
         # Breakeven force เป็นข้อยกเว้นตั้งใจ (กำไร >= 1R) — ให้ขยับเข้าหา entry ได้ ทับ ratchet ด้านบน
-        if ge1r:
+        if be_lock:
             desired_sl = max(desired_sl, entry) if direction == "Long" else min(desired_sl, entry)
     else:
-        desired_sl = entry if ge1r else None   # คำนวณสูตรไม่ได้ -> ใช้กติกาเดิม (breakeven เมื่อ >=1R)
+        desired_sl = entry if be_lock else None  # คำนวณสูตรไม่ได้ -> ใช้กติกาเดิม (breakeven เมื่อ >=1R)
 
     # ── TP ที่ควรตั้งรอบนี้ — เริ่ม trail เมื่อใกล้ TP เดิม <= TRAIL_TP_TRIGGER_PCT ──
     desired_tp = None

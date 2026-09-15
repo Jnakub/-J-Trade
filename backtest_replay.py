@@ -352,6 +352,13 @@ if "--structure-break" in sys.argv and not no_struct_break:
 no_trend_inval = "--no-trend-invalidate" in sys.argv
 if no_trend_inval:
     em.TREND_CHECK_KEEP_BY_CONSEC = {k: 100 for k in em.TREND_CHECK_KEEP_BY_CONSEC}
+# --no-breakeven : ปิดการบังคับเลื่อน SL ไป entry ที่ 1R (checklist ข้อ 5) ปล่อยให้ ATR trailing
+# คุม SL ล้วนๆ — analyze_position อ่าน BREAKEVEN_ENABLED จากโมดูลตอนถูกเรียกทุกครั้ง
+# ⚠️ ต้องวัดที่นี่ ไม่ใช่แค่ backtest_exit_rules: ปิด BE ทำให้ไม้ที่เคยจบที่ศูนย์เดินต่อจนถึง
+# TP/SL = **ครองช่องนานขึ้น** ซึ่งเป็นสิ่งเดียวที่เครื่องมือตัวนั้นมองไม่เห็นตามนิยามของมัน
+no_breakeven = "--no-breakeven" in sys.argv
+if no_breakeven:
+    em.BREAKEVEN_ENABLED = False
 
 # --adx-period / --adx-choppy / --adx-gray-high / --adx-strong : ทับเกณฑ์ ADX เฉพาะรอบนี้
 # classify_regime อ่านค่าพวกนี้จาก module global ตอนถูกเรียกทุกครั้ง การ set ตรงนี้จึงมีผลทันที
@@ -907,6 +914,8 @@ if _mh_arg:
     _tag += "_nomaxhold" if MAX_HOLD_DAYS >= 1e6 else f"_maxhold{MAX_HOLD_DAYS:g}"
 if live_spread:      # ผลรอบนี้ขึ้นกับเวลาที่รัน — อย่าให้ทับไฟล์ base ที่เทียบข้ามรอบได้
     _tag += "_livespread"
+if no_breakeven:
+    _tag += "_nobe"
 if log_cuts and cut_log:
     pd.DataFrame(cut_log).to_csv(f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
