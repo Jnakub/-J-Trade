@@ -120,6 +120,20 @@ SETS = {
         "R<0@5วัน":  {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 5},
         "R<0@7วัน":  {**LIVE_SLOW, "SLOW_TRADE_R": 0.0, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 7},
     },
+    # เพดานการขยาย SL (exit_monitor.MAX_SL_WIDEN_R = 1.5) — ตัวเดียวในระบบที่ยอมให้ขาดทุนจริง
+    # เกิน RISK_PER_TRADE ได้ เพราะ lot ถูกคิดจากระยะ SL ตอนเปิดไม้แล้วไม่เปลี่ยนอีก
+    # ⚠️ ข้อมูลก่อนกวาด: ไม้แย่สุดใน 730 วัน 7 symbol = **−1.107R** (gross) = เพดาน 1.5 ไม่เคย
+    # ถูกแตะเลยสักครั้ง ระดับ 1.5/1.3/1.2 จึงคาดว่าเป็น no-op เป๊ะ ใส่ไว้เพื่อ **ยืนยันว่าเป็น
+    # no-op จริง** ไม่ใช่เพื่อหาผู้ชนะ — ตัวที่กัดจริงคือ 1.0 (ผูก SL ไม่ให้กว้างกว่าตอนเข้า)
+    # ซึ่งไปลบ "การหายใจตาม ATR" ที่เป็นเจตนาของดีไซน์เดิมทิ้ง (ดู comment ที่ MAX_SL_WIDEN_R)
+    # ต้นทุนของมันจึงไม่ได้อยู่ในไม้ที่จบ SL แต่อยู่ในไม้ที่เคยโดนเขี่ยแล้วรอดกลับมาชนะ
+    "widen": {
+        "control": {"MAX_SL_WIDEN_R": em.MAX_SL_WIDEN_R},
+        "1.3":     {"MAX_SL_WIDEN_R": 1.3},
+        "1.2":     {"MAX_SL_WIDEN_R": 1.2},
+        "1.1":     {"MAX_SL_WIDEN_R": 1.1},
+        "1.0":     {"MAX_SL_WIDEN_R": 1.0},
+    },
     "slowkeep2": {
         "control":     LIVE_SLOW,
         "100%@5วัน":   {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 5},
