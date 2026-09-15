@@ -23,11 +23,15 @@ import sys
 import datetime
 from collections import defaultdict
 
+import exit_monitor as em
 from config import (SYMBOLS, RISK_PER_TRADE, MAX_PORTFOLIO_RISK_R,
                     MAX_GROUP_RISK_R, CORRELATION_GROUPS)
 
 P = datetime.datetime.fromisoformat
-BE_PREFIX = "ขยับ SL ไปจุด Entry"
+# อ่านจาก exit_monitor ไม่ hardcode — สตริงนี้เคยถูก rename แล้วที่นี่ไม่รู้ตัว ผลคือไม้ที่ล็อก
+# BE แล้วถูกนับว่ายังมีความเสี่ยงเต็ม (เพดานความเสี่ยงพอร์ตจึงเข้มกว่าจริง) โดยไม่มี error ใดๆ
+# "ขยับ SL ไปจุด Entry" = ข้อความเวอร์ชันก่อน 2026-09-15 ที่ยังค้างในไฟล์ replay_cuts_*.csv เก่า
+BE_PREFIXES = (em.BE_DECISION_PREFIX, "ขยับ SL ไปจุด Entry")
 
 
 def load():
@@ -67,7 +71,7 @@ def load():
                 rem = float(c["เหลือ"])     # สัดส่วนที่เหลือหลังปิดบางส่วน
             except (ValueError, KeyError):
                 pass
-            if c["final"].startswith(BE_PREFIX):
+            if c["final"].startswith(BE_PREFIXES):
                 be = True
             sched.append((P(c["cut_time"]), 0.0 if be else rem))
         sched.append((t["t_out"], 0.0))

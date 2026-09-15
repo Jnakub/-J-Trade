@@ -220,6 +220,12 @@ BREAKEVEN_ENABLED    = True
 # กฎเดิมให้ 0 — ตัวที่ฆ่าไม้ชนะไม่ใช่ "การล็อก" แต่คือ **การวาง SL ตรง entry เป๊ะ ซึ่งเป็นจุดที่
 # ราคามักย่อกลับมาแตะ** แกนนี้จึงเก็บการป้องกันไว้แต่ขยับจุดล็อกออกจากจุดนั้น
 BREAKEVEN_LEVEL_R    = 0.0
+
+# ข้อความนำหน้าของ final_decision ตอนกฎ BE ยิง — **มีคนอ่านสตริงนี้จริง**
+# backtest_portfolio.py ใช้มันดูจากคอลัมน์ final ของ replay_cuts_*.csv ว่าไม้นั้นล็อกความเสี่ยง
+# เป็นศูนย์ไปแล้วหรือยัง ถ้าแก้ข้อความแล้วไม่แก้ที่นั่น มันจะเลิกเจอเงียบๆ แล้วนับความเสี่ยงเกินจริง
+# (เกิดมาแล้วตอน rename รอบนี้) — ตรึงไว้เป็นค่าคงที่ให้มีแหล่งเดียว อย่า hardcode ซ้ำที่อื่น
+BE_DECISION_PREFIX   = "ขยับ SL ไปจุดล็อก"
 RSI_OVERBOUGHT       = 70
 RSI_OVERSOLD         = 30
 RULE_HOT_KEEP        = 75
@@ -808,7 +814,7 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     elif slow_trade:
         final_decision = ("ออก 50% (Time exit) — รอ setup ใหม่", YELLOW)
     elif be_lock:
-        final_decision = (f"ขยับ SL ไปจุดล็อก = {be_price:,.3f}{_be_note}", YELLOW)
+        final_decision = (f"{BE_DECISION_PREFIX} = {be_price:,.3f}{_be_note}", YELLOW)
     else:
         final_decision = ("ถือต่อ — ยังไม่มี signal ให้ออก", GREEN)
 
@@ -840,7 +846,7 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
          "note": f"เจตนาเดิม: ถ้า setup ดี ราคาควรวิ่งภายใน {SLOW_TRADE_DAYS} วัน — ⚠️ ขัดกับข้อมูลจริง "
                  f"(71% ของไม้ Scoring ถือเกิน 3 วัน) ดู comment ที่ SLOW_TRADE_DAYS"},
         {"no": 5, "q": "กำไร >= 1R แล้ว? (ระยะกำไร = ระยะ SL)",       "answer": ge1r,
-         "action": (f"ขยับ SL ไปจุดล็อก = {breakeven_str}" if be_lock else
+         "action": (f"{BE_DECISION_PREFIX} = {breakeven_str}" if be_lock else
                     "ถึง 1R แล้ว แต่ BREAKEVEN_ENABLED = False — ปล่อยให้ ATR trailing คุม SL" if ge1r else ""),
          "severity": "yellow",
          "note": "ป้องกัน winner กลายเป็น loser — นี่คือขยับ SL ไม่ใช่การออก"},
