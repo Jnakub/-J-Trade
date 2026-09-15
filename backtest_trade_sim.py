@@ -21,7 +21,7 @@ from datetime import timedelta
 import pandas as pd
 import MetaTrader5 as mt5
 
-from config import MT5_TIMEFRAMES
+from config import MT5_TIMEFRAMES, SPREAD_PCT_BY_SYMBOL
 from scoring import get_ohlcv
 import exit_monitor as em
 
@@ -44,11 +44,12 @@ class TradeSim:
 
     def __init__(self, symbol: str, days: int = 730, use_cost: bool = True):
         self.symbol = symbol
-        info = mt5.symbol_info(symbol)
-        spread = (info.ask - info.bid) if info else 0.0
-        if spread <= 0 and info:
-            spread = info.spread * info.point
-        self.cost_pct = (spread / info.bid * 100) if (use_cost and info and info.bid) else 0.0
+        # ต้นทุน spread ตรึงจาก config — เดิมอ่านค่าสดจาก symbol_info() ตอนสร้าง object ทำให้ผล
+        # ของรอบหนึ่งขึ้นกับเวลาที่กดรัน (ดู config.SPREAD_PCT_BY_SYMBOL)
+        # ในรอบเดียวกันทุกเงื่อนไขใช้ค่าเดียวกันอยู่แล้ว การเทียบ "ภายในรอบ" จึงไม่เคยเพี้ยน
+        # ที่เพี้ยนคือสองอย่างที่ทำประจำ: เทียบกับตัวเลขที่จดไว้จากรอบก่อน และการ calibrate กับ
+        # replay_trades_<sym>.csv ซึ่งเป็นไฟล์ที่สร้างคนละเวลากับรอบ sim เสมอ
+        self.cost_pct = SPREAD_PCT_BY_SYMBOL[symbol] if use_cost else 0.0
         self.h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=days * 24 + 500)
         self.idx = {t: i for i, t in enumerate(self.h1["time"])}
 
