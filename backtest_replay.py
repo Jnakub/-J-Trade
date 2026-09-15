@@ -107,6 +107,9 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
      --div-no-volume  หา swing สำหรับ divergence โดยไม่กรอง volume/wick
                  สองตัวนี้คลายด่าน Divergence ซึ่งเป็นด่านที่ตัดโอกาส Reversal ทิ้งมากที่สุด
                  (มีผลกับ regime ด้วย: REVERSAL-WATCH จะกลายเป็น REVERSAL-READY มากขึ้น)
+     --live-spread  อ่าน spread สดจากโบรกแทนค่าที่ตรึงใน config.SPREAD_PCT_BY_SYMBOL
+                 ⚠️ ผลของรอบนั้นจะขึ้นกับ "เวลาที่กดรัน" และเทียบกับรอบอื่นไม่ได้ (ไฟล์ติด tag
+                 _livespread) — ค่าตรึงมีไว้ให้ A/B ข้ามรอบเชื่อถือได้ ดูเหตุผลเต็มที่ config
      --max-hold=N  ทับ exit_monitor.MAX_HOLD_DAYS (ปกติ 30) — เพดานเวลาถือไม้ 0 = ปิดเพดาน
                  เพดานนี้เคยวัดตัวเองไม่ได้: backtest ตั้งเลขไว้เองตั้งแต่ก่อนมันเข้าระบบจริง
                  ทุกรอบที่เคยรันจึงสมมติว่ามีเพดานอยู่แล้ว (ไฟล์ผลติด tag _nomaxhold / _maxholdN)
@@ -124,7 +127,8 @@ load_dotenv()
 from mt5_connect import connect
 import config
 from config import (MT5_TIMEFRAMES, MAX_DAILY_LOSS, RISK_PER_TRADE,
-                    COOLDOWN_HOURS_BY_SYMBOL, get_min_sl_distance_pct)
+                    COOLDOWN_HOURS_BY_SYMBOL, SPREAD_PCT_BY_SYMBOL,
+                    get_min_sl_distance_pct)
 import scoring
 from scoring import compute_score, get_trend_bias, get_ohlcv, get_ohlcv_real, calc_rr
 from binance import merge_real_volume
@@ -376,10 +380,21 @@ if _sr_arg:
 connect()
 
 info = mt5.symbol_info(symbol)
+# ต้นทุน spread — ตรึงจาก config เป็นค่าเริ่มต้น **ไม่อ่านค่าสด** เพราะค่าสดทำให้ผลของรอบหนึ่ง
+# ขึ้นกับเวลาที่กดรัน และเลื่อนไม้ทุกไม้พร้อมกันเท่าๆ กัน = หน้าตาเหมือนผลจริงที่กระจายทั้งระบบ
+# แยกไม่ออกตอน diff สองรอบ (ดูเหตุผลเต็มที่ config.SPREAD_PCT_BY_SYMBOL)
+live_spread = "--live-spread" in sys.argv
 spread_price = (info.ask - info.bid) if info else 0.0
 if spread_price <= 0 and info:
     spread_price = info.spread * info.point
-cost_pct = (spread_price / info.bid * 100) if info and info.bid else 0.0
+live_cost_pct = (spread_price / info.bid * 100) if info and info.bid else 0.0
+if live_spread:
+    cost_pct = live_cost_pct
+else:
+    cost_pct = SPREAD_PCT_BY_SYMBOL.get(symbol)
+    if cost_pct is None:
+        sys.exit(f"ไม่มี {symbol} ใน config.SPREAD_PCT_BY_SYMBOL — วัด spread แล้วใส่ค่าไว้ก่อน "
+                 f"(ตอนนี้ตลาดให้ {live_cost_pct:.4f}%) หรือใช้ --live-spread ถ้าตั้งใจรันด้วยค่าสด")
 
 h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=days * 24 + 500)
 h4 = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=days * 6 + 400)
@@ -391,8 +406,14 @@ h4_idx = {t: i for i, t in enumerate(h4["time"])}
 max_daily_loss_r = MAX_DAILY_LOSS / RISK_PER_TRADE   # 6% / 2% = 3R ต่อวัน
 
 print(f"\n{symbol}  replay backtest  {clock['time'].iloc[0]} -> {end_time}")
-print(f"  สแกนทุก 1 ชม. ({len(clock)} รอบ)   spread ปัจจุบัน {spread_price:.2f} "
-      f"({cost_pct:.4f}% ของราคา){'  [คิดต้นทุน]' if use_cost else '  [--no-cost]'}")
+print(f"  สแกนทุก 1 ชม. ({len(clock)} รอบ)   ต้นทุน spread {cost_pct:.4f}% ของราคา "
+      f"{'[--live-spread: ค่าสด ณ ตอนรัน]' if live_spread else '[ตรึงจาก config]'}"
+      f"{'  [คิดต้นทุน]' if use_cost else '  [--no-cost]'}")
+if not live_spread and abs(live_cost_pct - cost_pct) > 0.2 * max(cost_pct, 1e-9):
+    # เตือนเมื่อค่าที่ตรึงไว้เริ่มห่างจากตลาดจริงเกิน 20% — ค่าตรึงมีไว้ให้เทียบข้ามรอบได้
+    # ไม่ได้มีไว้ให้ค้างจนไม่ตรงกับโบรกอีกต่อไป
+    print(f"  ⚠️ ตลาดตอนนี้ให้ {live_cost_pct:.4f}% ห่างจากค่าที่ตรึงไว้เกิน 20% "
+          f"— ถ้าไม่ใช่ช่วง rollover/ข่าว ให้วัดใหม่แล้วแก้ config.SPREAD_PCT_BY_SYMBOL")
 print(f"  Daily loss guard {MAX_DAILY_LOSS*100:.0f}% / risk {RISK_PER_TRADE*100:.0f}% ต่อไม้ "
       f"= หยุดหาไม้ใหม่เมื่อวันนั้นขาดทุนรวมถึง {max_daily_loss_r:.1f}R")
 print(f"  Cooldown {COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)} ชม.   "
@@ -884,6 +905,8 @@ if _runup_arg:
     _tag += f"_runup{max_runup:g}"
 if _mh_arg:
     _tag += "_nomaxhold" if MAX_HOLD_DAYS >= 1e6 else f"_maxhold{MAX_HOLD_DAYS:g}"
+if live_spread:      # ผลรอบนี้ขึ้นกับเวลาที่รัน — อย่าให้ทับไฟล์ base ที่เทียบข้ามรอบได้
+    _tag += "_livespread"
 if log_cuts and cut_log:
     pd.DataFrame(cut_log).to_csv(f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
