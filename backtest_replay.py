@@ -301,6 +301,12 @@ _swr_arg = next((a for a in sys.argv if a.startswith("--swing-recency=")), None)
 if _swr_arg:
     _swing_mod.SWING_RECENCY_TOL_ATR = float(_swr_arg.split("=", 1)[1])
 
+# --div-wick-gold-only : กลับไปพฤติกรรมก่อน 2026-09-15 (check_divergence ให้ wick เฉพาะทอง)
+# ไว้เทียบกับ default ปัจจุบันที่เปิดให้ทุก symbol — ดู regime_check.DIV_WICK_ALL_SYMBOLS
+div_wick_gold = "--div-wick-gold-only" in sys.argv
+if div_wick_gold:
+    regime_check.DIV_WICK_ALL_SYMBOLS = False
+
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
     regime_check.DIV_SWING_VOL_FILTER = False
@@ -929,6 +935,8 @@ if live_spread:      # ผลรอบนี้ขึ้นกับเวลา
     _tag += "_livespread"
 if no_breakeven:
     _tag += "_nobe"
+if div_wick_gold:
+    _tag += "_divwickgold"
 if _swr_arg:
     _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
 if log_cuts and cut_log:

@@ -243,6 +243,15 @@ DIV_MAX_LOOKBACK_BARS = 180
 # 2026-07-23 — comment ตรงนั้นค้างอยู่ ยังไม่ได้แก้เพราะรอผลรอบนี้ก่อนว่าจะเอาแบบไหน)
 DIV_SWING_VOL_FILTER  = True
 
+# 2026-09-15: **เปิด wick OR-logic ใน check_divergence ให้ทุก symbol ตามคำสั่งผู้ใช้**
+# (เดิมทองตัวเดียว — เป็นจุดเดียวในระบบที่กรองด้วย "ใช่ทองไหม" ส่วนอีก 7 จุดที่แตะ swing
+#  เรียก swing_wick_ratio_min(symbol) ตรงๆ ไม่มีเงื่อนไข ดู check_structure/check_key_level)
+# 🔴 **ขัดกับผลวัดในบล็อกถัดไป (-10.46R, |t| = 2.93, แย่ลง 4/4 symbol)** ซึ่งเป็นผลเดียวใน
+#    โปรเจกต์ที่ผ่านเกณฑ์นัยสำคัญเท่าที่ตรวจมา — ผู้ใช้ตัดสินใจเปิดโดยรู้ตัวเลขนี้แล้ว
+#    ⚠️ ผลนั้นวัดแค่ 4 symbol ที่ใช้ tick_volume **ไม่เคยทดสอบ BTC/ETH** ซึ่งอยู่ในขอบเขตนี้ด้วย
+# ตั้ง False = กลับไปพฤติกรรมเดิม (ทองเท่านั้น) แก้บรรทัดเดียวจบ
+DIV_WICK_ALL_SYMBOLS = True
+
 # 2026-09-13: ลองให้ symbol ที่ใช้ tick_volume (USDJPY/EUR/GBP/US500) ได้ wick OR-logic
 # เหมือน XAU — **แย่ลง -10.46R ถอดทิ้งแล้ว** (96 ไม้ +17.07R -> 100 ไม้ +6.60R, แย่ลงทั้ง 4 ตัว)
 # ยอดรวมซ่อนสาเหตุ: ได้ไม้ใหม่ 9 ไม้ -4.74R (โดน SL 7/9) แต่ **เสียไม้เดิม 5 ไม้ +5.72R ที่ชนะ
@@ -489,8 +498,8 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     เทียบ swing ราคา 2 จุดล่าสุด + จุดใหม่ต้องยืนยันภายใน DIV_MAX_AGE_BARS แท่ง
     + จุดแรกต้องเคยอยู่โซน overbought/oversold จริง (นิยาม divergence คลาสสิก, ยืนยันด้วย backtest)
 
-    Volume filter: **XAU/GOLD เท่านั้น** ที่ใช้ volume OR wick ratio (2026-07-25) — symbol อื่น
-    ทั้งหมด (BTC, ETH, USDJPY, EUR, GBP, US500) ใช้ volume อย่างเดียว
+    Volume filter: **ทุก symbol** ใช้ volume OR wick ratio ตั้งแต่ 2026-09-15 (ก่อนหน้านั้น
+    XAU/GOLD เท่านั้น) — คุมด้วย DIV_WICK_ALL_SYMBOLS ⚠️ อ่านบล็อก -10.46R ที่ค่าคงที่นั้นก่อนแตะ
     ที่มาของ XAU: เดิมเคยปิด volume filter ไปเลยเพราะทดสอบแล้วกรอง volume แบบ AND เดี่ยวๆ
     ตรวจ divergence ไม่เจอเลย 0% แต่นั่นคือก่อนมี wick_ratio_min OR-logic (ดู check_structure)
     พอเปลี่ยนมาเป็น volume OR wick ratio เหมือน check_structure/check_key_level แล้วปัญหาเดิม
@@ -514,8 +523,10 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     # 2026-09-13: เดิมชื่อ is_btc เขียนกลับด้าน (= ไม่ใช่ XAU/GOLD) ซึ่งหลอก
     is_gold = bool(symbol) and ("XAU" in symbol.upper() or "GOLD" in symbol.upper())
     vol_multiplier = swing_vol_multiplier(symbol) if symbol else 0.0
-    # ทองได้ volume OR wick ratio เหมือน check_structure/check_key_level ที่เหลือ volume ล้วน
-    wick_ratio_min = swing_wick_ratio_min(symbol) if (symbol and is_gold) else None
+    # DIV_WICK_ALL_SYMBOLS=True (2026-09-15) -> ทุก symbol ได้ volume OR wick เหมือนที่ทุกจุดอื่น
+    # ในระบบทำอยู่แล้ว · False -> ทองเท่านั้น (พฤติกรรมก่อน 2026-09-15) ดู comment ที่ค่าคงที่นั้น
+    wick_ratio_min = (swing_wick_ratio_min(symbol)
+                      if (symbol and (DIV_WICK_ALL_SYMBOLS or is_gold)) else None)
     if not DIV_SWING_VOL_FILTER:          # โหมดทดลอง — ดู comment ที่ตัวแปรนั้น
         vol_multiplier, wick_ratio_min = 0.0, None
     rsi = calc_rsi(df["close"])
