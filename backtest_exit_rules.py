@@ -144,6 +144,18 @@ SETS = {
         "control":  {"BREAKEVEN_ENABLED": True},
         "ปิด BE":   {"BREAKEVEN_ENABLED": False},
     },
+    # แกน "ย้ายไปที่ไหน" — เก็บการล็อกไว้ แต่ขยับจุดล็อกออกจาก entry เป๊ะ ซึ่งเป็นจุดที่ราคา
+    # มักย่อกลับมาแตะ (ค่าลบ = ยอมเสียเท่านั้น R แทนการเสมอตัว)
+    # "ระดับ 0.0" ต้องออกมา **เท่ากับ control เป๊ะทุกไม้** — ถ้าไม่เท่าแปลว่า refactor be_price
+    # เปลี่ยนพฤติกรรมโดยไม่ตั้งใจ และผลทั้งชุดใช้ไม่ได้ (ใส่ไว้เป็นตัวตรวจ ไม่ใช่ตัวเลือก)
+    "belevel": {
+        "control":  {"BREAKEVEN_LEVEL_R": 0.0},
+        "0.0":      {"BREAKEVEN_LEVEL_R": 0.0},
+        "-0.1R":    {"BREAKEVEN_LEVEL_R": -0.1},
+        "-0.2R":    {"BREAKEVEN_LEVEL_R": -0.2},
+        "-0.3R":    {"BREAKEVEN_LEVEL_R": -0.3},
+        "-0.5R":    {"BREAKEVEN_LEVEL_R": -0.5},
+    },
     "slowkeep2": {
         "control":     LIVE_SLOW,
         "100%@5วัน":   {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 5},

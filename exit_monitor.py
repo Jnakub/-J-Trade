@@ -211,6 +211,15 @@ RULE_1R_KEEP         = 100   # เดิม 50 — ดูบล็อกด้�
 # แค่ไม่ผูกกับเลข 1R และไม่ล็อกที่ entry เป๊ะ) — ตอบคำถามว่า "ของที่มีอยู่แล้วทำหน้าที่นี้เองได้ไหม"
 # ⚠️ ปิดตัวนี้ = ไม้ที่เคยจบ BE ส่วนหนึ่งจะกลายเป็น −1R เต็ม MFE ไม่ใช่กำไรที่รออยู่
 BREAKEVEN_ENABLED    = True
+
+# จุดที่ SL ไปนั่งตอนกฎยิง — หน่วยเป็นเท่าของระยะ 1R นับจาก entry (ค่าลบ = ต่ำกว่า entry ฝั่งเสี่ยง
+# เช่น -0.2 = ยอมเสีย 0.2R แทนที่จะเสมอตัว)  0.0 = ล็อกที่ entry เป๊ะ = พฤติกรรมเดิม
+# 2026-09-15: เพิ่มพร้อม BREAKEVEN_ENABLED — ที่มาคือผลของการ "ปิดทั้งกฎ" ซึ่งได้ +4.96R แต่
+# ไม่เอาเข้าระบบเพราะกระจุกที่ไม้ 5 ไม้ (ตัดออกเหลือ −1.75R) และบวกแค่ 4/7 symbol
+# สิ่งที่ข้อมูลรอบนั้นชี้: ไม้ที่แย่ลง 23 ไม้เกือบทั้งหมดกลายเป็น SL เต็ม (−0.57R เฉลี่ย) ทั้งที่
+# กฎเดิมให้ 0 — ตัวที่ฆ่าไม้ชนะไม่ใช่ "การล็อก" แต่คือ **การวาง SL ตรง entry เป๊ะ ซึ่งเป็นจุดที่
+# ราคามักย่อกลับมาแตะ** แกนนี้จึงเก็บการป้องกันไว้แต่ขยับจุดล็อกออกจากจุดนั้น
+BREAKEVEN_LEVEL_R    = 0.0
 RSI_OVERBOUGHT       = 70
 RSI_OVERSOLD         = 30
 RULE_HOT_KEEP        = 75
@@ -777,8 +786,17 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     # ge1r = "ถึง 1R แล้วจริงไหม" (ข้อเท็จจริง ใช้แสดงผลเสมอ)  be_lock = "แล้วจะบังคับ BE ไหม"
     # แยกสองอย่างนี้ออกจากกัน ไม่งั้นตอนปิดสวิตช์ checklist จะยังประกาศว่าขยับ SL ทั้งที่ไม่ได้ขยับ
     be_lock          = ge1r and BREAKEVEN_ENABLED
+    # จุดที่ SL ไปนั่งตอนกฎยิง = entry + BREAKEVEN_LEVEL_R * ระยะ 1R (ค่าลบ = ต่ำกว่า entry
+    # ฝั่งเสี่ยง) 0.0 = ล็อกที่ entry เป๊ะ = พฤติกรรมเดิม — คำนวณตรงนี้เพื่อให้ทั้งข้อความที่แสดง
+    # และ desired_sl ท้ายฟังก์ชันอ้างตัวเลขเดียวกัน ไม่ใช่คนละจุดเวลาตั้งค่าไม่เป็นศูนย์
+    be_price         = (entry + BREAKEVEN_LEVEL_R * sl_range * (1 if direction == "Long" else -1)
+                        if sl_range else entry)
     slow_trade       = time_held_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
     hold_cap         = time_held_days >= MAX_HOLD_DAYS
+
+    # ต่อท้ายเมื่อจุดล็อกไม่ใช่ entry — ไม่งั้นอ่าน log แล้วนึกว่าเสมอตัวทั้งที่ยอมเสียไว้แล้ว
+    _be_note      = "" if not BREAKEVEN_LEVEL_R else f" ({BREAKEVEN_LEVEL_R:+g}R จาก entry)"
+    breakeven_str = f"{be_price:,.3f}{_be_note}"
 
     invalidated = trend_broken_full or structure_broken or post_news_no_profit or hold_cap
     if trend_broken_full or structure_broken:
@@ -790,11 +808,10 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     elif slow_trade:
         final_decision = ("ออก 50% (Time exit) — รอ setup ใหม่", YELLOW)
     elif be_lock:
-        final_decision = (f"ขยับ SL ไปจุด Entry (Breakeven) = {entry:,.3f}", YELLOW)
+        final_decision = (f"ขยับ SL ไปจุดล็อก = {be_price:,.3f}{_be_note}", YELLOW)
     else:
         final_decision = ("ถือต่อ — ยังไม่มี signal ให้ออก", GREEN)
 
-    breakeven_str = f"{entry:,.3f}"
     checklist = [
         {"no": 1, "q": "Daily ปิดสวน trend ที่ใช้เข้า? (พ้น grace period แล้ว)",
          "answer": trend_broken_full or trend_broken_partial,
@@ -823,7 +840,7 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
          "note": f"เจตนาเดิม: ถ้า setup ดี ราคาควรวิ่งภายใน {SLOW_TRADE_DAYS} วัน — ⚠️ ขัดกับข้อมูลจริง "
                  f"(71% ของไม้ Scoring ถือเกิน 3 วัน) ดู comment ที่ SLOW_TRADE_DAYS"},
         {"no": 5, "q": "กำไร >= 1R แล้ว? (ระยะกำไร = ระยะ SL)",       "answer": ge1r,
-         "action": (f"ขยับ SL ไปจุด Entry (Breakeven) = {breakeven_str}" if be_lock else
+         "action": (f"ขยับ SL ไปจุดล็อก = {breakeven_str}" if be_lock else
                     "ถึง 1R แล้ว แต่ BREAKEVEN_ENABLED = False — ปล่อยให้ ATR trailing คุม SL" if ge1r else ""),
          "severity": "yellow",
          "note": "ป้องกัน winner กลายเป็น loser — นี่คือขยับ SL ไม่ใช่การออก"},
@@ -930,7 +947,10 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         #     (คำนวณจากราคาสดทุกรอบ) หลุด False ตอนราคาย่อกลับต่ำกว่า 1R แล้วดึง SL ที่ล็อก
         #     breakeven ไปแล้วให้ถอยกลับต่ำกว่า entry ซ้ำ (บั๊กที่พบตอนจำลอง: 900 -> 1000(BE) -> 850)
         if sl:
-            past_breakeven = (sl >= entry) if direction == "Long" else (sl <= entry)
+            # เทียบกับ "จุดที่ล็อก" ไม่ใช่ entry — ไม่งั้นตอน BREAKEVEN_LEVEL_R < 0 ไม้จะค้างอยู่
+            # ที่จุดล็อกตลอดไป: sl ไม่มีวัน >= entry ratchet จึงอยู่ขาที่ห้าม SL ขยับเข้าใกล้ราคา
+            # = ATR trailing ล็อกกำไรเพิ่มไม่ได้อีกเลย (ที่ 0.0 นิพจน์นี้เท่าเดิมทุกประการ)
+            past_breakeven = (sl >= be_price) if direction == "Long" else (sl <= be_price)
             if direction == "Long":
                 if past_breakeven:
                     desired_sl = max(desired_sl, sl)
@@ -942,11 +962,11 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                 elif desired_sl < sl:
                     desired_sl = sl
 
-        # Breakeven force เป็นข้อยกเว้นตั้งใจ (กำไร >= 1R) — ให้ขยับเข้าหา entry ได้ ทับ ratchet ด้านบน
+        # Breakeven force เป็นข้อยกเว้นตั้งใจ (กำไร >= 1R) — ให้ขยับเข้าหาจุดล็อกได้ ทับ ratchet ด้านบน
         if be_lock:
-            desired_sl = max(desired_sl, entry) if direction == "Long" else min(desired_sl, entry)
+            desired_sl = max(desired_sl, be_price) if direction == "Long" else min(desired_sl, be_price)
     else:
-        desired_sl = entry if be_lock else None  # คำนวณสูตรไม่ได้ -> ใช้กติกาเดิม (breakeven เมื่อ >=1R)
+        desired_sl = be_price if be_lock else None  # คำนวณสูตรไม่ได้ -> ใช้กติกาเดิม (ล็อกเมื่อ >=1R)
 
     # ── TP ที่ควรตั้งรอบนี้ — เริ่ม trail เมื่อใกล้ TP เดิม <= TRAIL_TP_TRIGGER_PCT ──
     desired_tp = None
