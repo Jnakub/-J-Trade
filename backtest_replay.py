@@ -307,6 +307,11 @@ div_wick_gold = "--div-wick-gold-only" in sys.argv
 if div_wick_gold:
     regime_check.DIV_WICK_ALL_SYMBOLS = False
 
+# --div-zone-legacy : กลับไปใช้โซน 55/45 (ค่าที่จูนบน RSI(14) ก่อน 2026-09-16)
+div_zone_legacy = "--div-zone-legacy" in sys.argv
+if div_zone_legacy:
+    regime_check.DIV_ZONE_OVERBOUGHT, regime_check.DIV_ZONE_OVERSOLD = 55, 45
+
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
     regime_check.DIV_SWING_VOL_FILTER = False
@@ -937,6 +942,8 @@ if no_breakeven:
     _tag += "_nobe"
 if div_wick_gold:
     _tag += "_divwickgold"
+if div_zone_legacy:
+    _tag += "_divzonelegacy"
 if _swr_arg:
     _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
 if log_cuts and cut_log:
