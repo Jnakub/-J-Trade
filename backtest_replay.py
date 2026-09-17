@@ -95,6 +95,13 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ สองตัวนี้คือกฎที่ยังไม่ถูกทดสอบ หลังจาก --rule-1r-keep พิสูจน์แล้วว่ากฎ 1R
                  ไม่ใช่ตัวที่กินกำไรไม้ใหญ่ (ปิดกฎ 1R ไปเลย ไม้ TP ก้อนใหญ่ไม่ขยับสักไม้)
      --div-max-age=N  ทับ DIV_MAX_AGE_BARS (ปกติ 20) — swing ของ divergence เก่าได้กี่แท่ง
+     --div-price-tol=X  ผ่อนการเทียบ "ราคาทำ new extreme" ได้ X ATR (ปกติ 0 = เทียบเป๊ะ)
+                 ATR(14) บน 4H ณ แท่งของจุด swing ใหม่ · ไม่แตะรายการ swing = เพิ่มไม้อย่างเดียว
+                 เคยวัดที่ 0.5 แล้ว ΔR -0.78 (ดู regime_check.DIV_PRICE_TOLERANCE_ATR)
+     --div-stall=N  ทับ DIV_STALL_THRESHOLD (ปกติ 5) — RSI สวนได้กี่แต้มถึงยังนับเป็น divergence
+                 0 = strict ล้วน · เลขมาก = หลวมขึ้น · ไม่แตะรายการ swing เหมือนกัน
+                 ⚠️ ค่า 5 ปัจจุบันมาจาก sample 3-6 เคส ยังไม่เคยกวาด — ใส่ 5 ในชุดกวาดเป็น
+                 identity check ด้วยเสมอ
      --div-rsi-period=N  ทับ DIV_RSI_PERIOD (ปกติ 20) — period ของ RSI ที่ใช้หา divergence
                  ⚠️ คุมเกณฑ์ "RSI extreme" (30/70) ของ Reversal ด้วย (reversal.py:207 เรียก
                  calc_rsi() โดยไม่ส่ง period) รอบที่ใส่ธงนี้จึงขยับสองด่านพร้อมกัน แยกผลไม่ได้
@@ -311,6 +318,22 @@ if div_wick_gold:
 div_zone_legacy = "--div-zone-legacy" in sys.argv
 if div_zone_legacy:
     regime_check.DIV_ZONE_OVERBOUGHT, regime_check.DIV_ZONE_OVERSOLD = 55, 45
+
+# --div-price-tol=X : ผ่อนการเทียบ "ราคาทำ new extreme" ได้ X ATR (ปกติ 0 = เทียบเป๊ะ)
+# ดู regime_check.DIV_PRICE_TOLERANCE_ATR — ไม่แตะรายการ swing จึงเพิ่มไม้ได้อย่างเดียว
+_dpt_arg = next((a for a in sys.argv if a.startswith("--div-price-tol=")), None)
+if _dpt_arg:
+    regime_check.DIV_PRICE_TOLERANCE_ATR = float(_dpt_arg.split("=")[1])
+
+# --div-stall=N : ทับ DIV_STALL_THRESHOLD (ปกติ 5) — RSI ขึ้น/ลงสวนได้ไม่เกินกี่แต้มถึงยังนับ
+# เป็น divergence · 0 = strict ล้วน (ต้องเป็น LH/HL จริงเท่านั้น) · เลขมาก = หลวมขึ้น
+# เหมือน --div-price-tol ตรงที่ทดสอบกับคู่ swing ที่ _find_spacing_partner เลือกมาแล้ว
+# **ไม่แตะรายการ swing** จึงไม่เบียดของเดิม (ดู DIV_WICK_ALL_SYMBOLS ว่ากรณีเบียดเป็นยังไง)
+# ⚠️ ค่า 5 ที่ใช้อยู่มาจาก sample 3-6 เคสบน BTC เท่านั้น ยังไม่เคยกวาดจริงสักครั้ง
+# 👉 ใส่ --div-stall=5 ในชุดกวาดด้วยเสมอ = identity check ฟรี (ต้องออกมาเท่า control เป๊ะ)
+_dst_arg = next((a for a in sys.argv if a.startswith("--div-stall=")), None)
+if _dst_arg:
+    regime_check.DIV_STALL_THRESHOLD = float(_dst_arg.split("=")[1])
 
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
@@ -944,6 +967,10 @@ if div_wick_gold:
     _tag += "_divwickgold"
 if div_zone_legacy:
     _tag += "_divzonelegacy"
+if _dpt_arg:
+    _tag += f"_divpricetol{regime_check.DIV_PRICE_TOLERANCE_ATR:g}"
+if _dst_arg:
+    _tag += f"_divstall{regime_check.DIV_STALL_THRESHOLD:g}"
 if _swr_arg:
     _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
 if log_cuts and cut_log:
