@@ -20,6 +20,7 @@ from config import (
     COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
+    SCORING_NEEDS_STRUCTURE_MATCH,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
@@ -252,6 +253,12 @@ def scan_symbol(symbol: str) -> None:
             direction, bias_source = get_trend_bias(symbol, df_1d)
             if direction is None:
                 print(f"  [{symbol}] SKIP — หา Bias ไม่ได้ ({bias_source})")
+                return
+            # ทิศจาก trend_flip (1D) ต้องตรงกับโครงสร้าง 4H — ดู config ที่ค่านั้น
+            # structure["trend"] = "Long (HH/HL)" / "Short (LL/LH)" ตอน regime = TREND เสมอ
+            _struct = regime_info["structure"]["trend"]
+            if SCORING_NEEDS_STRUCTURE_MATCH and not _struct.startswith(direction):
+                print(f"  [{symbol}] SKIP — Bias={direction} สวนโครงสร้าง 4H ({_struct})")
                 return
             print(f"  [{symbol}] เปิด Scoring — Bias={direction} ({bias_source})  Entry={entry:.5f}")
             # ส่ง df_1d ที่ดึงไปแล้วข้างบน (สำหรับ get_trend_bias) ให้ compute_score ใช้ซ้ำ —

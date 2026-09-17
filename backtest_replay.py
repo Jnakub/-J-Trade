@@ -98,6 +98,8 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
      --div-price-tol=X  ผ่อนการเทียบ "ราคาทำ new extreme" ได้ X ATR (ปกติ 0 = เทียบเป๊ะ)
                  ATR(14) บน 4H ณ แท่งของจุด swing ใหม่ · ไม่แตะรายการ swing = เพิ่มไม้อย่างเดียว
                  เคยวัดที่ 0.5 แล้ว ΔR -0.78 (ดู regime_check.DIV_PRICE_TOLERANCE_ATR)
+     --adx-decline-bars=N  ทับ ADX_DECLINE_BARS (ปกติ 4) — ADX ต้องลงติดกันกี่แท่งจาก peak
+                 ⚠️ ไม่ใช่ subset สะอาด — เลื่อนเวลาเข้าไม้ = เปลี่ยนการครองช่อง churn เยอะ
      --div-stall=N  ทับ DIV_STALL_THRESHOLD (ปกติ 5) — RSI สวนได้กี่แต้มถึงยังนับเป็น divergence
                  0 = strict ล้วน · เลขมาก = หลวมขึ้น · ไม่แตะรายการ swing เหมือนกัน
                  ⚠️ ค่า 5 ปัจจุบันมาจาก sample 3-6 เคส ยังไม่เคยกวาด — ใส่ 5 ในชุดกวาดเป็น
@@ -136,6 +138,7 @@ import config
 from config import (MT5_TIMEFRAMES, MAX_DAILY_LOSS, RISK_PER_TRADE,
                     COOLDOWN_HOURS_BY_SYMBOL, SPREAD_PCT_BY_SYMBOL,
                     get_min_sl_distance_pct)
+import config as cfg
 import scoring
 from scoring import compute_score, get_trend_bias, get_ohlcv, get_ohlcv_real, calc_rr
 from binance import merge_real_volume
@@ -334,6 +337,28 @@ if _dpt_arg:
 _dst_arg = next((a for a in sys.argv if a.startswith("--div-stall=")), None)
 if _dst_arg:
     regime_check.DIV_STALL_THRESHOLD = float(_dst_arg.split("=")[1])
+
+# --adx-decline-bars=N : ทับ ADX_DECLINE_BARS (ปกติ 4 ตั้งแต่ 2026-09-17 · เดิม 3)
+# ⚠️ ตัวนี้ **ไม่ใช่ subset สะอาด** แบบ --div-stall — มันเลื่อนเวลาที่ regime ปล่อยให้เข้าไม้
+# = เปลี่ยนว่าใครครองช่องเมื่อไหร่ = churn เยอะกว่ามาก ต้องดู direct/churn แยกเสมอ
+_adb_arg = next((a for a in sys.argv if a.startswith("--adx-decline-bars=")), None)
+if _adb_arg:
+    regime_check.ADX_DECLINE_BARS = int(_adb_arg.split("=")[1])
+
+# --adx-min-peak=N : ทับ ADX_MIN_PEAK_REVERSAL (ปกติ 28.5) — 0 = ปิดด่าน (พฤติกรรมก่อน 2026-09-17)
+# ⚠️ ไม่ใช่ subset สะอาด — แท่งที่ตกด่านนี้ไหลไป branch TREND ได้ = Scoring อาจเพิ่ม
+_amp_arg = next((a for a in sys.argv if a.startswith("--adx-min-peak=")), None)
+if _amp_arg:
+    _v = float(_amp_arg.split("=")[1])
+    regime_check.ADX_MIN_PEAK_REVERSAL = _v if _v > 0 else None
+
+# --scoring-struct-match / --no-scoring-struct-match : ทับ config.SCORING_NEEDS_STRUCTURE_MATCH
+# ทิศ Scoring (trend_flip 1D) ต้องตรงกับโครงสร้าง 4H ไหม — เหตุผล+ตัวเลขอยู่ที่ค่าคงที่นั้น
+scoring_struct_match = cfg.SCORING_NEEDS_STRUCTURE_MATCH
+if "--scoring-struct-match" in sys.argv:
+    scoring_struct_match = True
+if "--no-scoring-struct-match" in sys.argv:
+    scoring_struct_match = False
 
 div_no_vol = "--div-no-volume" in sys.argv
 if div_no_vol:
@@ -704,6 +729,11 @@ for n, row in enumerate(clock.to_dict("records")):
             if direction is None:
                 note("หา bias ไม่ได้")
                 continue
+            _struct = rinfo["structure"]["trend"]
+            if scoring_struct_match and not _struct.startswith(direction):
+                note(f"bias {direction} สวนโครงสร้าง 4H ({_struct})")
+                fate("bias สวนโครงสร้าง 4H")
+                continue
             score, criteria, passed, sl_info = compute_score(symbol, direction, entry,
                                                             as_of=now, df_1d=df_1d)
             # exec_sl มาจาก compute_score แล้ว (ด่าน R:R ใช้ตัวนี้ตรวจ) ไม่คำนวณซ้ำที่นี่
@@ -971,6 +1001,12 @@ if _dpt_arg:
     _tag += f"_divpricetol{regime_check.DIV_PRICE_TOLERANCE_ATR:g}"
 if _dst_arg:
     _tag += f"_divstall{regime_check.DIV_STALL_THRESHOLD:g}"
+if _adb_arg:
+    _tag += f"_adxdecl{regime_check.ADX_DECLINE_BARS:g}"
+if _amp_arg:
+    _tag += f"_adxminpeak{regime_check.ADX_MIN_PEAK_REVERSAL or 0:g}"
+if scoring_struct_match != cfg.SCORING_NEEDS_STRUCTURE_MATCH:
+    _tag += "_structmatch" if scoring_struct_match else "_nostructmatch"
 if _swr_arg:
     _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
 if log_cuts and cut_log:
