@@ -56,6 +56,12 @@ VOL_MULTIPLIER_BY_SYMBOL = {
     "US500m":  2.0,
     "EURUSDm": 1.8,
     "GBPUSDm": 1.8,
+    # 2026-09-19: UKOILm — ไม่มี real volume ให้ merge ต้องใช้ tick_volume เป็น proxy
+    # (เหตุผลเดียวกับ XAUUSDm/USDJPYm ที่ลดมาที่ 1.6) ตารางจริง 400 แท่ง 4H ที่ offset=1:
+    # vol_ratio ของจุด swing อยู่ที่ 0.58-2.24 มัธยฐาน ~1.1 -> เกณฑ์ default 1.9x ผ่านแค่
+    # **1/14 จุดของ high และ 1/12 ของ low** = check_divergence (ใช้ volume ล้วน ไม่สน wick)
+    # แทบไม่มีจุดให้ทำงาน ตรงกับผล backtest ที่ได้ Reversal แค่ 2 ไม้ใน 730 วัน
+    "UKOILm":  1.6,
 }
 VOL_MULTIPLIER_BY_CLASS = {
     "CRYPTO": 1.9,
@@ -114,6 +120,9 @@ WICK_RATIO_MIN_BY_SYMBOL = {
     "US500m":  0.6,
     "EURUSDm": 0.6,
     "GBPUSDm": 0.5,
+    # 2026-09-19: UKOILm — ที่ default 0.5 มี **25/26 จุดผ่าน** = ตัวกรองแทบไม่ได้กรองอะไร
+    # (wick_ratio ของจุด swing อยู่ที่ 0.38-0.91) ขยับเป็น 0.54 ตามคำสั่งผู้ใช้
+    "UKOILm":  0.54,
 }
 WICK_RATIO_MIN_BY_CLASS = {
     "CRYPTO": 0.5,

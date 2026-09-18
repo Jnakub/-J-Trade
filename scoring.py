@@ -82,6 +82,10 @@ TREND_FLIP_K = {
     "US500m": 0.20,
     "EURUSDm": 0.20,
     "GBPUSDm": 0.20,
+    # 2026-09-18: UKOILm — backtest_trend_flip_ksweep UKOILm 3000 1D (1,726 แท่ง 1D)
+    #   k 0.20-0.60 ให้ FalseFlip = 0% ทุกค่า · เลือก 0.20 เพราะได้ flip มากสุด (36 ครั้ง)
+    #   และเร็วกว่า EMA50/200 cross เฉลี่ย 10.2 แท่ง (matched 13 คู่) — เกณฑ์เดียวกับตัวอื่น
+    "UKOILm": 0.20,
 }
 
 
