@@ -30,6 +30,14 @@ entry_lead_*.csv
 blocked_value_*.csv
 # backtest_mfe.py
 mfe_trades*.csv
+# entry_features.py
+entry_features.csv
+
+# state ของ cooldown หลังถูกด่านปฏิเสธ (scheduler สร้างเอง ดู config.REJECT_COOLDOWN_HOURS)
+reject_cooldown.json
+
+# log ของระบบจริง — exit_monitor เขียนเองทุกครั้งที่กฎสั่งปิดบางส่วน
+cuts_log.csv
 
 # ไฟล์ที่ Wine สร้างทิ้งไว้ตอนรัน python ผ่าน run_wine.sh
 msedgewebview2.dxvk-cache

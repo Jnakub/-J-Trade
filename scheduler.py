@@ -2,9 +2,11 @@
 scheduler.py — รันค้างไว้ เช็คทุก 1 ชั่วโมงอัตโนมัติ
 ใช้: python scheduler.py
 """
+import json
+import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import MetaTrader5 as mt5
 from dotenv import load_dotenv
@@ -17,7 +19,8 @@ import journal
 from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
-    COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, TP_MAX_ATR,
+    COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, MIN_TURN_FROM_EXTREME_R,
+    REJECT_COOLDOWN_HOURS, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
@@ -37,6 +40,62 @@ import notify
 from logger_setup import get_logger, tee_print
 
 log = get_logger("scheduler")
+
+# ---------------------------------------------------------------------------
+# state ของ cooldown หลังถูกด่านปฏิเสธ (config.REJECT_COOLDOWN_HOURS)
+# ---------------------------------------------------------------------------
+# เก็บลงไฟล์ ไม่ใช่ตัวแปรในหน่วยความจำ — scheduler รันเป็น while True ก็จริง แต่ถ้าโปรเซส
+# รีสตาร์ท (crash / reboot / แก้โค้ดแล้วรันใหม่) cooldown ที่ค้างอยู่จะหายเงียบๆ แล้วสัญญาณ
+# ที่เพิ่งถูกปฏิเสธจะเข้าได้ทันทีในรอบถัดไป = พฤติกรรมต่างจาก backtest โดยไม่มีอะไรฟ้อง
+# ซึ่งเป็นรูปแบบความผิดพลาดที่แพงที่สุดของโปรเจกต์นี้ (ตัวเลขผิดแบบเงียบ ไม่ใช่โค้ด crash)
+_REJECT_CD_FILE = os.path.join(os.path.dirname(__file__), "reject_cooldown.json")
+
+
+def _reject_cd_load() -> dict:
+    try:
+        with open(_REJECT_CD_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}      # ไฟล์ยังไม่มี/พัง = ถือว่าไม่มีใครติด cooldown (fail-open ตามพฤติกรรมเดิม)
+
+
+def reject_cd_blocked(symbol: str, direction: str):
+    """คืนเวลาที่จะปลดล็อก ถ้า symbol+ทิศนี้ยังติด cooldown อยู่ · None = เข้าได้"""
+    if not REJECT_COOLDOWN_HOURS:
+        return None
+    raw = _reject_cd_load().get(f"{symbol}|{direction}")
+    if not raw:
+        return None
+    try:
+        until = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return until if datetime.now() < until else None
+
+
+def reject_cd_set(symbol: str, direction: str) -> None:
+    """ตั้ง cooldown ให้ symbol+ทิศนี้ — เรียกตอนด่านปฏิเสธเท่านั้น"""
+    if not REJECT_COOLDOWN_HOURS:
+        return
+    data = _reject_cd_load()
+    data[f"{symbol}|{direction}"] = (datetime.now()
+                                     + timedelta(hours=REJECT_COOLDOWN_HOURS)).isoformat()
+    # ล้างรายการที่หมดอายุแล้วทิ้งไปด้วย กันไฟล์โตไม่รู้จบ
+    now = datetime.now()
+    data = {k: v for k, v in data.items()
+            if (lambda t: t is not None and t > now)(_parse_iso(v))}
+    try:
+        with open(_REJECT_CD_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as exc:
+        print(f"  ⚠️ เขียน {_REJECT_CD_FILE} ไม่ได้ ({exc}) — cooldown รอบนี้จะไม่ถูกจำ")
+
+
+def _parse_iso(raw: str):
+    try:
+        return datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
 print = tee_print(log)   # เขียนทุกอย่างที่ print ลง logs/scheduler.log ด้วย (ดู logger_setup.py)
 
 # Regime ที่ "ไม่เปิด" scorecard ใดๆ — รอความชัดเจนก่อน (ตาม Mutual Exclusivity ที่ตั้งไว้)
@@ -357,6 +416,31 @@ def scan_symbol(symbol: str) -> None:
                     print(f"  [{symbol}] NO ENTRY — ราคาวิ่งไปทาง {direction} มาแล้ว {_runup:.2f}R "
                           f"ใน 24 ชม. (เกิน {MAX_RUNUP_24H_R:g}R) — เข้าตอนปลายทาง")
                     return
+
+                # 4d. ด่านฝาแฝดคนละด้าน — กันเข้าไม้ "ตรงจุดสุดขั้วพอดี" (ยังไม่เด้งให้เห็น)
+                #     ดูที่มา/ตัวเลขคัดกรองทั้งหมดที่ config.MIN_TURN_FROM_EXTREME_R
+                #     หน้าต่าง = 24 แท่ง 1H ที่ปิดแล้ว **รวมแท่งปิดล่าสุด** (iloc[-25:-1] เพราะ
+                #     iloc[-1] คือแท่งที่ยังไม่ปิด) = ชุดเดียวกับที่ backtest_replay ใช้
+                #     (clock.iloc[n-24:n]) และตรงกับที่ entry_features.py คัดกรองไว้เป๊ะ
+                #     ⚠️ บล็อกนี้ซ้อนอยู่ใต้การดึง _h1 ของข้อ 4c — ถ้าตั้ง MAX_RUNUP_24H_R = None
+                #     ด่านนี้จะหยุดทำงานตามไปด้วยเงียบๆ (ถ้าจะปิด 4c ต้องย้ายการดึง _h1 ออกมา)
+                if MIN_TURN_FROM_EXTREME_R is not None:
+                    # เช็ค cooldown **ก่อน** ตัวด่านเสมอ — ถ้าเช็คทีหลัง การถูกปฏิเสธซ้ำทุก
+                    # ชั่วโมงจะไปต่ออายุ cooldown ของตัวเองไปเรื่อยๆ กลายเป็นบล็อกถาวร
+                    # (ลำดับเดียวกับ backtest_replay ต้องตรงกันเป๊ะ ไม่งั้นวัดคนละระบบ)
+                    _cd_until = reject_cd_blocked(symbol, direction)
+                    if _cd_until:
+                        print(f"  [{symbol}] SKIP — ติด cooldown หลังถูกด่านปฏิเสธ "
+                              f"(ถึง {_cd_until:%Y-%m-%d %H:%M})")
+                        return
+                    _w = _h1.iloc[-25:-1]
+                    _turn = ((entry - float(_w["low"].min())) if direction == "Long"
+                             else (float(_w["high"].max()) - entry)) / _risk
+                    if _turn < MIN_TURN_FROM_EXTREME_R:
+                        print(f"  [{symbol}] NO ENTRY — เข้าตรงจุดสุดขั้ว 24 ชม. "
+                              f"(เด้งมาแค่ {_turn:.2f}R < {MIN_TURN_FROM_EXTREME_R:g}R)")
+                        reject_cd_set(symbol, direction)
+                        return
 
         # 5. Execute
         # ── ฐานตรึงของ ATR Trailing SL — คำนวณก่อนส่ง order เพื่อส่งเข้า place_order() รวดเดียว

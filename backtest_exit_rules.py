@@ -156,6 +156,19 @@ SETS = {
         "-0.3R":    {"BREAKEVEN_LEVEL_R": -0.3},
         "-0.5R":    {"BREAKEVEN_LEVEL_R": -0.5},
     },
+    # หลังกฎ BE ยิงแล้ว SL แช่ที่ entry ตลอดอายุไม้ที่เหลือ (89/89 ไม้ที่แคบเข้าได้ หยุดที่ entry
+    # เป๊ะ เลยไป 0 ไม้) — ชุดนี้ถามว่า "ให้ SL ไต่ตามระยะทางที่เดินไปหา TP" คุ้มไหม
+    # KEEP = สัดส่วนของระยะทางที่เดินไปแล้วที่ยอมล็อกไว้ · ดู exit_monitor.TP_PROGRESS_LOCK
+    # 🔴 ⚠️ กฎนี้ปิดไม้เร็วขึ้น = คืนช่องถือไม้ = **ชุดไม้เปลี่ยน** ชุดนี้จึงเป็นแค่ด่านคัดกรอง
+    #    (ไม่เห็นไม้ที่จะเข้ามาแทน) ตัวชนะต้องยืนยันด้วย backtest_replay --tp-lock=X เต็มเสมอ
+    # "0" ต้องออกมาเท่า control เป๊ะทุกไม้ — identity check ไม่ใช่ตัวเลือก (CLAUDE.md ข้อ 5)
+    "tplock": {
+        "control": {"TP_PROGRESS_LOCK": False},
+        "0":       {"TP_PROGRESS_LOCK": True, "TP_PROGRESS_LOCK_KEEP": 0.0},
+        "0.25":    {"TP_PROGRESS_LOCK": True, "TP_PROGRESS_LOCK_KEEP": 0.25},
+        "0.5":     {"TP_PROGRESS_LOCK": True, "TP_PROGRESS_LOCK_KEEP": 0.5},
+        "0.75":    {"TP_PROGRESS_LOCK": True, "TP_PROGRESS_LOCK_KEEP": 0.75},
+    },
     "slowkeep2": {
         "control":     LIVE_SLOW,
         "100%@5วัน":   {**LIVE_SLOW, "SLOW_TRADE_KEEP": 0, "SLOW_TRADE_DAYS": 5},

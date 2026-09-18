@@ -98,7 +98,7 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
      --div-price-tol=X  ผ่อนการเทียบ "ราคาทำ new extreme" ได้ X ATR (ปกติ 0 = เทียบเป๊ะ)
                  ATR(14) บน 4H ณ แท่งของจุด swing ใหม่ · ไม่แตะรายการ swing = เพิ่มไม้อย่างเดียว
                  เคยวัดที่ 0.5 แล้ว ΔR -0.78 (ดู regime_check.DIV_PRICE_TOLERANCE_ATR)
-     --adx-decline-bars=N  ทับ ADX_DECLINE_BARS (ปกติ 4) — ADX ต้องลงติดกันกี่แท่งจาก peak
+     --adx-decline-bars=N  ทับ ADX_DECLINE_BARS (ปกติ 3) — ADX ต้องลงติดกันกี่แท่งจาก peak
                  ⚠️ ไม่ใช่ subset สะอาด — เลื่อนเวลาเข้าไม้ = เปลี่ยนการครองช่อง churn เยอะ
      --div-stall=N  ทับ DIV_STALL_THRESHOLD (ปกติ 5) — RSI สวนได้กี่แต้มถึงยังนับเป็น divergence
                  0 = strict ล้วน · เลขมาก = หลวมขึ้น · ไม่แตะรายการ swing เหมือนกัน
@@ -338,7 +338,10 @@ _dst_arg = next((a for a in sys.argv if a.startswith("--div-stall=")), None)
 if _dst_arg:
     regime_check.DIV_STALL_THRESHOLD = float(_dst_arg.split("=")[1])
 
-# --adx-decline-bars=N : ทับ ADX_DECLINE_BARS (ปกติ 4 ตั้งแต่ 2026-09-17 · เดิม 3)
+# --adx-decline-bars=N : ทับ ADX_DECLINE_BARS (ปกติ 3)
+# 🔴 2026-09-18: บรรทัดนี้เคยเขียนว่า "ปกติ 4 ตั้งแต่ 2026-09-17" ซึ่ง **ไม่จริง** — 4 ถูกลอง
+# แล้วย้อนกลับ (ดู config.REVERSAL_NEEDS_CHOCH ที่อ้างถึง "ADX_DECLINE_BARS 4 ที่ลองแล้วย้อน")
+# ค่าจริงใน regime_check.py คือ 3 มาตลอด · เจอตอนไล่ว่าทำไม XAU เข้าไม้ 2026-09-17 12:50
 # ⚠️ ตัวนี้ **ไม่ใช่ subset สะอาด** แบบ --div-stall — มันเลื่อนเวลาที่ regime ปล่อยให้เข้าไม้
 # = เปลี่ยนว่าใครครองช่องเมื่อไหร่ = churn เยอะกว่ามาก ต้องดู direct/churn แยกเสมอ
 _adb_arg = next((a for a in sys.argv if a.startswith("--adx-decline-bars=")), None)
@@ -354,6 +357,31 @@ if _tex_arg:
     em.TRAIL_FROM_EXTREME = True
     if "=" in _tex_arg:
         em.TRAIL_EXTREME_ATR_MULT = float(_tex_arg.split("=")[1])
+
+# --adx-dir-bars=N / --adx-dir-eps=X : ไม้บรรทัดที่ตัดสินว่าเส้น ADX "ขึ้น/ทรง/ลง"
+#   diff = ADX[แท่งปิดล่าสุด] − ADX[ย้อน N แท่ง] · |diff| < EPS = "ทรง" (ซึ่งผ่านด่าน TREND
+#   เท่ากับ "ขึ้น") · diff <= −EPS = "ลง" = เขตเทา = ไม่เข้าไม้   ของจริง 4 / 1.0
+# ⚠️ **ยิ่งแน่น (N มากขึ้น หรือ EPS น้อยลง) = ตัดไม้ออก ไม่ใช่เพิ่มไม้** — คัดกรองบนไม้ 145 ไม้
+#   ของ base (adx_dir_at_entry.py 2026-09-18) ว่าไม้ที่จะถูกตัดทิ้งทำเงินได้เท่าไหร่:
+#     5/0.5 -> ตัด 25 ไม้ที่รวมกัน **+5.81R** (= เสีย)   5/1.0 -> ตัด 13 ไม้ −0.96R (= ได้)
+#     6/1.0 -> ตัด 19 ไม้ +0.60R         8/1.0 -> ตัด 24 ไม้ +1.03R
+#   ทุกช่อง |t| <= 1.01 (SE = 1.15×√n) = **ไม่มีช่องไหนแยกจากศูนย์ได้** อย่าคาดหวังผลจากแกนนี้
+# ⚠️ เปลี่ยนชุดไม้ (ตัดไม้ = คืนช่อง = ไม้อื่น backfill) -> replay เต็มเท่านั้น ตัวเลขข้างบน
+#   เป็นแค่การคัดกรอง ไม่ได้นับไม้ที่จะเข้ามาแทน
+_adb2_arg = next((a for a in sys.argv if a.startswith("--adx-dir-bars=")), None)
+if _adb2_arg:
+    regime_check.ADX_DIR_BARS = int(_adb2_arg.split("=")[1])
+_ade_arg = next((a for a in sys.argv if a.startswith("--adx-dir-eps=")), None)
+if _ade_arg:
+    regime_check.ADX_DIR_EPS = float(_ade_arg.split("=")[1])
+
+# --tp-lock[=KEEP] : หลังกฎ BE ยิงแล้ว ให้ SL ไต่ขึ้นตามระยะทางที่เดินไปหา TP (ดู exit_monitor)
+# default ปิด = พฤติกรรมเดิม (SL แช่ที่ entry ตลอดอายุไม้ที่เหลือ)  KEEP=0 = no-op เป๊ะ
+_tpl_arg = next((a for a in sys.argv if a == "--tp-lock" or a.startswith("--tp-lock=")), None)
+if _tpl_arg:
+    em.TP_PROGRESS_LOCK = True
+    if "=" in _tpl_arg:
+        em.TP_PROGRESS_LOCK_KEEP = float(_tpl_arg.split("=")[1])
 
 _amp_arg = next((a for a in sys.argv if a.startswith("--adx-min-peak=")), None)
 if _amp_arg:
@@ -429,6 +457,21 @@ for _flag, _attr, _cast in (("--slow-r=",     "SLOW_TRADE_R",    float),
 _runup_arg = next((a for a in sys.argv if a.startswith("--max-runup-24h=")), None)
 # default มาจาก config.MAX_RUNUP_24H_R (ค่าที่ระบบจริงใช้) — ธงมีไว้ทับเฉพาะรอบทดลองเท่านั้น
 max_runup = float(_runup_arg.split("=")[1]) if _runup_arg else config.MAX_RUNUP_24H_R
+
+# --min-turn=X : ทับ config.MIN_TURN_FROM_EXTREME_R (ปกติ None = ปิด) — กันเข้าไม้ตรงจุดสุดขั้ว
+# 24 ชม. พอดี (ดูที่มา/ตัวเลขคัดกรองทั้งหมดที่ config.MIN_TURN_FROM_EXTREME_R) · 0 = ปิดด่าน
+_mt_arg = next((a for a in sys.argv if a.startswith("--min-turn=")), None)
+min_turn = float(_mt_arg.split("=")[1]) if _mt_arg else config.MIN_TURN_FROM_EXTREME_R
+if min_turn == 0:
+    min_turn = None
+
+# --reject-cooldown=N : ทับ config.REJECT_COOLDOWN_HOURS — พอด่านปฏิเสธ setup แล้วล็อกทิศนั้น
+# ไว้ N ชม. กันสัญญาณเดิมกลับเข้ามา (ที่มา/ตัวเลขทั้งหมดที่ config.REJECT_COOLDOWN_HOURS)
+_rcd_arg = next((a for a in sys.argv if a.startswith("--reject-cooldown=")), None)
+reject_cd = float(_rcd_arg.split("=")[1]) if _rcd_arg else config.REJECT_COOLDOWN_HOURS
+if not reject_cd:
+    reject_cd = None
+reject_until = {}     # {direction: เวลาที่ปลดล็อก} — อายุเท่ากับการรัน 1 symbol
 no_struct_break = "--no-structure-break" in sys.argv
 if no_struct_break:
     em.STRUCTURE_BREAK_ENABLED = False
@@ -867,6 +910,30 @@ for n, row in enumerate(clock.to_dict("records")):
             note(f"ราคาวิ่งไปทางที่จะเข้ามาแล้ว > {max_runup:g}R ใน 24 ชม.")
             continue
 
+    # --reject-cooldown : ทิศนี้เพิ่งถูกด่านปฏิเสธไปไม่นาน -> ยังไม่ให้เข้า (ดู config)
+    # ต้องเช็ค **ก่อน** ตัวด่านเอง ไม่งั้นการปฏิเสธซ้ำจะไปต่ออายุ cooldown ของตัวเองไปเรื่อยๆ
+    # 🔴 2026-09-18: ต้องมี `strategy == "Scoring"` ด้วย — รอบแรกลืมใส่ ทำให้ไม้ Reversal โดน
+    # บล็อกจาก cooldown ที่ **Scoring** เป็นคนตั้ง ซึ่ง (ก) ไม่ตรงกับ scheduler.py ที่บล็อก 4d
+    # ซ้อนอยู่ใต้เงื่อนไข Scoring อยู่แล้ว = live ต่างจาก backtest เงียบๆ และ (ข) ผิดเจตนา —
+    # การที่ราคาอยู่ตรงจุดสุดขั้วคือ "เหตุผลที่ Reversal ควรเข้า" ไม่ใช่เหตุผลที่ควรห้าม
+    if reject_cd and strategy == "Scoring" \
+       and reject_until.get(direction) is not None and now < reject_until[direction]:
+        note(f"cooldown หลังถูกด่านปฏิเสธ ({reject_cd} ชม.)")
+        continue
+
+    # --min-turn : ด่านฝาแฝดคนละด้าน — กันเข้าไม้ "ตรงจุดสุดขั้วพอดี" (ยังไม่เด้งให้เห็น)
+    # ใช้หน้าต่าง 24 แท่งชุดเดียวกับ run-up guard ข้างบน (clock เดียวกัน = นาฬิกาตลาดเปิด)
+    if min_turn is not None and strategy == "Scoring" and n >= 24:
+        _risk = abs(entry - sl)
+        _w = clock.iloc[n - 24:n]
+        _turn = ((entry - float(_w["low"].min())) if direction == "Long"
+                 else (float(_w["high"].max()) - entry)) / _risk if _risk else 0.0
+        if _turn < min_turn:
+            note(f"เข้าตรงจุดสุดขั้ว 24 ชม. (เด้งมาแค่ {_turn:.2f}R < {min_turn:g}R)")
+            if reject_cd:
+                reject_until[direction] = now + timedelta(hours=reject_cd)
+            continue
+
     # เก็บผลรายเกณฑ์ลงไม้ด้วย — ไม่งั้นต้องมาไล่เรียก compute_score ซ้ำทีหลังเพื่อวิเคราะห์
     # รายเกณฑ์ ซึ่งได้ค่าจาก scoring.py "ณ วันที่วิเคราะห์" ไม่ใช่ตัวที่กรองไม้นี้จริงตอน replay
     # (ถ้าสกอร์การ์ดถูกแก้ระหว่างนั้น ตัวเลขจะไม่ตรงกับไม้ที่ได้มาโดยที่ไม่มีอะไรฟ้อง)
@@ -1010,6 +1077,10 @@ if "--structure-break" in sys.argv and not no_struct_break:
     _tag += "_structbreak"
 if _runup_arg:
     _tag += f"_runup{max_runup:g}"
+if min_turn != config.MIN_TURN_FROM_EXTREME_R:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += f"_minturn{min_turn:g}" if min_turn else "_nominturn"
+if reject_cd != config.REJECT_COOLDOWN_HOURS:
+    _tag += f"_rejcd{reject_cd:g}" if reject_cd else "_norejcd"
 if _mh_arg:
     _tag += "_nomaxhold" if MAX_HOLD_DAYS >= 1e6 else f"_maxhold{MAX_HOLD_DAYS:g}"
 if live_spread:      # ผลรอบนี้ขึ้นกับเวลาที่รัน — อย่าให้ทับไฟล์ base ที่เทียบข้ามรอบได้
@@ -1030,6 +1101,10 @@ if _amp_arg:
     _tag += f"_adxminpeak{regime_check.ADX_MIN_PEAK_REVERSAL or 0:g}"
 if _tex_arg:
     _tag += f"_trailext{em.TRAIL_EXTREME_ATR_MULT:g}"
+if _tpl_arg:
+    _tag += f"_tplock{em.TP_PROGRESS_LOCK_KEEP:g}"
+if _adb2_arg or _ade_arg:
+    _tag += f"_adxdir{regime_check.ADX_DIR_BARS:g}-{regime_check.ADX_DIR_EPS:g}"
 if scoring_struct_match != cfg.SCORING_NEEDS_STRUCTURE_MATCH:
     _tag += "_structmatch" if scoring_struct_match else "_nostructmatch"
 if rev_choch != cfg.REVERSAL_NEEDS_CHOCH:
