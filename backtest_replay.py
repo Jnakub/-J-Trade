@@ -347,10 +347,26 @@ if _adb_arg:
 
 # --adx-min-peak=N : ทับ ADX_MIN_PEAK_REVERSAL (ปกติ 28.5) — 0 = ปิดด่าน (พฤติกรรมก่อน 2026-09-17)
 # ⚠️ ไม่ใช่ subset สะอาด — แท่งที่ตกด่านนี้ไหลไป branch TREND ได้ = Scoring อาจเพิ่ม
+# --trail-extreme[=MULT] : เปิด trailing ที่เกาะจุดสูงสุด/ต่ำสุดหลังเข้าไม้ (ดู exit_monitor)
+# default ปิด = พฤติกรรมเดิม (pinned base ที่ swing ตอนเข้า ซึ่งขึ้นไม่ถึง entry โดยโครงสร้าง)
+_tex_arg = next((a for a in sys.argv if a == "--trail-extreme" or a.startswith("--trail-extreme=")), None)
+if _tex_arg:
+    em.TRAIL_FROM_EXTREME = True
+    if "=" in _tex_arg:
+        em.TRAIL_EXTREME_ATR_MULT = float(_tex_arg.split("=")[1])
+
 _amp_arg = next((a for a in sys.argv if a.startswith("--adx-min-peak=")), None)
 if _amp_arg:
     _v = float(_amp_arg.split("=")[1])
     regime_check.ADX_MIN_PEAK_REVERSAL = _v if _v > 0 else None
+
+# --rev-choch / --no-rev-choch : ทับ config.REVERSAL_NEEDS_CHOCH — Reversal ต้องเห็นโครงสร้าง
+# เดิมพัง (CHoCH) ก่อนเข้าไหม · ใช้ exit_monitor.check_structure_break ตัวเดียวกับกฎออก
+rev_choch = cfg.REVERSAL_NEEDS_CHOCH
+if "--rev-choch" in sys.argv:
+    rev_choch = True
+if "--no-rev-choch" in sys.argv:
+    rev_choch = False
 
 # --scoring-struct-match / --no-scoring-struct-match : ทับ config.SCORING_NEEDS_STRUCTURE_MATCH
 # ทิศ Scoring (trend_flip 1D) ต้องตรงกับโครงสร้าง 4H ไหม — เหตุผล+ตัวเลขอยู่ที่ค่าคงที่นั้น
@@ -759,6 +775,13 @@ for n, row in enumerate(clock.to_dict("records")):
                     note(f"Reversal Short แต่เทรนด์ 1D = {bias_1d}")
                     fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
                     continue
+            # CHoCH — โครงสร้างฝั่งตรงข้ามต้องพังแล้ว (ดู config.REVERSAL_NEEDS_CHOCH)
+            if rev_choch:
+                _opp = "Short" if direction == "Long" else "Long"
+                if not em.check_structure_break(symbol, _opp, as_of=now):
+                    note(f"ยังไม่เห็น CHoCH (โครงสร้าง {_opp} ยังไม่พัง)")
+                    fate("ยังไม่เห็น CHoCH")
+                    continue
             score, criteria, passed, inf = reversal.compute_reversal_score(
                 symbol, direction, entry, key_level=rinfo["key_level"],
                 df_4h=rinfo["df_4h"], as_of=now)
@@ -1005,8 +1028,12 @@ if _adb_arg:
     _tag += f"_adxdecl{regime_check.ADX_DECLINE_BARS:g}"
 if _amp_arg:
     _tag += f"_adxminpeak{regime_check.ADX_MIN_PEAK_REVERSAL or 0:g}"
+if _tex_arg:
+    _tag += f"_trailext{em.TRAIL_EXTREME_ATR_MULT:g}"
 if scoring_struct_match != cfg.SCORING_NEEDS_STRUCTURE_MATCH:
     _tag += "_structmatch" if scoring_struct_match else "_nostructmatch"
+if rev_choch != cfg.REVERSAL_NEEDS_CHOCH:
+    _tag += "_revchoch" if rev_choch else "_norevchoch"
 if _swr_arg:
     _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
 if log_cuts and cut_log:

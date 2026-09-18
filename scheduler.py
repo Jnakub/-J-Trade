@@ -20,13 +20,14 @@ from config import (
     COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
-    SCORING_NEEDS_STRUCTURE_MATCH,
+    SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
 from order import calculate_lot_size, clamp_lot, place_order, position_risk_amount
 from binance import merge_real_volume
 from exit_monitor import (
+    check_structure_break,
     analyze_position, print_report, execute_decision,
     check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS_CURRENCY,
 )
@@ -285,6 +286,13 @@ def scan_symbol(symbol: str) -> None:
                           f"({bias_src}) ต้องเป็น Short ถึงจะเข้าได้")
                     return
                 print(f"  [{symbol}] Reversal Short — เทรนด์ 1D = Short ({bias_src}) ผ่านด่าน")
+            # CHoCH — โครงสร้างเดิม (ฝั่งตรงข้ามกับที่จะเข้า) ต้องพังแล้ว ดู config ที่ค่านั้น
+            if REVERSAL_NEEDS_CHOCH:
+                _opp = "Short" if direction == "Long" else "Long"
+                if not check_structure_break(symbol, _opp):
+                    print(f"  [{symbol}] SKIP — ยังไม่เห็น CHoCH (โครงสร้าง {_opp} ยังไม่พัง) "
+                          f"ยังไม่เข้า Reversal {direction}")
+                    return
             print(f"  [{symbol}] เปิด Reversal — Divergence={div_polarity} -> เข้าเป็น {direction}  Entry={entry:.5f}")
             # 2026-09-05: รับเข้า `sl_info` ตัวเดียวกับทาง Scoring — เดิมรับเป็น `info` แล้วโค้ด
             # ด้านล่าง (exec_sl / pinned_swing) อ่านจาก `sl_info` แบบไม่แยก branch ทำให้ไม้

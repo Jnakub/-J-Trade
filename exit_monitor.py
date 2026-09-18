@@ -294,6 +294,32 @@ TRAIL_TIMEFRAME  = MT5_TIMEFRAMES["1H"]
 TRAIL_ATR_PERIOD = 14
 TRAIL_BARS       = 500   # ~20 วันบน 1H — ต้องครอบคลุมเวลาที่ถือ position
 
+# ---------------------------------------------------------------------------
+# Trailing ที่เกาะจุดสูงสุด/ต่ำสุดหลังเข้าไม้ (2026-09-17) — default = ปิด = พฤติกรรมเดิมเป๊ะ
+# ---------------------------------------------------------------------------
+# ปัญหาที่จะแก้: calc_atr_trailing_sl เดิมคืน pinned_base ∓ atr_latest โดย pinned_base ตรึงที่
+# swing ตอนเข้าไม้ **ไม่วิ่งตามราคา** เพดานของมันจึงอยู่ใต้ entry ราว 1 ATR = ขึ้นไปถึง entry
+# ไม่ได้โดยโครงสร้าง -> กฎ BE กลายเป็นกลไกเดียวทั้งระบบที่ดึง SL ให้แคบลง และดึงได้ไกลสุด
+# แค่ entry เป๊ะ (ยืนยันจากข้อมูล 208 ไม้: SL แคบเข้าได้สูงสุด +1.00R พอดี ไม่มีไม้ไหนเลยจุดนั้น)
+#
+# 🔴 ขนาดของรูที่วัดได้ (ชุด 208 ไม้ +38.18R):
+#   ถัง BE มี 42 ไม้ (20% ของทั้งหมด) · **ทุกไม้เคยแตะ +1R มาแล้วโดยนิยาม** (be_lock = ge1r)
+#   แล้วจบรวมที่ **+4.13R** = avgR +0.098 -> ช่องว่างเทียบกับการเก็บ 1R เต็ม = **+37.87R**
+#   ซึ่งใหญ่เท่ากำไรสุทธิทั้งระบบ (แต่นั่นคือ "ขนาดของรู" ไม่ใช่ "เงินที่หยิบได้")
+# ⚠️ แกน "ย้ายจุดล็อก BE" กวาดไปแล้วและ **ตกรอบทั้งแกน** (วาง SL ตรง entry เป๊ะ = ไม้ตายจาก
+#    การย่อปกติ) ส่วนการปิดกฎ BE ทั้งกฎได้ +4.96R แต่กระจุกที่ 5 ไม้ บวก 4/7 -> ไม่เอา
+#    สิ่งที่ **ยังไม่เคยลอง** คือ trailing ที่เกาะราคาจริง ซึ่งคือสวิตช์นี้
+#
+# วิธีทำงาน: new_sl = (จุดสูงสุด/ต่ำสุดของแท่ง 1H ที่ปิดแล้วนับจากเวลาเข้าไม้) ∓ MULT × ATR(14) 1H
+# 🟢 ไม่ต้องแก้ ratchet — ตรรกะที่มีอยู่แล้วคุมทิศให้ถูกต้องอยู่: ก่อนถึง BE ห้าม SL ขยับเข้าหา
+#    entry · หลังผ่าน BE แล้วห้ามถอย = trailing ตัวนี้จะเริ่มล็อกกำไรได้จริงหลังไม้แตะ 1R
+#    ซึ่งตรงกับตำแหน่งของรูพอดี · เพดาน MAX_SL_WIDEN_R ยังคุมฝั่งขยายเหมือนเดิม
+# ⚠️ ถ้าไม้ถือนานเกินหน้าต่าง TRAIL_BARS (500 แท่ง 1H ~20 วัน) จะหาจุดสูงสุดตั้งแต่เข้าไม้ไม่ครบ
+#    -> fallback ไปสูตรเดิมอัตโนมัติ ไม่ใช่เดาค่า
+# ธง backtest: --trail-extreme[=MULT]
+TRAIL_FROM_EXTREME     = False
+TRAIL_EXTREME_ATR_MULT = 2.0
+
 # เพดานการขยาย SL (2026-08-02) — SL ตัวนี้ตั้งใจให้ "หายใจ" ตาม ATR ได้ทั้งสองทาง (ถอยห่างตอน
 # ผันผวนเพื่อไม่ให้โดนเขี่ยแล้วกลับมาที่เดิมตอนสงบ) ไม่ใช่ ratchet ทางเดียวแบบ TP — แต่ lot ถูก
 # คำนวณตอนเปิดไม้จากระยะ SL เริ่มต้น (= 1R) แล้วไม่เปลี่ยนอีก ถ้า ATR ระเบิดจน SL ห่างขึ้นมาก
@@ -467,18 +493,30 @@ def calc_atr_trailing_sl(df_swing: pd.DataFrame, symbol: str,
                 return None
             swing = df_before["high"].iloc[swing_highs_b[-1]]
 
+    # ── Trailing เกาะจุดสูงสุด/ต่ำสุดหลังเข้าไม้ (ดู TRAIL_FROM_EXTREME) ──
+    # ใช้เฉพาะแท่ง 1H ที่ **ปิดแล้ว** (ตัดแท่งท้ายที่ยังฟอร์มอยู่ ตัวเดียวกับที่ atr_latest ใช้)
+    extreme_sl = None
+    if TRAIL_FROM_EXTREME:
+        closed_1h = df_1h.iloc[:len(df_1h) - 1]
+        seg = closed_1h[closed_1h["time"] >= entry_time]
+        # ต้องมีแท่งแรกของไม้อยู่ในหน้าต่างจริง ไม่งั้นจุดสูงสุดจะไม่ครบ -> ปล่อยให้ fallback
+        if len(seg) and closed_1h["time"].iloc[0] <= entry_time:
+            ext = seg["high"].max() if direction == "Long" else seg["low"].min()
+            extreme_sl = (ext - TRAIL_EXTREME_ATR_MULT * atr_latest) if direction == "Long" \
+                         else (ext + TRAIL_EXTREME_ATR_MULT * atr_latest)
+
     if direction == "Long":
         pinned = swing - atr_entry
         return {"swing": swing, "atr_entry": atr_entry, "atr_latest": atr_latest,
                 "pinned_base": pinned,
                 "initial_sl": pinned - atr_entry,
-                "new_sl":     pinned - atr_latest}
+                "new_sl":     extreme_sl if extreme_sl is not None else pinned - atr_latest}
 
     pinned = swing + atr_entry
     return {"swing": swing, "atr_entry": atr_entry, "atr_latest": atr_latest,
             "pinned_base": pinned,
             "initial_sl": pinned + atr_entry,
-            "new_sl":     pinned + atr_latest}
+            "new_sl":     extreme_sl if extreme_sl is not None else pinned + atr_latest}
 
 
 # ---------------------------------------------------------------------------
