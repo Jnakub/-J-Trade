@@ -20,14 +20,15 @@ from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
     COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, MIN_TURN_FROM_EXTREME_R,
-    REJECT_COOLDOWN_HOURS, TP_MAX_ATR,
+    REJECT_COOLDOWN_HOURS, LOT_RISK_WARN_PCT, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
-from order import calculate_lot_size, clamp_lot, place_order, position_risk_amount
+from order import (calculate_lot_size, clamp_lot, place_order, position_risk_amount,
+                   risk_pct_of)
 from binance import merge_real_volume
 from exit_monitor import (
     check_structure_break,
@@ -488,6 +489,15 @@ def scan_symbol(symbol: str) -> None:
 
         lot, _ = calculate_lot_size(symbol, entry, exec_sl, balance, RISK_PER_TRADE)
         lot    = clamp_lot(symbol, lot)
+        # ทำให้การปัดเศษ lot "มองเห็นได้" — volume_step ของโบรกหยาบกว่าที่ต้องการบาง symbol
+        # (XAU: 0.02 = 1.67% · 0.03 = 2.50% ไม่มีค่าไหนได้ 2%) เดิมมันเงียบสนิทเพราะ backtest
+        # รายงานเป็น R ซึ่งไม่ขึ้นกับขนาดไม้ ดูที่มา/ตัวเลขทั้งหมดที่ config.LOT_ROUNDING
+        _risk_pct = risk_pct_of(symbol, entry, exec_sl, lot, balance)
+        _target = RISK_PER_TRADE * 100
+        if _risk_pct == _risk_pct and abs(_risk_pct - _target) / _target * 100 > LOT_RISK_WARN_PCT:
+            print(f"  [{symbol}] ⚠️ lot {lot} ทำให้เสี่ยงจริง {_risk_pct:.2f}% "
+                  f"(เป้า {_target:.1f}% · เพี้ยน {(_risk_pct - _target) / _target * 100:+.0f}%) "
+                  f"— volume_step {mt5.symbol_info(symbol).volume_step:g} หยาบเกินไปสำหรับระยะ SL นี้")
         if exec_sl != sl:
             rr_exec = calc_rr(entry, exec_sl, tp, direction)
             print(f"  [{symbol}] SL ที่ส่ง broker = {exec_sl:.2f} (SL โครงสร้าง {sl:.2f} "

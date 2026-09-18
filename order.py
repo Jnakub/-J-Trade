@@ -7,7 +7,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-from config import RISK_PER_TRADE
+from config import RISK_PER_TRADE, LOT_ROUNDING
 from mt5_connect import connect, get_account_balance, get_tick_or_raise, get_position_or_raise, is_demo_account
 import journal
 import notify
@@ -44,8 +44,25 @@ def calculate_lot_size(symbol: str, entry: float, sl: float,
     else:
         raw_lot = risk_amount / (distance * contract_size)
 
-    lot = math.floor(raw_lot * 10 ** decimals) / 10 ** decimals
+    # ปัดเศษตาม config.LOT_ROUNDING — ดูที่มา/ตัวเลขที่วัดได้ทั้งหมดที่นั่น
+    # floor ปัดลงเสมอ = ความเสี่ยงจริงต่ำกว่าเป้าอย่างเป็นระบบ (XAU median 1.67% จาก 2%)
+    # ซึ่งมองไม่เห็นจาก backtest เพราะ R ไม่ขึ้นกับขนาดไม้ — ผู้เรียกควรใช้ค่าที่คืนไปเตือน
+    scaled = raw_lot * 10 ** decimals
+    lot = (math.floor(scaled + 0.5) if LOT_ROUNDING == "nearest"
+           else math.floor(scaled)) / 10 ** decimals
     return lot, decimals
+
+
+def risk_pct_of(symbol: str, entry: float, sl: float, lot: float, balance: float) -> float:
+    """ความเสี่ยงจริงของ lot นี้ คิดเป็น % ของ balance — ใช้เทียบกับ RISK_PER_TRADE ว่าการ
+    ปัดเศษทำให้เพี้ยนไปเท่าไหร่ (สูตรเดียวกับ calculate_lot_size กลับด้าน รวมการแปลงคู่ JPY)"""
+    info = mt5.symbol_info(symbol)
+    if info is None or not balance:
+        return float("nan")
+    distance = abs(entry - sl)
+    per_lot = (distance * info.trade_contract_size / entry) if "JPY" in symbol.upper() \
+        else (distance * info.trade_contract_size)
+    return lot * per_lot / balance * 100
 
 
 def position_risk_amount(symbol: str, direction: str,
