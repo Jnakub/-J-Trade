@@ -277,6 +277,16 @@ _DIV_RSI_LIVE = regime_check.DIV_RSI_PERIOD        # รอบนี้ "สว�
 _dma_arg = next((a for a in sys.argv if a.startswith("--div-max-age=")), None)
 if _dma_arg:
     regime_check.DIV_MAX_AGE_BARS = int(_dma_arg.split("=")[1])
+
+# --div-max-lookback=N : ทับ DIV_MAX_LOOKBACK_BARS (ปกติ 180) — คู่เทียบ divergence (h1) ถอย
+# ย้อนหลังได้ไกลสุดกี่แท่ง · ดูที่มาทั้งหมดที่ regime_check.DIV_MAX_LOOKBACK_BARS
+# 🟢 เป็น **subset แท้**: ลดแล้วทำได้แค่ "เคยเจอ -> ไม่เจอ" ไม่มีทางไปเบียดคู่ของใคร (ต่างจาก
+#    wick/vol/tolerance ที่เปลี่ยน*รายชื่อ* swing แล้วสลับคู่) = ปุ่ม divergence ที่สะอาดที่สุด
+# 👉 ใส่ 180 ในชุดกวาดด้วยเสมอ = identity check ฟรี (ต้องออกมาเท่า base เป๊ะทุกไม้)
+_dml_arg = next((a for a in sys.argv if a.startswith("--div-max-lookback=")), None)
+_DIV_LOOKBACK_LIVE = regime_check.DIV_MAX_LOOKBACK_BARS
+if _dml_arg:
+    regime_check.DIV_MAX_LOOKBACK_BARS = int(_dml_arg.split("=")[1])
 # --div-rsi-period=N : ทับ regime_check.DIV_RSI_PERIOD เฉพาะรอบนี้
 # ⚠️ ค่านี้ไม่ได้คุมแค่ divergence — reversal.py:207 เรียก calc_rsi() โดยไม่ส่ง period จึงรับ
 # ค่านี้เป็น default ด้วย = เกณฑ์ "RSI extreme" (30/70) ของ Reversal ขยับตามไปพร้อมกัน
@@ -1048,6 +1058,8 @@ if rev_tp_entry:
     _tag += "_revtpentry"
 if regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE:    # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += f"_divage{regime_check.DIV_MAX_AGE_BARS}"
+if _dml_arg:      # ติด tag ทุกครั้งที่ส่งธง รวม 180 ที่เป็น identity check (กันทับไฟล์ base)
+    _tag += f"_divlook{regime_check.DIV_MAX_LOOKBACK_BARS}"
 if regime_check.DIV_RSI_PERIOD != _DIV_RSI_LIVE:
     _tag += f"_divrsi{regime_check.DIV_RSI_PERIOD}"
 if em.RSI_PERIOD != _EXIT_RSI_LIVE:

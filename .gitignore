@@ -42,3 +42,4 @@ cuts_log.csv
 # ไฟล์ที่ Wine สร้างทิ้งไว้ตอนรัน python ผ่าน run_wine.sh
 msedgewebview2.dxvk-cache
 settings.dat
+entry_structure.csv
