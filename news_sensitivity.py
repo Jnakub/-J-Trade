@@ -210,6 +210,7 @@ for lab, kw in (
         ("ของเดิม: เหลือ 50% ทุกไม้",          dict()),
         ("เหลือ 75% ทุกไม้",                    dict(b_keep=0.75)),
         ("เหลือ 50% เฉพาะไม้ที่ยังไม่กำไร",     dict(b_only_if_losing=True)),
+        ("ปิด 100% เฉพาะไม้ที่ยังไม่กำไร",       dict(b_only_if_losing=True, b_keep=0.0)),
         ("ปิดกฎ B ทิ้ง (เหลือแต่ A)",           dict(use_b=False)),
 ):
     rng = np.random.default_rng(0)
