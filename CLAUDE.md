@@ -266,7 +266,7 @@ checklist ข้อ 0 ปิดไม้ก่อน `backtest_replay.py:592` �
 | `backtest_score.py` | เช็ค score ณ **จุดเดียว** ในอดีต (debug) | ไม่ใช่เครื่องมือวัดผล |
 | `backtest_reversal.py` | เดิน Reversal path ทั้งเส้น ณ เวลาในอดีต (debug) | ไม่ใช่เครื่องมือวัดผล |
 | `backtest_tp_sweep.py` | หา `TP_FIB_RATIO` แยกราย symbol | ยึดหน้าต่างเวลาจาก `datetime.now()` — เลื่อนทุกรอบที่รัน |
-| `backtest_trend_flip_ksweep.py` | หา `TREND_FLIP_K` แยกราย symbol | ดึงแท่งล่าสุดเสมอ ไม่มี `as_of` |
+| `backtest_trend_flip_ksweep.py` | หา `TREND_FLIP_K` แยกราย symbol | ดึงแท่งล่าสุดเสมอ ไม่มี `as_of` · 🔴 **default เป็น 4H แต่ระบบใช้ 1D** (`get_trend_flip_bias` ใช้ `df_1d`) — ต้องส่ง `1D` ต่อท้ายทุกครั้ง ไม่งั้นได้ k ของ timeframe ที่ไม่มีใครใช้ |
 | `backtest_rsi_rebound.py` | เทียบ RSI double rebound vs threshold เดี่ยว | วัด signal rate / predictive power ไม่ใช่ R |
 | `backtest_exit_compare.py` | Fixed SL/TP vs Chandelier (ของเก่า BTC 1 เดือน) | เก่ามาก · ยึดหน้าต่างจาก `now()` |
 | `inspect_swings.py` | ตาราง swing high/low พร้อม vol/wick ratio | ทุกแถวในตาราง**ผ่าน vol-OR-wick มาแล้ว** (ตัวกรองอยู่ใน `find_swing_highs/lows`) ส่วน `clean ✓` = จุดที่รอด `collapse_swing_runs` อีกชั้น = **สิ่งที่ระบบเห็นจริง** 🔴 2026-09-19 แก้: บรรทัดนี้เคยเขียนว่า "`check_divergence` ใช้ volume ล้วน ต้องดูคอลัมน์ `vol`" — **ไม่จริงตั้งแต่ 2026-09-15** ที่ `DIV_WICK_ALL_SYMBOLS` ถูกตั้งเป็น True (`check_divergence` เรียก `swing_wick_ratio_min()` ตรงๆ เหมือนทุกจุด) คำเตือนที่ค้างทำให้อ่านตารางผิดไปแล้วจริง 1 ครั้ง |

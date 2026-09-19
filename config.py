@@ -26,6 +26,7 @@ ASSET_CLASS = {
     "GBPUSDm": "FOREX",
     "US500m":  "INDEX",
     "UKOILm":  "COMMODITY",   # ไม่มี *_BY_CLASS ให้ — ใช้ override ราย symbol ทั้ง vol/wick
+    "HK50m":   "INDEX",       # ดัชนี Hang Seng — คลาสเดียวกับ US500m แต่ vol/wick override เอง
 }
 
 
@@ -868,6 +869,8 @@ RSI_REBOUND_MIN_TOUCHES   = 1    # ต้องแตะ+เด้งอย่�
 #
 # 🔴 เช็คลิสต์ตอนเพิ่ม symbol ใหม่ (ทุกช่องต้องตั้งค่า ไม่งั้นได้ default ที่อาจไม่เหมาะ):
 #   1. scoring.TREND_FLIP_K        — รัน backtest_trend_flip_ksweep.py หา k (ไม่มี = bias None = SKIP ตลอด)
+#      🔴 **ต้องส่ง `1D` ต่อท้าย**: `./run_wine.sh backtest_trend_flip_ksweep.py <SYM> 3000 1D`
+#      default ของมันคือ 4H แต่ระบบเรียก compute_trend_regime บน 1D เท่านั้น (2026-09-19)
 #   2. swing.swing_vol_multiplier  — default 1.9x
 #   3. swing.swing_wick_ratio_min  — default 0.5
 #      🔴 **วิธีทำข้อ 2+3 (คำสั่งผู้ใช้ 2026-09-19): รัน 2 ค่านี้แล้วเอาตารางให้ผู้ใช้เลือก**
@@ -1002,6 +1005,13 @@ SPREAD_PCT_BY_SYMBOL = {
     # (spread คงที่) = ระดับเดียวกับ ETHUSDm (0.0399) ซึ่งระบบเทรดอยู่แล้ว
     # ⚠️ ค่า info.spread ที่อ่านตอนตลาดปิดให้ 0.000% — ต้องวัดจาก bid/ask ตอนเปิดเท่านั้น
     "UKOILm":  0.0368,
+    # 2026-09-19: HK50m — tick 278,112 รายการใน 14 วัน (copy_ticks_range เหมือนที่วัด XRP)
+    # median 0.0287% · p90 0.0291% (= คงที่เหมือนตัวอื่น) · p99 0.1283% (กว้างขึ้น 4.5 เท่า
+    # เป็นบางจังหวะ ซึ่งตัวอื่นไม่มี — ถ้าวันหนึ่งต้นทุนจริงสูงกว่าที่ backtest คิด ให้สงสัยตรงนี้)
+    # ต้นทุน 0.0136R/ไม้ = **ถูกกว่า GBPUSDm (0.0114R) เล็กน้อยเท่านั้น และถูกกว่า US500m
+    # ในแง่ spread ดิบ** · วัดตอนตลาดปิดวันเสาร์ได้เพราะใช้ tick ย้อนหลัง ไม่ใช่ symbol_info_tick
+    # (info.spread ให้ 314 ตามคำเตือนในเช็คลิสต์ข้อ 6 — ไม่ได้ใช้)
+    "HK50m":   0.0287,
     # ถอดออกจาก SYMBOLS แล้ว (ดูบล็อก SYMBOLS) เก็บไว้ให้รอบย้อนหลังรันได้ — 0.71% คือ 100 เท่า
     # ของ XAU/US500 และเป็นเหตุผลเชิงกลไกที่มันถูกถอดออก ไม่ใช่แค่ผล R
     "XRPUSDm": 0.7085,
@@ -1049,6 +1059,7 @@ COOLDOWN_HOURS_BY_SYMBOL = {
     "EURUSDm": 0,
     "GBPUSDm": 0,
     "UKOILm": 0,
+    "HK50m": 0,
 }
 
 # ---------------------------------------------------------------------------
