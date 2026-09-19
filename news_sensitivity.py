@@ -40,6 +40,23 @@
 ⚠️ และนี่คือ **ขอบบนของความเสียหาย** (กติกาข้อ 3c): ชุดไม้คงที่ = ปิดไม้เร็วขึ้นแล้วช่องว่าง
    ที่คืนมาไม่ถูกนับว่ามีไม้ใหม่เข้ามาแทน ของจริงจะเบากว่านี้เท่าไหร่ ต้อง replay เต็มถึงจะรู้
 
+🔴 ทางเลือกแก้กฎ B (วัด 2026-09-19 · ยังไม่ได้เอาเข้าระบบ รอผู้ใช้ตัดสิน):
+     ของเดิม เหลือ 50% ทุกไม้           -6.95R
+     เหลือ 75% ทุกไม้                    -5.64R   (+1.31)
+     เหลือ 50% เฉพาะไม้ที่ยังไม่กำไร     -4.43R   (+2.53)
+     ปิดกฎ B ทิ้ง                        -4.33R   (+2.62)
+   "เฉพาะไม้ที่ยังไม่กำไร" ได้ 97% ของผลที่ปิดทิ้งเลย โดยยังเหลือกฎไว้ในเคสที่เสี่ยงจริง
+🔑 **แล้วกฎ B กันอะไรอยู่จริงๆ — วัดแล้วได้ว่า "ไม่ได้กันอะไรเลย"**
+   เหตุผลที่กฎนี้มีอยู่คือกลัวราคากระโดดข้าม SL ตอนข่าวออก แต่วัด 21,374 แท่ง-ชั่วโมงที่ระบบ
+   ถือไม้อยู่จริงตอนตลาดเปิดต่อเนื่อง: **gap > 0.25R เกิด 0 ครั้ง · gap ใหญ่ที่สุด 0.19R**
+   gap ที่เกิน 0.5R มี 15 ครั้งและ **ทุกครั้งมีตลาดปิดคั่น** (สุดสัปดาห์) ซึ่งกฎ B ที่อิง
+   "1 ชม.ก่อนข่าว" กันไม่ได้อยู่แล้ว · ส่วนแท่งที่วิ่งเร็วเกิน 1R ในชั่วโมงเดียวมี 0.20%
+   แต่ SL ก็ยังปิดที่ -1R ตามเดิมเพราะไม่มี gap => **ความเสี่ยงถูกกั้นด้วย SL อยู่แล้ว**
+   การหั่นครึ่งก่อนข่าวจึงแค่ทำให้ไม้เสียได้ -0.5R แทน -1R และไม้ดีได้ครึ่งเดียว
+   ซึ่งบนระบบที่ expectancy เป็นบวก = ขาดทุนล้วน
+   ⚠️ สิ่งเดียวที่วัดไม่ได้คือ **slippage ของโบรกตอนข่าว** (OHLC ไม่บอก) — ไม้จริงที่โดน SL
+      มีแค่ 2 ไม้ n น้อยเกินจะดู
+
 ใช้:  ./run_wine.sh news_sensitivity.py
       ต้องมี news_paths.csv จาก ./run_wine.sh news_paths.py ก่อน
       (ตัวมันเองอ่าน CSV อย่างเดียว ไม่แตะ MT5 — แต่ต้องผ่าน wine เพราะ `from config import
@@ -112,7 +129,8 @@ def draw_events(rng, rate, mode):
     return np.sort(ev[:n])
 
 
-def simulate(ev, use_a=True, use_b=True, tally=None, per_trade=False):
+def simulate(ev, use_a=True, use_b=True, tally=None, per_trade=False,
+             b_keep=KEEP, b_only_if_losing=False):
     """คืน ΔR รวม บนหน้าต่างข่าวชุดนี้ — เปิด/ปิดกฎแต่ละตัวได้เพื่อดูว่าตัวไหนเป็นตัวการ
     tally = dict ไว้เก็บสถิติว่าไม้ที่โดนแต่ละกฎ เป็นไม้แบบไหน (ดี/ตาย)
     per_trade=True = คืน array รายไม้แทนผลรวม (ใช้หา 5 ไม้ใหญ่สุดตามกติกาข้อ 3)"""
@@ -128,12 +146,14 @@ def simulate(ev, use_a=True, use_b=True, tally=None, per_trade=False):
                 (ev[np.clip(j, 0, None)] >= ENTRY[i]) & (r <= 0)
         k = np.searchsorted(ev, t, side="right")            # ข่าวถัดไปที่ > ชั่วโมงนี้
         ruleB = (k < len(ev)) & (ev[np.clip(k, 0, len(ev) - 1)] - t <= IMMINENT_H)
+        if b_only_if_losing:
+            ruleB = ruleB & (r <= 0)
         iA = int(np.argmax(ruleA)) if (use_a and ruleA.any()) else len(t)
         iB = int(np.argmax(ruleB)) if (use_b and ruleB.any()) else len(t)
         realized = 0.0
         if iB < iA:                       # โดนหั่นครึ่งก่อน แล้วค่อยโดนปิดทิ้ง
-            realized += f * (1 - KEEP) * r[iB]
-            f *= KEEP
+            realized += f * (1 - b_keep) * r[iB]
+            f *= b_keep
         if iA < len(t):
             realized += f * r[iA]
             f = 0.0
@@ -180,6 +200,22 @@ print(f"\n5 ไม้ที่โดนกระทบหนักสุด (ΔR
       f"จาก {per.sum():+.2f}R  ->  ตัดออกเหลือ {per.sum() - per[big].sum():+.2f}R")
 for i in big:
     print(f"    {KEY[i][0]:<9} #{KEY[i][1]:<3} R จริง {R_ACTUAL[i]:>+6.2f}  ->  ΔR {per[i]:>+6.2f}")
+
+# ── ทางเลือกในการแก้กฎ B (A คงไว้ทุกแถวเพื่อให้เทียบกันได้) ────────────────────
+print("\nทางเลือกแก้กฎ B — ที่อัตราจริง 5 ครั้ง/เดือน (uniform) · A เปิดไว้ทุกแถว\n")
+print(f"{'':<40}{'ΔR mean':>10}{'sd':>8}{'ดีขึ้นจากเดิม':>14}")
+print("-" * 72)
+BASE_B = None
+for lab, kw in (
+        ("ของเดิม: เหลือ 50% ทุกไม้",          dict()),
+        ("เหลือ 75% ทุกไม้",                    dict(b_keep=0.75)),
+        ("เหลือ 50% เฉพาะไม้ที่ยังไม่กำไร",     dict(b_only_if_losing=True)),
+        ("ปิดกฎ B ทิ้ง (เหลือแต่ A)",           dict(use_b=False)),
+):
+    rng = np.random.default_rng(0)
+    d = np.array([simulate(draw_events(rng, 5, "uniform"), **kw) for _ in range(DRAWS)])
+    if BASE_B is None: BASE_B = d.mean()
+    print(f"{lab:<40}{d.mean():>+10.2f}{d.std():>8.2f}{d.mean()-BASE_B:>+14.2f}")
 
 tally = dict(A_good=0, A_dead=0, B_good=0, B_dead=0)
 rng = np.random.default_rng(0)
