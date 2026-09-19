@@ -870,12 +870,29 @@ RSI_REBOUND_MIN_TOUCHES   = 1    # ต้องแตะ+เด้งอย่�
 #   1. scoring.TREND_FLIP_K        — รัน backtest_trend_flip_ksweep.py หา k (ไม่มี = bias None = SKIP ตลอด)
 #   2. swing.swing_vol_multiplier  — default 1.9x
 #   3. swing.swing_wick_ratio_min  — default 0.5
+#      🔴 **วิธีทำข้อ 2+3 (คำสั่งผู้ใช้ 2026-09-19): รัน 2 ค่านี้แล้วเอาตารางให้ผู้ใช้เลือก**
+#         ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.45 1.5
+#         ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.5  1.6
+#         (arg 4 = wick · arg 5 = vol · ทับค่าชั่วคราวโดยไม่แตะ swing.py)
+#         **อย่าไล่จูนเองทีละค่า** — ผู้ใช้จะจูนต่อจากสองตารางนี้เอง
+#         เหตุผล: ตารางบอกได้แค่ "จุดเยอะขึ้น" ไม่ได้บอกว่าอันไหนทำเงิน (เคส UKOILm 2026-09-19
+#         ไล่ 7 ชุด จุด 14->31 แล้ว backtest ได้ไม้เพิ่ม 1 ไม้) การไล่เองจึงเสียเวลาเปล่า
+#         และสิ่งที่ตัดสินจริงคือ collapse_swing_runs ไม่ใช่เกณฑ์ที่ปรับ
 #   4. bars.BAR_OFFSET_H           — default 0 ⚠️ ต้องเทียบกับจอ TradingView เอง ไม่งั้น ADX
 #      ที่ระบบเห็นจะไม่ตรงกับที่คุณดู และอาจตัดสิน regime คนละแบบ (ดูคำอธิบายเต็มในไฟล์นั้น)
 #      (regime_check.ADX_BAR_OFFSET_H เป็นชื่อเก่าที่ re-export ไว้เฉยๆ บ้านจริงอยู่ที่ bars.py)
 #   5. COOLDOWN_HOURS_BY_SYMBOL ด้านล่าง
 #   6. SPREAD_PCT_BY_SYMBOL ด้านบน — **ไม่มีค่า = backtest_replay หยุดทันทีพร้อมบอกค่าที่ตลาดให้**
-#      (ตั้งใจให้ดังแบบนั้น ดีกว่าเดาต้นทุนเงียบๆ) วัดด้วย mt5.symbol_info ตอนตลาดปกติ
+#      (ตั้งใจให้ดังแบบนั้น ดีกว่าเดาต้นทุนเงียบๆ) วัดตอนตลาดปกติ
+#      ⚠️ 2026-09-19: **อย่าใช้ `info.spread`** — มันคืน 0 ได้ทั้งที่ตลาดเปิดอยู่ (เจอกับ
+#      UKOIL/USOIL/SOL/DE30/XAG) ให้คิดจาก `symbol_info_tick`: (ask-bid)/bid*100
+#
+#   🔴 ข้อ 0 ที่ควรทำ **ก่อน** ทั้ง 6 ข้อ (บทเรียนจาก UKOILm 2026-09-19):
+#      รัน backtest_replay symbol เดียวแล้วดูแค่ **regime funnel** (~10 นาที) —
+#      ถ้า CHOPPY% + เขตเทา% สูงจนผลิตไม้ไม่พอ ที่เหลือไม่ต้องทำเลย
+#      UKOIL: CHOPPY 54% -> 16 ไม้/2ปี (เทียบ XAU CHOPPY 8.3% -> 24 ไม้)
+#      รอบนั้นตรวจ corr/spread/ATR%/lot granularity ครบหมดแต่ลืมข้อนี้ เลยเสียเวลาไปกับ
+#      การจูน swing ที่ไม่ใช่คอขวด
 #
 # 2026-08-12: เพิ่ม US500m (S&P500 index, Exness suffix m) — ครบทั้ง 5 ช่องแล้ว: k=0.20,
 # vol=2.0x, wick=0.6, ADX offset=2, cooldown 48 ชม. (ดูรายละเอียด/ที่มาของแต่ละค่าในไฟล์นั้นๆ)
