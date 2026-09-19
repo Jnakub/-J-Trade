@@ -32,6 +32,8 @@ blocked_value_*.csv
 mfe_trades*.csv
 # entry_features.py
 entry_features.csv
+# news_paths.py (สร้างใหม่ได้ ~1 นาที — ป้อนให้ news_sensitivity.py)
+news_paths.csv
 
 # state ของ cooldown หลังถูกด่านปฏิเสธ (scheduler สร้างเอง ดู config.REJECT_COOLDOWN_HOURS)
 reject_cooldown.json
