@@ -226,6 +226,11 @@ if "--rev-short-1d" in sys.argv:
 if "--no-rev-short-1d" in sys.argv:
     rev_short_1d = False
 no_rev_short = "--no-rev-short" in sys.argv            # ปิดฝั่ง Short ของ Reversal ทิ้งเลย
+# --breakout : ไม้ Reversal Short ที่ถูก REVERSAL_SHORT_NEEDS_1D_TREND กัก ให้**กลับข้าง
+# เป็น Long** แทนการทิ้ง (เฉพาะตอนเทรนด์ 1D = Long เท่านั้น · bias = None ยังทิ้งเหมือนเดิม
+# เพราะไม่มีอะไรหนุนทั้งสองทาง) ดูเหตุผล/หลักฐานเต็มที่จุดใช้งานในลูปหลัก
+# ต้องใช้คู่กับด่านที่เปิดอยู่ — ถ้าสั่ง --no-rev-short-1d ด้วย ธงนี้จะไม่มีผลเพราะไม่มีไม้ถูกกัก
+breakout_mode = "--breakout" in sys.argv
 # --tp-cap-r=X : เพดานระยะ TP เป็นเท่าของความเสี่ยง (ดูที่จุดใช้งานในลูปหลัก)
 _tpc_arg = next((a for a in sys.argv if a.startswith("--tp-cap-r=")), None)
 tp_cap_r = float(_tpc_arg.split("=")[1]) if _tpc_arg else None
@@ -589,7 +594,8 @@ if max_runup is not None:
           f"{'   [ทับด้วย --max-runup-24h]' if _runup_arg else ''}")
 print(f"  Slot: ถือได้ 1 ไม้ต่อ{'กลยุทธ์ต่อ' if slot_per_strategy else ''} symbol   "
       f"Reversal Short: {'ต้องมีเทรนด์ 1D หนุน' if rev_short_1d else 'ไม่กรองเทรนด์ 1D'}"
-      f"{'   [ปิดฝั่ง Short ทิ้ง]' if no_rev_short else ''}")
+      f"{'   [ปิดฝั่ง Short ทิ้ง]' if no_rev_short else ''}"
+      f"{'   [กลับข้างเป็น Long แทนการทิ้ง -> strategy=Breakout]' if breakout_mode else ''}")
 if max_sl_atr is not None:
     print(f"  Entry: ข้ามไม้ที่ SL ห่างจาก entry เกิน {max_sl_atr:g} ATR")
 if tp_cap_r is not None:
@@ -648,6 +654,18 @@ def note(reason):
 
 
 def slot_of(strategy):
+    # 🔴 ไม้ "Breakout" (--breakout) ใช้ **ช่องเดียวกับ Reversal** โดยตั้งใจ ไม่ใช่ช่องที่สาม
+    # เหตุผล 2 ข้อ:
+    #   1) ความถูกต้อง — ด่านเช็คช่อง (`_want`) ถูกคำนวณ *ก่อน* รู้ว่าจะ flip หรือไม่ ตอนนั้น
+    #      regime เป็น REVERSAL-READY จึงเช็คช่อง "Reversal" เสมอ ถ้าปล่อยให้ไม้ไปเก็บใน
+    #      ช่อง "Breakout" ด่านกับที่เก็บจะเป็นคนละช่อง => ไม้ Breakout ตัวที่ 2 จะเปิดทับ
+    #      ตัวแรกใน dict และไม้แรก**หายไปจากผลทั้งใบ**โดยไม่มี error (ไม่เคยถูกปิด =
+    #      ไม่เคยถูก append เข้า trades)
+    #   2) การทดลอง — ให้ช่องที่สามพร้อมกับการทดลองนี้ = วัดสองอย่างปนกัน (flip คุ้มไหม +
+    #      เพิ่มช่องคุ้มไหม) ใช้ช่องร่วมทำให้คำถามเหลือข้อเดียว: "ตรงจุดที่เคยทิ้ง เข้า Long
+    #      ดีกว่าไม่ทำอะไรหรือเปล่า" และความเสี่ยงค้างพร้อมกันต่อ symbol ไม่เปลี่ยนจากเดิม
+    if strategy == "Breakout":
+        strategy = "Reversal"
     return strategy if slot_per_strategy else "ANY"
 
 
@@ -819,29 +837,65 @@ for n, row in enumerate(clock.to_dict("records")):
             # ตลาดที่ไต่ขึ้น) bearish divergence ที่ key level จึงยิงใส่ความแข็งแรงธรรมดา
             # (ดู scratchpad/rev_short.py, div_bias.py)
             bias_1d = None
+            flipped = False
             if direction == "Short" and (no_rev_short or rev_short_1d):
                 if no_rev_short:
                     note("ปิดฝั่ง Short ของ Reversal"); fate("Reversal Short ถูกปิด")
                     continue
-                bias_1d, _ = get_trend_bias(symbol, df1d_at(now))
+                _df1d_rev = df1d_at(now)
+                bias_1d, _ = get_trend_bias(symbol, _df1d_rev)
                 if bias_1d != "Short":
-                    note(f"Reversal Short แต่เทรนด์ 1D = {bias_1d}")
-                    fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
-                    continue
-            # CHoCH — โครงสร้างฝั่งตรงข้ามต้องพังแล้ว (ดู config.REVERSAL_NEEDS_CHOCH)
-            if rev_choch:
-                _opp = "Short" if direction == "Long" else "Long"
-                if not em.check_structure_break(symbol, _opp, as_of=now):
-                    note(f"ยังไม่เห็น CHoCH (โครงสร้าง {_opp} ยังไม่พัง)")
-                    fate("ยังไม่เห็น CHoCH")
-                    continue
-            score, criteria, passed, inf = reversal.compute_reversal_score(
-                symbol, direction, entry, key_level=rinfo["key_level"],
-                df_4h=rinfo["df_4h"], as_of=now)
-            sl, tp, strategy = inf["sl"], inf["tp"], "Reversal"
-            # 2026-09-05: exec_sl มาจาก compute_reversal_score แล้ว (เหมือนทาง Scoring) —
-            # เดิมคำนวณเองตรงนี้ ทำให้ด่าน R:R ข้างในตรวจด้วย SL โครงสร้างที่แคบกว่าของจริง
-            exec_sl, atr_entry_ = inf["exec_sl"], inf["atr_entry"]
+                    # ── --breakout : กลับข้างแทนที่จะทิ้ง (สมมติฐานผู้ใช้ 2026-09-20) ──
+                    # ไอเดีย: ไม้ Reversal Short ที่ด่านนี้กักไว้ ส่วนใหญ่ไม่ใช่ "จุดกลับตัวที่
+                    # ทำไม่สำเร็จ" แต่เป็นจุดที่ราคา**ทะลุไปต่อ** (breakout) ถ้าจริง การเข้า Long
+                    # ตรงนั้นแทนควรได้กำไร แทนที่จะแค่ไม่ขาดทุน
+                    # หลักฐานที่มีอยู่ก่อนรัน (จากรอบ --no-rev-short-1d 2026-09-17 · 6 symbol):
+                    #   ไม้ Short ที่ปลดล็อกแล้ว 28 ไม้ แพ้ 20 · WR 33% · จบด้วย SL 64%
+                    #   ถือ median 35 ชม. (ฝั่ง Long 53) · MAE median −1.06R
+                    #   และ **10 จาก 20 ไม้ที่แพ้ MFE < 0.3R** = ไม่เคยกลับตัวเลยแม้แต่นิดเดียว
+                    # ⚠️ แต่ฝั่ง Long ก็มีสัดส่วนเดียวกันเป๊ะ (5/10) = ครึ่งหนึ่งของไม้ Reversal
+                    #    ที่แพ้ "ไม่เคยกลับตัว" ทั้งสองฝั่ง ไม่ใช่ลักษณะเฉพาะของฝั่ง Short
+                    #    สมมติฐานนี้จึงยังไม่ถูกพิสูจน์ ต้องวัดด้วยธงนี้เท่านั้น
+                    #
+                    # เข้าทาง **Scoring** ไม่ใช่ Reversal โดยตั้งใจ: ไม้ที่ได้คือ "ไปตามเทรนด์ 1D"
+                    # = การเทรดต่อเนื่อง ไม่ใช่การกลับตัว และสกอร์การ์ด Reversal จะตัดแต้ม
+                    # Divergence/RSI/VSA ทิ้งทั้งหมดอยู่แล้วเพราะขั้ว divergence เป็น bearish
+                    # สวนกับทิศ Long (reversal.py:219 · 230 · 239) = ให้คะแนนไม้นี้ไม่ได้เลย
+                    # ติด strategy = "Breakout" ไว้ในไฟล์ผล เพื่อแยกออกจากไม้ Scoring ปกติได้
+                    if breakout_mode and bias_1d == "Long":
+                        direction = "Long"
+                        _struct = rinfo["structure"]["trend"]
+                        if scoring_struct_match and not _struct.startswith(direction):
+                            note(f"flip -> Long สวนโครงสร้าง 4H ({_struct})")
+                            fate("flip Long สวนโครงสร้าง 4H")
+                            continue
+                        score, criteria, passed, sl_info = compute_score(
+                            symbol, direction, entry, as_of=now, df_1d=_df1d_rev)
+                        sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Breakout"
+                        exec_sl, atr_entry_ = sl_info["exec_sl"], sl_info["atr_entry"]
+                        note("Reversal Short -> กลับเป็น Long (เทรนด์ 1D = Long)")
+                        flipped = True
+                    else:
+                        note(f"Reversal Short แต่เทรนด์ 1D = {bias_1d}")
+                        fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
+                        continue
+            if not flipped:
+                # CHoCH — โครงสร้างฝั่งตรงข้ามต้องพังแล้ว (ดู config.REVERSAL_NEEDS_CHOCH)
+                # ไม้ flip ไม่ต้องผ่านด่านนี้: CHoCH ถามว่า "โครงสร้างเดิมพังหรือยัง" ซึ่งเป็น
+                # คำถามของการกลับตัว ส่วนไม้ flip เดิมพันว่าโครงสร้างเดิม **ไม่พัง** และไปต่อ
+                if rev_choch:
+                    _opp = "Short" if direction == "Long" else "Long"
+                    if not em.check_structure_break(symbol, _opp, as_of=now):
+                        note(f"ยังไม่เห็น CHoCH (โครงสร้าง {_opp} ยังไม่พัง)")
+                        fate("ยังไม่เห็น CHoCH")
+                        continue
+                score, criteria, passed, inf = reversal.compute_reversal_score(
+                    symbol, direction, entry, key_level=rinfo["key_level"],
+                    df_4h=rinfo["df_4h"], as_of=now)
+                sl, tp, strategy = inf["sl"], inf["tp"], "Reversal"
+                # 2026-09-05: exec_sl มาจาก compute_reversal_score แล้ว (เหมือนทาง Scoring) —
+                # เดิมคำนวณเองตรงนี้ ทำให้ด่าน R:R ข้างในตรวจด้วย SL โครงสร้างที่แคบกว่าของจริง
+                exec_sl, atr_entry_ = inf["exec_sl"], inf["atr_entry"]
         else:
             note(f"regime ไม่รู้จัก = {regime}")
             continue
@@ -1004,9 +1058,28 @@ if t.empty:
     print(f"{'=' * 78}")
     sys.exit(0)
 
-t["win"] = t["R"] > 0
+# นิยาม "ชนะ" — 2026-09-20 เปลี่ยนจาก `R > 0` เป็น `R > WIN_THRESHOLD_R` ตามคำสั่งผู้ใช้
+# เหตุผล: ไม้ที่ออกที่จุดคุ้มทุน (BE) จบด้วย R ติดลบนิดเดียวจากค่า spread ล้วนๆ แล้วถูกนับเป็น
+# "แพ้" เต็มหน่วยเท่ากับไม้ที่โดน SL เต็ม −1.05R ทำให้ WR ขยับแรงจากการเปลี่ยนที่แทบไม่กระทบเงิน
+# (เคสจริง: ปิดกฎ Indicator ร้อน 2026-09-20 ทำให้ไม้ BE 21 ไม้พลิกจาก +0.01…+0.2R เป็น
+#  median −0.007R -> WR ร่วง 13.9 จุด ทั้งที่ผลสุทธิของการเปลี่ยน **+6.33R**)
+#
+# 🔴 ทำไมเป็น −0.05 ไม่ใช่ −0.01: **ข้อมูลมีช่องว่างจริงตรงนั้น** วัดบน base 160 ไม้
+#   −0.25..−0.10  6 ไม้ | −0.10..−0.05 **0 ไม้** | −0.05..−0.02 2 ไม้
+#   −0.02..−0.01  9 ไม้ | −0.01..0.00 18 ไม้ | 0.00..+0.05 **0 ไม้**
+#   ไม้ BE กองรวมกัน 27 ไม้ในช่วง −0.02..0.00 — เส้น −0.01 ผ่ากลางกองนั้น (18 ชนะ/9 แพ้)
+#   ซึ่งจะเด้งไปมาเมื่อ spread ของ symbol ใดเปลี่ยน ส่วนเส้น −0.05 ตกในช่องว่างที่ไม่มีไม้เลย
+#   => ทุกค่าตั้งแต่ −0.05 ถึง −0.10 ให้คำตอบเดียวกันเป๊ะ (53.1%) = ไม่ไวต่อ spread
+# ⚠️ **ตัวเลข WR ก่อน 2026-09-20 ทั้งหมดคิดด้วย `R > 0` เทียบกับของใหม่ตรงๆ ไม่ได้**
+#   (base ปัจจุบัน: นิยามเก่า 35.0% · นิยามใหม่ 53.1% — ไม้ชุดเดียวกันเป๊ะ)
+# ⚠️ และ WR ไม่ใช่ตัวตัดสิน — เส้นเสมอตัวของระบบอยู่ที่ WR ~33% เท่านั้น (ไม้ชนะเฉลี่ยใหญ่กว่า
+#   ไม้แพ้ ~2 เท่า) การไล่ทำ WR ให้สูงวัดแล้วว่าซื้อได้ที่ราคา 2-3R ต่อ 1 จุด = ขาดทุนล้วน
+#   (ดูบล็อกการกวาด --tp-cap-r ที่ config.TP_FIB_RATIO)
+WIN_THRESHOLD_R = -0.05
+t["win"] = t["R"] > WIN_THRESHOLD_R
 print(f"  {'-' * 74}")
-print(f"  Win Rate   : {t['win'].mean()*100:.1f}%  ({int(t['win'].sum())}/{len(t)})")
+print(f"  Win Rate   : {t['win'].mean()*100:.1f}%  ({int(t['win'].sum())}/{len(t)})"
+      f"   [ชนะ = R > {WIN_THRESHOLD_R:g} — ไม้ BE ไม่นับเป็นแพ้]")
 print(f"  Avg R      : {t['R'].mean():+.2f}R      Total R: {t['R'].sum():+.1f}R")
 print(f"  ถือเฉลี่ย   : {(t['exit_time']-t['time']).mean().total_seconds()/86400:.1f} วัน")
 
@@ -1054,6 +1127,8 @@ if max_sl_atr is not None:
     _tag += f"_maxslatr{max_sl_atr:g}"
 if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
     _tag += "_revshort1d" if rev_short_1d else "_revshortany"
+if breakout_mode:
+    _tag += "_breakout"
 if rev_tp_entry:
     _tag += "_revtpentry"
 if regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE:    # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
