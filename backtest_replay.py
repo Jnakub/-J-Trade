@@ -292,6 +292,28 @@ if rev_tp_entry:
 # ตอนถูกเรียกทุกครั้ง (ทั้งจาก get_regime และจาก compute_reversal_score) การ set ตรงนี้จึงมีผล
 # กับทั้งการจัด regime และสกอร์การ์ดพร้อมกัน เหมือนแก้ค่าคงที่จริงแต่เฉพาะรอบนี้
 import regime_check
+# --struct-reg : เปลี่ยน check_structure จาก "เทียบ swing high/low" เป็น "ความชัน regression + R²"
+# ดูเหตุผล/พารามิเตอร์เต็มที่ regime_check.check_structure_reg — พารามิเตอร์ (N ราย symbol จาก
+# คลื่นราคา x2 · R2_MIN 0.5) **ประกาศไว้ก่อนรัน ห้ามขยับหลังเห็นผล**
+# ผลติด tag _structreg ที่ชื่อไฟล์ผล base จึงไม่ถูกทับ
+_STRUCT_REG_LIVE = regime_check.USE_STRUCT_REG      # ค่าระบบจริง เก็บไว้ก่อนถูกทับ (ไว้ติด tag)
+struct_reg = _STRUCT_REG_LIVE
+if "--struct-reg" in sys.argv:
+    struct_reg = True
+if "--swing-struct" in sys.argv:                    # ย้อนกลับไปใช้ check_structure แบบ swing
+    struct_reg = False
+regime_check.USE_STRUCT_REG = struct_reg
+# --struct-reg-n=X / --struct-reg-r2=X : ทับ N และ R2_MIN ของรอบนั้น (ใช้ได้เพราะ replay รัน
+# ทีละ symbol) — ค่า default มาจาก regime_check.STRUCT_REG_N / STRUCT_REG_R2_MIN
+_srn_arg = next((a for a in sys.argv if a.startswith("--struct-reg-n=")), None)
+_srr_arg = next((a for a in sys.argv if a.startswith("--struct-reg-r2=")), None)
+if struct_reg:
+    if _srn_arg:
+        regime_check.STRUCT_REG_N = dict(regime_check.STRUCT_REG_N)
+        regime_check.STRUCT_REG_N[sys.argv[1]] = int(_srn_arg.split("=")[1])
+        regime_check.STRUCT_REG_N_DEFAULT = int(_srn_arg.split("=")[1])
+    if _srr_arg:
+        regime_check.STRUCT_REG_R2_MIN = float(_srr_arg.split("=")[1])
 _DIV_AGE_LIVE = regime_check.DIV_MAX_AGE_BARS      # ค่าของระบบจริง เก็บไว้ก่อนถูกทับ ใช้ตัดสินว่า
 _DIV_RSI_LIVE = regime_check.DIV_RSI_PERIOD        # รอบนี้ "สวนค่าระบบจริง" หรือไม่ (ไว้ติด tag)
 _dma_arg = next((a for a in sys.argv if a.startswith("--div-max-age=")), None)
@@ -1154,6 +1176,11 @@ if breakout_mode:
     _tag += "_breakout"
     if _botp_arg:                      # ติด tag เฉพาะรอบที่สวนค่า default 2.618
         _tag += f"_botp{BREAKOUT_TP_FIB_RATIO:g}"
+if struct_reg != _STRUCT_REG_LIVE:      # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_structreg" if struct_reg else "_swingstruct"
+if struct_reg:
+    if _srn_arg: _tag += f"n{int(_srn_arg.split('=')[1])}"
+    if _srr_arg: _tag += f"r2{float(_srr_arg.split('=')[1]):g}"
 if rev_tp_entry:
     _tag += "_revtpentry"
 if regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE:    # ติด tag เฉพาะรอบที่สวนค่าระบบจริง

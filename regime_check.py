@@ -33,6 +33,7 @@ import sys
 from datetime import datetime
 
 import MetaTrader5 as mt5
+import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -573,6 +574,109 @@ def find_adx_swings(adx: pd.Series, left: int = ADX_SWING_LEFT_RIGHT,
 #   Short intact = LL/LH ต่อเนื่อง
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# โครงสร้างแบบ regression — ทางเลือกทดลอง (2026-09-21) เปิดด้วย backtest_replay --struct-reg
+# ---------------------------------------------------------------------------
+# ทำไมถึงมี: check_structure เดิมอ่าน **ผลลัพธ์ของ pipeline 3 ขั้น** (pivot -> กรอง vol/wick ->
+# collapse_swing_runs) แล้วเทียบ highs[-3] vs highs[-1] ทุกขั้นเป็น on/off จึงมีหน้าผา
+# เคสจริง BTCUSDm 2025-12-17 12:00: เปลี่ยน wick 0.50 -> 0.48 ทำให้ swing low หนึ่งจุด
+# (wick 0.4893) เข้ามาคั่นพวง -> index เลื่อนทั้งลิสต์ -> คู่ที่เอามาเทียบเปลี่ยนทั้ง 4 ตัว ->
+# intact พลิก False -> True -> regime พลิก "เขตเทา" -> "TREND" ทั้งที่ ADX เท่ากันเป๊ะ (22.0)
+# วัดขนาดปัญหาแล้ว: intact ต่างกัน 146/4379 แท่ง (3.33%) แต่ที่พลิกการตัดสินจริง 34 แท่ง
+# (0.78%) ~= 3 การตัดสิน/ปี บน BTC
+#
+# วิธีนี้ไม่ใช้ find_swing_* / collapse_swing_runs / ตัวกรอง vol-wick เลย จึง:
+#   - ไม่มี index ให้เลื่อน · ไม่มีการจัดพวงใหม่
+#   - ไม่แตะชุด swing ที่ check_divergence ใช้ (ต้นเหตุที่ไม้ 2026-06-10 หายตอนขยับ wick)
+#   - มีสถานะ "sideways" จริงๆ จาก R² ต่ำ ไม่ใช่ "เงื่อนไขไม่ครบ"
+#
+# 🔴 พารามิเตอร์ **ประกาศไว้ก่อนรัน ห้ามขยับหลังเห็นผล** (กัน fit ขอบแบบที่เกิดกับ wick วันนี้)
+#   N ต่อ symbol = คลื่นราคาเต็ม (ยอด->ยอด) x 2 — คลื่นวัดจากระยะห่าง swing ที่ติดกัน ณ จุด
+#   เข้าไม้จริงของทั้ง 161 ไม้ใน base (median ครึ่งคลื่น 9.0 แท่ง = 1.5 วัน ทั้งระบบ แต่ราย
+#   symbol ต่างกัน 2 เท่า: XAU 6.0 แท่ง .. HK50 12.2 แท่ง) **ไม่ได้เลือกจากผลตอบแทน**
+#   R2_MIN = 0.5 ค่ากลาง ไม่ได้เลือกจากข้อมูล
+#   N ต่อ symbol = **คลื่นราคาเต็ม (ยอด->ยอด) x k** โดย k = 3 (ตัดสิน 2026-09-21 ดูบล็อกด้านล่าง)
+#   คลื่นวัดจากระยะห่าง swing ที่ติดกัน ณ จุดเข้าไม้จริงของ 161 ไม้ใน base — **ไม่ได้เลือกจาก
+#   ผลตอบแทน** (median ครึ่งคลื่นทั้งระบบ 9.0 แท่ง = 1.5 วัน · ราย symbol ต่างกัน 2 เท่า)
+STRUCT_REG_N = {
+    "XAUUSDm": 36, "EURUSDm": 42,
+    "BTCUSDm": 54, "ETHUSDm": 54, "US500m": 54,
+    "UKOILm":  66, "USDJPYm": 66,
+    "HK50m":   72,
+}
+STRUCT_REG_N_DEFAULT = 54
+# R2_MIN = 0 -> **ไม่มีด่าน R² เลย** ใช้ทิศจาก slope อย่างเดียว
+# ที่มา: ตอนตั้ง 0.5 ไม้ที่ถูกด่านนี้ตัดทิ้ง 32 ไม้มี avgR **+0.678** (ดีกว่าค่าเฉลี่ยระบบ
+# +0.312 เกินสองเท่า) และ R² median ของไม้พวกนั้นอยู่ที่ **0.20** ไม่ใช่ 0.45 = ไม้ที่ทำเงิน
+# เกิดตอนราคา**ไม่**เป็นเส้นตรง เพราะระบบเข้าที่แท่งแรกที่ ADX พลิก ซึ่งเป็นจุดที่ 36-54 แท่ง
+# ย้อนหลังยังเป็นช่วงพัก/กลับตัวของขาก่อน — ด่าน R² จึงกรองเฉพาะไม้ที่เข้าเร็ว = ไม้ที่ทำเงิน
+STRUCT_REG_R2_MIN    = 0.0
+
+# ---------------------------------------------------------------------------
+# 🔴 2026-09-21: **เปิดใช้จริง (USE_STRUCT_REG = True) ตามคำสั่งผู้ใช้** — อ่านให้ครบก่อนต่อยอด
+# ---------------------------------------------------------------------------
+# ผลวัด replay เต็ม 8 symbol 730 วัน เทียบ base (swing):
+#   k=2    145 ไม้ +33.46R  ΔR **−16.73**  ดีขึ้น 3/8
+#   k=2.5  152 ไม้ +45.47R  ΔR  **−4.71**  ดีขึ้น 4/8
+#   k=3    157 ไม้ +59.49R  ΔR  **+9.31**  ดีขึ้น 6/8   <- ที่เลือกใช้
+#   k=3.5  163 ไม้ +50.44R  ΔR  **+0.26**  ดีขึ้น 5/8
+#
+# 🔴🔴 **k=3 เป็น "ยอดแหลม" ไม่ใช่ "ที่ราบ" — ต้องกลับมาตรวจซ้ำ**
+#   เพื่อนบ้านทั้งสองข้างห่างจาก k=3 อยู่ 9.1R และ 14.0R ขยับ k แค่ 0.5 ผลหายเกือบหมด
+#   เกณฑ์ที่ประกาศไว้ **ก่อน** รัน k=2.5/3.5 คือ "ถ้า k=3 โดดเดี่ยว = overfit = ทิ้งทั้งสาย"
+#   ผลออกมาตรงเงื่อนไขนั้น — **ผู้ใช้ตัดสินใจใช้ต่อทั้งที่รู้** และสั่งให้จดไว้ว่าต้องตามดูอีกที
+#
+# กติกาข้อ 3 ของ CLAUDE.md ผ่านแค่ 1 จาก 4 ข้อ:
+#   |t| ของ churn = 0.71 (84 ไม้ · SE 13.20)                                 ❌
+#   ตัด 5 ไม้ใหญ่สุดของไม้ใหม่ (+16.32R) -> ΔR พลิกเป็น **−7.01R**            ❌
+#   permutation "ไม้ใหม่ดีกว่าไม้ที่หายไหม" p = 0.213                          ❌
+#   นับ symbol ที่บวก 6/8                                                      ✅
+# และกำไร +9.31R กระจุกที่ **ETHUSDm +5.59R (60%)** ซึ่งให้ค่าเดียวกันเป๊ะที่ k=2.5 แล้วหาย
+# เกลี้ยงที่ k=3.5 = พฤติกรรมของไม้ไม่กี่ไม้ที่พลิกไปมา
+#
+# ⚠️ **ตัวเลขนี้เป็น in-sample และเป็นตัวแปรที่ 5 ที่ลองบนข้อมูลชุดเดิม** (k=2/N80-R2 0.5/
+#   N80-R2 0.4/k=2 R2=0/k=3) churn SE = 13.20R ดังนั้น +9.31R = 0.71 SE — การลอง 5 รอบ
+#   มีโอกาสราว 75% ที่จะเจออย่างน้อย 1 ค่าที่เกิน 0.7 SE โดยบังเอิญ
+#
+# 👉 **สิ่งที่ต้องทำเมื่อกลับมาตรวจ (ตั้งใจให้เป็น out-of-sample):**
+#   1. อย่าแตะ k / N / R2_MIN ระหว่างนี้ — การขยับค่าจะทำลายคุณสมบัติ out-of-sample ทันที
+#   2. รอให้ระบบผลิตไม้ใหม่ 40-80 ไม้ (~6-12 เดือน = ราว 2027-03 ถึง 2027-09)
+#   3. รัน replay ใหม่แล้วเทียบ k=3 กับ swing เดิม **เฉพาะบนไม้ที่เกิดหลัง 2026-09-21**
+#   4. ถ้ายังบวก = หลักฐานจริง · ถ้าไม่ = ถอยกลับเป็น swing (ตั้ง USE_STRUCT_REG = False)
+#   🔴 ห้ามตัดสินด้วยการรัน replay บนหน้าต่างเดิมซ้ำ — มันคือข้อมูลชุดที่ใช้เลือก k มาแล้ว
+#
+# ขอบเขตที่กระทบ: get_regime() เท่านั้น -> ด่าน regime (structure["intact"]) และ
+# SCORING_NEEDS_STRUCTURE_MATCH (ทิศ) · **ไม่แตะ exit_monitor.check_structure_break**
+# (ตัวนั้นมี logic ของตัวเอง ยังใช้ swing เหมือนเดิม) และ **ไม่แตะ check_divergence** เลย
+# ถอยกลับ: ตั้งค่าเดียวที่บรรทัดล่างนี้เป็น False
+USE_STRUCT_REG = True
+
+
+def check_structure_reg(df: pd.DataFrame, symbol: str) -> dict:
+    """โครงสร้างจากความชันของเส้น regression บนราคาปิด N แท่งล่าสุด
+    คืน dict หน้าตาเดียวกับ check_structure เพื่อให้ผู้เรียกไม่ต้องรู้ว่าใช้วิธีไหน
+    (hh/hl/ll/lh คืน None เพราะวิธีนี้ไม่ได้ตอบทีละจุด — ผู้เรียกที่ใช้ค่าพวกนี้มีแต่ run_check
+     ที่ print เท่านั้น)"""
+    N = STRUCT_REG_N.get(symbol, STRUCT_REG_N_DEFAULT)
+    if len(df) < N:
+        return {"trend": "ไม่ชัด / กำลังพัง", "intact": False, "hh": None, "hl": None,
+                "ll": None, "lh": None, "n_highs": 0, "n_lows": 0, "r2": 0.0, "slope": 0.0}
+    y = df["close"].iloc[-N:].to_numpy(dtype=float)
+    x = np.arange(N, dtype=float)
+    slope, intercept = np.polyfit(x, y, 1)
+    resid = ((y - (slope * x + intercept)) ** 2).sum()
+    total = ((y - y.mean()) ** 2).sum()
+    r2 = float(1 - resid / total) if total > 0 else 0.0
+    if r2 < STRUCT_REG_R2_MIN:
+        trend, intact = "ไม่ชัด / กำลังพัง", False      # sideways — ใช้สตริงเดิมเพื่อไม่ให้
+    elif slope > 0:                                     # ด่าน startswith(direction) เจอโดยบังเอิญ
+        trend, intact = "Long (reg)", True
+    else:
+        trend, intact = "Short (reg)", True
+    return {"trend": trend, "intact": intact, "hh": None, "hl": None, "ll": None, "lh": None,
+            "n_highs": 0, "n_lows": 0, "r2": r2, "slope": float(slope)}
+
+
 def check_structure(df: pd.DataFrame, vol_multiplier: float, wick_ratio_min: float = None) -> dict:
     """เทียบ 3 จุดสุดท้ายของแต่ละฝั่ง แต่ดูแค่ 'จุดแรก vs จุดสุดท้าย' (ข้ามจุดกลาง)
     จุดกลางถือเป็นการย่อ/เด้งชั่วคราวที่ยอมรับได้ในเทรนด์จริง — ไม่เอามาตัดสิน
@@ -928,9 +1032,15 @@ def get_regime(symbol: str, as_of=None) -> dict:
     # volume ซ้ำสองรอบต่อ symbol ต่อรอบสแกน (เดิมดึงแยก 210 แท่งสำหรับ structure + 400 แท่งสำหรับ key level)
     df_4h_full = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS, as_of=as_of)
     df_4h = df_4h_full.iloc[-BARS:].reset_index(drop=True)
-    structure = check_structure(df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True),
-                                vol_multiplier=swing_vol_multiplier(symbol),
-                                wick_ratio_min=swing_wick_ratio_min(symbol))
+    # USE_STRUCT_REG = True -> ใช้ check_structure_reg แทน (ตั้งจาก backtest_replay --struct-reg
+    # เท่านั้น · default False = พฤติกรรมระบบจริงเป๊ะ) ดูเหตุผล/พารามิเตอร์ที่ check_structure_reg
+    _df_struct = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)
+    if USE_STRUCT_REG:
+        structure = check_structure_reg(_df_struct, symbol)
+    else:
+        structure = check_structure(_df_struct,
+                                    vol_multiplier=swing_vol_multiplier(symbol),
+                                    wick_ratio_min=swing_wick_ratio_min(symbol))
     current_price = df_4h["close"].iloc[len(df_4h) - 2]   # ราคาปิดแท่ง 4H ล่าสุด
     key_level  = check_key_level(symbol, current_price, df=df_4h_full)
     # ใช้ df_4h (real volume) ไม่ใช่ df เดิม (tick_volume) — จำเป็นตั้งแต่เปิด volume filter
