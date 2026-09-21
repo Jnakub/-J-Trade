@@ -24,11 +24,13 @@ from config import (
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
+    BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
 from order import (calculate_lot_size, clamp_lot, place_order, position_risk_amount,
                    risk_pct_of)
+import swing
 from binance import merge_real_volume
 from exit_monitor import (
     check_structure_break,
@@ -334,6 +336,7 @@ def scan_symbol(symbol: str) -> None:
             # ── เปิด Reversal (ทิศตามขั้ว divergence ที่ทำให้ REVERSAL-READY ยิง ไม่ใช่แค่กลับ bias) ──
             div_polarity = regime_info["divergence"]["divergence"]
             direction = "Long" if div_polarity == "bullish" else "Short"
+            breakout_flip = False   # True เมื่อไม้นี้ถูกกลับข้างเป็น Breakout (ข้าม CHoCH ด้านล่าง)
             # ── ด่านฝั่ง Short: ต้องมีเทรนด์ 1D หนุนด้วย (ดูที่มา/ตัวเลขที่ config.py) ──
             # ใช้ get_trend_bias ตัวเดียวกับที่ฝั่ง Scoring ใช้ ไม่เพิ่มนิยามเทรนด์ตัวที่สอง
             # เข้าระบบ และดึง 1D แบบเดียวกันเป๊ะ (bars=800 + merge_real_volume)
@@ -342,31 +345,60 @@ def scan_symbol(symbol: str) -> None:
                     get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800), symbol, "1D")
                 bias_1d, bias_src = get_trend_bias(symbol, df_1d_rev)
                 if bias_1d != "Short":
-                    print(f"  [{symbol}] SKIP — Reversal Short แต่เทรนด์ 1D = {bias_1d} "
-                          f"({bias_src}) ต้องเป็น Short ถึงจะเข้าได้")
-                    return
-                print(f"  [{symbol}] Reversal Short — เทรนด์ 1D = Short ({bias_src}) ผ่านด่าน")
+                    # ── Breakout: กลับข้างเป็น Long แทนการทิ้ง (ดู config.BREAKOUT_ENABLED) ──
+                    if BREAKOUT_ENABLED and bias_1d == "Long":
+                        direction = "Long"
+                        _struct = regime_info["structure"]["trend"]
+                        if SCORING_NEEDS_STRUCTURE_MATCH and not _struct.startswith(direction):
+                            print(f"  [{symbol}] SKIP — Breakout flip -> Long แต่สวนโครงสร้าง "
+                                  f"4H ({_struct})")
+                            return
+                        print(f"  [{symbol}] Breakout — Reversal Short ถูกกัก (เทรนด์ 1D = Long) "
+                              f"-> กลับข้างเข้า Long แทน  Entry={entry:.5f}")
+                        _saved_fib = swing.TP_FIB_RATIO
+                        swing.TP_FIB_RATIO = BREAKOUT_TP_FIB_RATIO
+                        try:
+                            score, criteria, passed, sl_info = compute_score(
+                                symbol, direction, entry, df_1d=df_1d_rev)
+                        finally:
+                            swing.TP_FIB_RATIO = _saved_fib
+                        sl, tp = sl_info["sl"], sl_info["tp"]
+                        rr = sl_info["rr"]
+                        score_total = TOTAL_WEIGHT
+                        strategy = "Breakout"
+                        breakout_flip = True
+                    else:
+                        print(f"  [{symbol}] SKIP — Reversal Short แต่เทรนด์ 1D = {bias_1d} "
+                              f"({bias_src}) ต้องเป็น Short ถึงจะเข้าได้")
+                        return
+                else:
+                    print(f"  [{symbol}] Reversal Short — เทรนด์ 1D = Short ({bias_src}) ผ่านด่าน")
             # CHoCH — โครงสร้างเดิม (ฝั่งตรงข้ามกับที่จะเข้า) ต้องพังแล้ว ดู config ที่ค่านั้น
-            if REVERSAL_NEEDS_CHOCH:
+            # ไม้ Breakout ข้ามด่านนี้: CHoCH ถามว่า "โครงสร้างเดิมพังหรือยัง" ซึ่งเป็นคำถามของ
+            # การกลับตัว ส่วน Breakout เดิมพันว่าโครงสร้างเดิม **ไม่พัง** แล้วไปต่อ (ตรงกับ
+            # backtest_replay ที่ข้ามด่านนี้เหมือนกัน — ต้องตรงกันสองฝั่งเสมอ)
+            if REVERSAL_NEEDS_CHOCH and not breakout_flip:
                 _opp = "Short" if direction == "Long" else "Long"
                 if not check_structure_break(symbol, _opp):
                     print(f"  [{symbol}] SKIP — ยังไม่เห็น CHoCH (โครงสร้าง {_opp} ยังไม่พัง) "
                           f"ยังไม่เข้า Reversal {direction}")
                     return
-            print(f"  [{symbol}] เปิด Reversal — Divergence={div_polarity} -> เข้าเป็น {direction}  Entry={entry:.5f}")
-            # 2026-09-05: รับเข้า `sl_info` ตัวเดียวกับทาง Scoring — เดิมรับเป็น `info` แล้วโค้ด
-            # ด้านล่าง (exec_sl / pinned_swing) อ่านจาก `sl_info` แบบไม่แยก branch ทำให้ไม้
-            # Reversal โยน NameError: name 'sl_info' is not defined ทุกครั้งแล้วโดน except
-            # ด้านล่างกลืนไปเป็น "ERROR — ..." = **ระบบจริงเปิดไม้ Reversal ไม่ได้เลยตั้งแต่
-            # 2026-08-31** (รอบที่ย้าย exec_sl เข้า compute_score แล้วไม่ได้แก้ทาง Reversal ตาม)
-            # backtest ไม่เจอเพราะ backtest_replay.py มีโค้ดคำนวณ exec_sl ของตัวเองแยกต่างหาก
-            score, criteria, passed, sl_info = reversal.compute_reversal_score(
-                symbol, direction, entry, key_level=regime_info["key_level"],
-                df_4h=regime_info["df_4h"])
-            sl, tp = sl_info["sl"], sl_info["tp"]
-            rr = sl_info["rr"]
-            score_total = reversal.TOTAL_WEIGHT
-            strategy = "Reversal"
+            # ไม้ Breakout คิด score/sl/tp ไปแล้วตอนกลับข้าง (ทาง compute_score) — ข้ามบล็อกนี้
+            if not breakout_flip:
+                print(f"  [{symbol}] เปิด Reversal — Divergence={div_polarity} -> เข้าเป็น {direction}  Entry={entry:.5f}")
+                # 2026-09-05: รับเข้า `sl_info` ตัวเดียวกับทาง Scoring — เดิมรับเป็น `info` แล้วโค้ด
+                # ด้านล่าง (exec_sl / pinned_swing) อ่านจาก `sl_info` แบบไม่แยก branch ทำให้ไม้
+                # Reversal โยน NameError: name 'sl_info' is not defined ทุกครั้งแล้วโดน except
+                # ด้านล่างกลืนไปเป็น "ERROR — ..." = **ระบบจริงเปิดไม้ Reversal ไม่ได้เลยตั้งแต่
+                # 2026-08-31** (รอบที่ย้าย exec_sl เข้า compute_score แล้วไม่ได้แก้ทาง Reversal ตาม)
+                # backtest ไม่เจอเพราะ backtest_replay.py มีโค้ดคำนวณ exec_sl ของตัวเองแยกต่างหาก
+                score, criteria, passed, sl_info = reversal.compute_reversal_score(
+                    symbol, direction, entry, key_level=regime_info["key_level"],
+                    df_4h=regime_info["df_4h"])
+                sl, tp = sl_info["sl"], sl_info["tp"]
+                rr = sl_info["rr"]
+                score_total = reversal.TOTAL_WEIGHT
+                strategy = "Reversal"
 
         # แสดงผลสรุป
         failed = [name for name, p, _ in criteria if not p]

@@ -230,7 +230,12 @@ no_rev_short = "--no-rev-short" in sys.argv            # ปิดฝั่ง S
 # เป็น Long** แทนการทิ้ง (เฉพาะตอนเทรนด์ 1D = Long เท่านั้น · bias = None ยังทิ้งเหมือนเดิม
 # เพราะไม่มีอะไรหนุนทั้งสองทาง) ดูเหตุผล/หลักฐานเต็มที่จุดใช้งานในลูปหลัก
 # ต้องใช้คู่กับด่านที่เปิดอยู่ — ถ้าสั่ง --no-rev-short-1d ด้วย ธงนี้จะไม่มีผลเพราะไม่มีไม้ถูกกัก
-breakout_mode = "--breakout" in sys.argv
+_BREAKOUT_LIVE = cfg.BREAKOUT_ENABLED          # ค่าระบบจริง (config = แหล่งเดียว)
+breakout_mode = _BREAKOUT_LIVE
+if "--breakout" in sys.argv:
+    breakout_mode = True
+if "--no-breakout" in sys.argv:
+    breakout_mode = False
 # --breakout-tp=X : อัตราส่วน Fibonacci ที่ **ไม้ Breakout เท่านั้น** ใช้วาง TP
 # (ไม้ Scoring/Reversal ยังใช้ config.TP_FIB_RATIO = 1.618 เหมือนเดิม ไม่ถูกแตะ)
 # ที่มา 2026-09-21: ไม้ Breakout เกิดตอนราคาเพิ่งทำยอดใหม่ จุด B ของ fib (= swing low ล่าสุด)
@@ -245,7 +250,7 @@ breakout_mode = "--breakout" in sys.argv
 #      ไม่ใช่ด้วยการหาจุดเข้าที่ดีขึ้น ตรงกับรูปแบบ "ด่านที่รอให้เงื่อนไขดีขึ้น พังทุกตัว"
 #      ที่บันทึกไว้ที่ config.MIN_RR_HARD_BLOCK
 _botp_arg = next((a for a in sys.argv if a.startswith("--breakout-tp=")), None)
-BREAKOUT_TP_FIB_RATIO = float(_botp_arg.split("=")[1]) if _botp_arg else 2.618
+BREAKOUT_TP_FIB_RATIO = float(_botp_arg.split("=")[1]) if _botp_arg else cfg.BREAKOUT_TP_FIB_RATIO
 # --tp-cap-r=X : เพดานระยะ TP เป็นเท่าของความเสี่ยง (ดูที่จุดใช้งานในลูปหลัก)
 _tpc_arg = next((a for a in sys.argv if a.startswith("--tp-cap-r=")), None)
 tp_cap_r = float(_tpc_arg.split("=")[1]) if _tpc_arg else None
@@ -1172,8 +1177,9 @@ if max_sl_atr is not None:
     _tag += f"_maxslatr{max_sl_atr:g}"
 if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
     _tag += "_revshort1d" if rev_short_1d else "_revshortany"
+if breakout_mode != _BREAKOUT_LIVE:        # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_breakout" if breakout_mode else "_nobreakout"
 if breakout_mode:
-    _tag += "_breakout"
     if _botp_arg:                      # ติด tag เฉพาะรอบที่สวนค่า default 2.618
         _tag += f"_botp{BREAKOUT_TP_FIB_RATIO:g}"
 if struct_reg != _STRUCT_REG_LIVE:      # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
