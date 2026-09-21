@@ -231,6 +231,21 @@ no_rev_short = "--no-rev-short" in sys.argv            # ปิดฝั่ง S
 # เพราะไม่มีอะไรหนุนทั้งสองทาง) ดูเหตุผล/หลักฐานเต็มที่จุดใช้งานในลูปหลัก
 # ต้องใช้คู่กับด่านที่เปิดอยู่ — ถ้าสั่ง --no-rev-short-1d ด้วย ธงนี้จะไม่มีผลเพราะไม่มีไม้ถูกกัก
 breakout_mode = "--breakout" in sys.argv
+# --breakout-tp=X : อัตราส่วน Fibonacci ที่ **ไม้ Breakout เท่านั้น** ใช้วาง TP
+# (ไม้ Scoring/Reversal ยังใช้ config.TP_FIB_RATIO = 1.618 เหมือนเดิม ไม่ถูกแตะ)
+# ที่มา 2026-09-21: ไม้ Breakout เกิดตอนราคาเพิ่งทำยอดใหม่ จุด B ของ fib (= swing low ล่าสุด)
+# จึงอยู่ใกล้ราคามาก -> TP ที่ 1.618 ตกมาอยู่แค่เอื้อม ขณะที่ SL อยู่ใต้ก้นจริง = R:R พังทันที
+# เคสจริง BTCUSDm 2025-05-13 20:00 (หลังตั้ง wick 0.48 ให้เห็นก้นจริง):
+#   entry 104,794 · SL 99,182 (1R = 5,613) · TP@1.618 = 105,298 (ห่างแค่ 504 จุด) -> R:R 0.09
+#   ถูก MIN_RR_HARD_BLOCK (1.5) ตัดทิ้ง
+# 🔴 **ยังไม่มีหลักฐานว่าดีกว่า** และมีหลักฐานที่ขัดอยู่ 2 ชิ้น อ่านก่อนเชื่อผล:
+#   1) ไม้ Breakout 31 ไม้ (วัด 2026-09-20) **ไม้ที่แพ้มี R:R แผนสูงกว่าไม้ที่ชนะ**
+#      (เฉลี่ย 2.90 vs 2.44) = TP ไกลไม่ได้แปลว่าดี ในกลุ่มนี้มันสัมพันธ์กับการแพ้ด้วยซ้ำ
+#   2) การยืด TP ทำให้ไม้ที่เคยถูกด่าน R:R ตัดทิ้ง **กลับเข้ามาได้** = ผลิต R:R ด้วยการย้ายเป้า
+#      ไม่ใช่ด้วยการหาจุดเข้าที่ดีขึ้น ตรงกับรูปแบบ "ด่านที่รอให้เงื่อนไขดีขึ้น พังทุกตัว"
+#      ที่บันทึกไว้ที่ config.MIN_RR_HARD_BLOCK
+_botp_arg = next((a for a in sys.argv if a.startswith("--breakout-tp=")), None)
+BREAKOUT_TP_FIB_RATIO = float(_botp_arg.split("=")[1]) if _botp_arg else 2.618
 # --tp-cap-r=X : เพดานระยะ TP เป็นเท่าของความเสี่ยง (ดูที่จุดใช้งานในลูปหลัก)
 _tpc_arg = next((a for a in sys.argv if a.startswith("--tp-cap-r=")), None)
 tp_cap_r = float(_tpc_arg.split("=")[1]) if _tpc_arg else None
@@ -869,8 +884,16 @@ for n, row in enumerate(clock.to_dict("records")):
                             note(f"flip -> Long สวนโครงสร้าง 4H ({_struct})")
                             fate("flip Long สวนโครงสร้าง 4H")
                             continue
-                        score, criteria, passed, sl_info = compute_score(
-                            symbol, direction, entry, as_of=now, df_1d=_df1d_rev)
+                        # TP ของไม้ Breakout ใช้อัตราส่วน fib ของตัวเอง (ดู --breakout-tp)
+                        # swing.py ผูก TP_FIB_RATIO ไว้ที่ระดับโมดูลตอน import จึงสลับตรงนั้น
+                        # แล้วคืนค่าเดิมเสมอใน finally — ไม้ Scoring/Reversal ต้องไม่ถูกแตะ
+                        _saved_fib = _swing_mod.TP_FIB_RATIO
+                        _swing_mod.TP_FIB_RATIO = BREAKOUT_TP_FIB_RATIO
+                        try:
+                            score, criteria, passed, sl_info = compute_score(
+                                symbol, direction, entry, as_of=now, df_1d=_df1d_rev)
+                        finally:
+                            _swing_mod.TP_FIB_RATIO = _saved_fib
                         sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Breakout"
                         exec_sl, atr_entry_ = sl_info["exec_sl"], sl_info["atr_entry"]
                         note("Reversal Short -> กลับเป็น Long (เทรนด์ 1D = Long)")
@@ -1129,6 +1152,8 @@ if rev_short_1d != config.REVERSAL_SHORT_NEEDS_1D_TREND:
     _tag += "_revshort1d" if rev_short_1d else "_revshortany"
 if breakout_mode:
     _tag += "_breakout"
+    if _botp_arg:                      # ติด tag เฉพาะรอบที่สวนค่า default 2.618
+        _tag += f"_botp{BREAKOUT_TP_FIB_RATIO:g}"
 if rev_tp_entry:
     _tag += "_revtpentry"
 if regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE:    # ติด tag เฉพาะรอบที่สวนค่าระบบจริง

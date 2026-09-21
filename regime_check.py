@@ -578,7 +578,17 @@ def check_structure(df: pd.DataFrame, vol_multiplier: float, wick_ratio_min: flo
     จุดกลางถือเป็นการย่อ/เด้งชั่วคราวที่ยอมรับได้ในเทรนด์จริง — ไม่เอามาตัดสิน
     ทดสอบแล้วว่าสมดุลกว่าเทียบแค่ 2 จุด (ไวเกิน) หรือบังคับ 3 จุดเรียงต่อเนื่องเป๊ะ (เข้มเกิน)
 
-    wick_ratio_min: OR-logic เฉพาะ XAU (ดู swing.swing_wick_ratio_min) — symbol อื่นส่ง None เสมอ"""
+    wick_ratio_min: เกณฑ์ไส้เทียนแบบ OR-logic (ผ่านได้ถ้า volume ถึง **หรือ** ไส้ถึง)
+    🔴 2026-09-21 แก้: บรรทัดนี้เคยเขียนว่า "เฉพาะ XAU — symbol อื่นส่ง None เสมอ" ซึ่ง
+    **หมดอายุไปแล้ว** — get_regime() ส่ง swing_wick_ratio_min(symbol) ให้ **ทุก symbol**
+    (ดูจุดเรียกด้านล่างในไฟล์นี้) และตอนนี้ทุกตัวใน SYMBOLS มีค่า wick ของตัวเองครบ
+    ไม่มีตัวไหนส่ง None เลย
+    ⚠️ ที่ต้องแก้เพราะถ้าเชื่อข้อความเดิมจะสรุปว่า "เปลี่ยนเกณฑ์ wick ไม่กระทบ structure/regime"
+    ซึ่งตรงข้ามกับที่วัดได้จริง: BTCUSDm 2025-12-17 12:00 เปลี่ยน wick 0.50 -> 0.48 ทำให้
+    structure["intact"] พลิก False -> True และ regime พลิก "เขตเทา" -> "TREND" ทั้งที่ ADX
+    เท่ากันเป๊ะ (22.0) เพราะ swing low ที่ wick 0.4893 เข้ามาคั่นพวงใน collapse_swing_runs
+    (คำเตือนชุดเดียวกันนี้ถูกแก้ไปแล้วที่ inspect_swings.py 2026-09-19 และ swing.py 2026-09-20
+     — ทั้งสองที่บันทึกไว้ว่าเคยทำให้อ่านข้อมูลผิดมาแล้วจริง ตัวนี้ตกหล่นเพราะอยู่คนละไฟล์)"""
     highs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
                              tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,
                              wick_ratio_min=wick_ratio_min)
