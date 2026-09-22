@@ -546,7 +546,8 @@ if "--structure-break" in sys.argv and not no_struct_break:
 no_trend_inval = "--no-trend-invalidate" in sys.argv
 if no_trend_inval:
     em.TREND_CHECK_KEEP_BY_CONSEC = {k: 100 for k in em.TREND_CHECK_KEEP_BY_CONSEC}
-# --no-breakeven : ปิดการบังคับเลื่อน SL ไป entry ที่ 1R (checklist ข้อ 5)
+# --no-breakeven : ปิดการบังคับเลื่อน SL ไป entry (checklist ข้อ 5)
+#   จุดที่ยิงอ่านจาก exit_monitor.BREAKEVEN_TRIGGER_R — **1.5R ตั้งแต่ 2026-09-22** ไม่ใช่ 1R
 # ⚠️ **ไม่ใช่ "ปล่อยให้ ATR trailing คุมแทน"** อย่างที่เคยเขียนไว้ตรงนี้ — วัดแล้วได้ SL ที่แคบลง
 # 0 ไม้จาก 188 เพราะ trailing ตรึงฐานที่ swing ตอนเข้า ขึ้นไม่ถึง entry โดยโครงสร้าง
 # (ดู BREAKEVEN_ENABLED ที่ exit_monitor) รอบนี้จึงวัด "ไม่มีการดึง SL ให้แคบลงเลย"
@@ -557,7 +558,7 @@ no_breakeven = "--no-breakeven" in sys.argv
 if no_breakeven:
     em.BREAKEVEN_ENABLED = False
 
-# --be-trigger=X : R ที่กฎ BE เริ่มยิง (ปกติ 1.0) · --be-level=X : จุดที่ SL ไปนั่งเทียบ entry
+# --be-trigger=X : R ที่กฎ BE เริ่มยิง (ปัจจุบัน 1.5) · --be-level=X : จุดที่ SL ไปนั่งเทียบ entry
 # ทั้งสองตัวต้องวัดที่นี่ ไม่ใช่ backtest_exit_rules ด้วยเหตุผลเดียวกับ --no-breakeven ข้างบน:
 # มันเปลี่ยนว่าไม้จบเมื่อไหร่ = ครองช่องนานขึ้น/สั้นลง = **ชุดไม้เปลี่ยน**
 # 🔴 be-level เคยถูกกวาดเฉพาะฝั่งลบ (0.0/-0.1/-0.2/-0.3/-0.5 ใน backtest_exit_rules --set=belevel)
