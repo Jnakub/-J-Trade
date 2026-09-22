@@ -1161,7 +1161,13 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         # แต่ตัดสินใจไม่เอากลับ ดู comment ที่ RULE_1R_KEEP ด้านบนไฟล์
         position_rules = [
             {"no": 1, "name": "ถึง 1R",               "trigger": rule_1r_trigger,       "keep_pct": RULE_1R_KEEP,
-             "cond": "R-multiple >= 1.0 (ล็อกกำไรครึ่งหนึ่ง คู่กับ SL ที่ขยับไป breakeven)"},
+             # 🔴 2026-09-22: ข้อความเดิม "ล็อกกำไรครึ่งหนึ่ง คู่กับ SL ที่ขยับไป breakeven"
+             # ผิดสองทาง — (1) RULE_1R_KEEP = 100 ตั้งแต่ 2026-09-13 กฎนี้ไม่ตัดอะไรเลย
+             # (2) ตั้งแต่ BREAKEVEN_TRIGGER_R = 1.5 มันไม่ได้ "คู่กับ" กฎ BE อีกต่อไป
+             # สองกฎยิงคนละจุดแล้ว  และเลข 1.0 เคย hardcode ทั้งที่ค่าจริงอยู่ที่ RULE_1R_TRIGGER
+             "cond": (f"R-multiple >= {RULE_1R_TRIGGER:g}"
+                      + ("" if RULE_1R_KEEP < 100 else " (กฎปิดอยู่ ไม่ลดขนาดไม้)")
+                      + f" — คนละจุดกับกฎ BE ที่ยิงที่ {BREAKEVEN_TRIGGER_R:g}R")},
             {"no": 2, "name": "Indicator ร้อน",        "trigger": hot_trigger,           "keep_pct": RULE_HOT_KEEP,
              "cond": "RSI ชนขอบ / ราคาชน Bollinger ฝั่งกำไร"},
             {"no": 3, "name": "เดินทาง >=50% ไป TP",   "trigger": halfway_trigger,       "keep_pct": RULE_HALFWAY_KEEP,
