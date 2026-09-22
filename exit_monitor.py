@@ -23,7 +23,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-from config import MT5_TIMEFRAMES
+from config import MT5_TIMEFRAMES, get_asset_class
 from mt5_connect import connect, get_tick_or_raise, is_demo_account
 from scoring import get_ohlcv, get_ohlcv_real, ema
 from swing import calc_atr, find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
@@ -41,7 +41,9 @@ AUTO_EXECUTE = True   # False = แค่แนะนำเหมือนเด
 
 STRUCTURE_LEFT_RIGHT  = 4
 STRUCTURE_TOLERANCE   = 0.22   # 2026-07-24: เปลี่ยนจาก 0.25 — ยังไม่มี backtest ยืนยัน
-# กฎ "ถือครบ N วันแล้วยังไม่ถึง R" -> base_keep_pct = 50 (ตัวเลข 50 hardcode ใน analyze_position)
+# กฎ "ถือครบ N วันแล้วยังไม่ถึง R" -> base_keep_pct = SLOW_TRADE_KEEP (ดูค่านั้นด้านล่าง —
+# 2026-09-22 แก้บรรทัดนี้: เดิมเขียนว่า "50 hardcode ใน analyze_position" ซึ่งไม่จริงตั้งแต่
+# 2026-09-14 ที่แยก SLOW_TRADE_KEEP ออกมา เหลือแต่ข้อความบนจอที่ยัง hardcode 50 อยู่ ซึ่งแก้แล้ว)
 # 2026-09-13: กวาดเกณฑ์ครบ 7 symbol 730 วัน (backtest_exit_rules.py --set=slow / slow2) —
 # **ไม่แตะ คงไว้ที่ 3 วัน** ไม่ใช่เพราะ 3 ดีที่สุด แต่เพราะข้อมูลไม่มีทิศพอจะบอกว่าค่าไหนดีกว่า
 #   ΔR เทียบ control(3 วัน):    5ว     7ว     10ว    14ว    ปิดกฎ
@@ -97,6 +99,32 @@ STRUCTURE_TOLERANCE   = 0.22   # 2026-07-24: เปลี่ยนจาก 0.25
 MAX_HOLD_DAYS         = 30
 
 SLOW_TRADE_DAYS       = 3
+# 🔴 2026-09-22 (คำสั่งผู้ใช้): **หน่วยของค่านี้เปลี่ยนจาก "วันปฏิทิน" เป็น "วันทำการ"** —
+# symbol ที่ไม่ใช่ CRYPTO หักเสาร์-อาทิตย์ออก (ดู market_days_held) ตัวเลขยังเป็น 3 เท่าเดิม
+# แต่ **แปลว่าคนละอย่าง**: ของเดิมยิงได้ตอนตลาดปิด (เคสจริง XAUUSDm เข้า พฤ 17/09 กฎยิง
+# อา 20/09 ทั้งที่ตลาดเปิดให้ราคาวิ่งไปแค่ 1 วัน) ของใหม่ยิง อัง 22/09 = ช้าลง ~2 วันปฏิทิน
+# ⚠️ **ตาราง ΔR ทุกช่องด้านบน + ตัวเลข +1.86R ด้านล่าง วัดบนนิยามเก่า (วันปฏิทิน) ทั้งหมด**
+#    ห้ามอ้างตัวเลขพวกนั้นเป็นผลของ config ปัจจุบัน
+#
+# 📊 **วัดจริงแล้ว — replay เต็ม 8 symbol 730 วัน 2026-09-22** (base ก่อน/หลังบนหน้าต่างเดียวกัน
+# เป๊ะ ไม้แรกสุดตรงกันทั้งสองรอบ จึงไม่มีผลของขอบหน้าต่างปน):
+#   **187 ไม้ +68.26R -> 187 ไม้ +66.85R  =  ΔR direct −1.415R**
+#   🔴 **ชุดไม้ไม่ขยับเลยแม้แต่ไม้เดียว: หาย 0 · ใหม่ 0 · `exit_time` เปลี่ยน 0 · `sl0` เปลี่ยน 0**
+#      = ยืนยันด้วยข้อมูลแล้วว่ากฎนี้ "ตัดขนาดอย่างเดียว ไม่คืนช่องถือไม้" ไม่ใช่แค่สมมติฐาน
+#   R เปลี่ยน **32 ไม้** · sd/ไม้ 0.339 -> SE 1.92R -> **|t| = 0.74** · บวก 2/6 symbol
+#   5 ไม้ใหญ่ +0.59R ตัดออกเหลือ −2.01R  => **noise ทุกมุม ตกกติกาข้อ 3 ครบทุกข้อ**
+#   EURUSDm −1.43 · UKOILm −0.69 · HK50m −0.38 · XAUUSDm −0.20 · US500m +0.06 · USDJPYm +1.23
+# 👉 เพดานของแกนนี้เล็กโดยโครงสร้าง: แตะได้แค่ 32 ไม้ x ครึ่งไม้ x ราคาที่ขยับ ~2 วัน
+#    **เหตุผลที่เปลี่ยนคือ "กฎวัดสิ่งที่มันอ้างว่าวัด" ไม่ใช่ R — อย่าเอาไปขายเป็นผลตอบแทน**
+#    และห้ามถอยกลับเพราะ −1.4R นี้ ด้วยเหตุผลเดียวกัน (มันคือ noise เท่ากัน)
+# ✅ identity check ผ่านก่อนรันจริง (กติกาข้อ 5 ของ CLAUDE.md):
+#    `backtest_replay.py XAUUSDm 730 --slow-calendar` บนโค้ดใหม่ = ไฟล์ base ทุกคอลัมน์
+#    30/30 ไม้ · ΔR 0.0000 · ไม่มี `how` เปลี่ยนสักไม้ => การแก้รอบนี้ไม่ได้ไปโดนกฎอื่นเลย
+# 📌 ของแถมที่ได้ความรู้: ประมาณการล่วงหน้าจาก `news_paths.csv` (เดินเส้นทาง R รายชั่วโมง
+#    หาจุดยิงของทั้งสองนิยาม ~10 วินาที ไม่ต้องรัน replay) ทายได้ **จำนวนไม้ที่เปลี่ยน 32 ไม้
+#    ตรงเป๊ะ** และทิศถูก แต่ขนาดพลาด (−0.45R เทียบของจริง −1.415R) เพราะไม่นับปฏิสัมพันธ์กับ
+#    กฎตัดตัวอื่นที่แทรกกลาง => ใช้เป็น **เครื่องคัดกรองว่า "แกนนี้ใหญ่พอจะวัดไหม"** ได้ดีมาก
+#    แต่ใช้แทนตัวเลขจริงไม่ได้ (รูปแบบเดียวกับ backtest_exit_rules ในกติกาข้อ 6)
 # 2026-09-14: 0.5 -> 0.0 = **ตัดเฉพาะไม้ที่ติดลบจริงที่วันที่ 3** เลิกยิงใส่ไม้ที่กำไรอยู่แต่ไปช้า
 # เหตุผลหลักไม่ใช่ตัวเลข แต่คือกฎเดิมไม่ตรงกับเจตนาตัวเอง: มันประกาศว่า "ยังไม่วิ่งใน 3 วัน =
 # สมมติฐานอาจผิด" แต่ยิงใส่ไม้ที่ +0.3R ด้วย ซึ่งไม่ใช่หลักฐานว่าสมมติฐานผิด — ครึ่งหนึ่งของ
@@ -826,6 +854,51 @@ def check_recent_news(entry_time: pd.Timestamp, hours_back: int = NEWS_POST_H) -
 
 
 # ---------------------------------------------------------------------------
+# นับ "วันที่ถือไม้" — มี 2 นิยาม อย่าสลับกัน
+# ---------------------------------------------------------------------------
+# 🔴 2026-09-22 (คำสั่งผู้ใช้): กฎที่ถามว่า "ราคาควรวิ่งภายใน N วัน" ต้องนับเฉพาะวันที่ตลาด
+# เปิดจริง — ของเดิมนับวันปฏิทินล้วน เสาร์-อาทิตย์ที่ตลาดปิดจึงถูกนับเป็น "เวลาที่ให้ราคาวิ่ง"
+# ทั้งที่ราคาขยับไม่ได้เลย  เคสจริงที่ทำให้เจอ: XAUUSDm #4726514804 เข้า พฤ 17/09 05:50
+# กฎ 3 วันยิงตอน **อา 20/09 ซึ่งตลาดปิด** ทั้งที่ตลาดเพิ่งเปิดให้ราคาวิ่งไปแค่ 1 วันทำการ
+# (ศุกร์) — นับแบบใหม่ได้ 3 วันทำการพอดีที่ อัง 22/09 05:50 = ช้ากว่าเดิม 2 วัน
+#
+# CRYPTO เปิด 24/7 จึงไม่หักอะไร (ดู config.ASSET_CLASS = แหล่งความจริงเดียวของการจัดกลุ่ม)
+# ⚠️ ตัดหยาบระดับ "ทั้งวันเสาร์ + ทั้งวันอาทิตย์" ตามที่สั่ง ไม่ได้ไล่ตามเวลาเปิด-ปิดจริงของ
+#    โบรก (FX ปิดศุกร์ ~23:59 เปิดอาทิตย์เย็น) ส่วนต่างระดับไม่กี่ชั่วโมงต่อสุดสัปดาห์
+# ⚠️ **ใช้กับ SLOW_TRADE_DAYS เท่านั้น** MAX_HOLD_DAYS ยังนับวันปฏิทินเหมือนเดิม เพราะมันคือ
+#    เพดาน "เงินทุนถูกล็อกไว้นานแค่ไหน" (เสาร์-อาทิตย์ก็ล็อกอยู่) และเป็นตัวที่ backtest_replay
+#    /backtest_trade_sim บังคับเองด้วย timedelta ปฏิทิน — เปลี่ยนนิยามที่นี่ที่เดียวจะทำให้
+#    ระบบจริงกับ backtest ทำคนละอย่าง ซึ่งเป็นบั๊กที่เพิ่งแก้ไปเมื่อ 2026-09-14
+def _weekend_seconds(start: datetime, end: datetime) -> float:
+    """จำนวนวินาทีในช่วง [start, end) ที่ตกวันเสาร์/อาทิตย์"""
+    if end <= start:
+        return 0.0
+    total = 0.0
+    day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    while day < end:
+        nxt = day + timedelta(days=1)
+        if day.weekday() >= 5:            # 5 = เสาร์, 6 = อาทิตย์
+            total += (min(end, nxt) - max(start, day)).total_seconds()
+        day = nxt
+    return total
+
+
+SLOW_TRADE_SKIP_WEEKENDS = True   # False = นับวันปฏิทินแบบก่อน 2026-09-22 (มีไว้ให้ backtest
+                                  # เทียบ 2 นิยามได้: `backtest_replay.py <SYM> 730 --slow-calendar`)
+
+
+def market_days_held(symbol: str, entry_time: datetime, now: datetime) -> float:
+    """จำนวน 'วันที่ตลาดเปิด' ที่ถือไม้มา — CRYPTO = วันปฏิทินตรงๆ, ที่เหลือหักเสาร์-อาทิตย์
+
+    now < entry_time (นาฬิกา MT5 กับเครื่องเหลื่อมกัน) คืนค่าติดลบตามจริง ไม่ clamp เป็น 0 —
+    ให้พฤติกรรมเหมือน time_held_days เดิมเป๊ะ และค่าติดลบทำให้กฎไม่ยิง ซึ่งเป็นฝั่งที่ปลอดภัย"""
+    elapsed = (now - entry_time).total_seconds()
+    if not SLOW_TRADE_SKIP_WEEKENDS or get_asset_class(symbol) == "CRYPTO":
+        return elapsed / 86400
+    return (elapsed - _weekend_seconds(entry_time, now)) / 86400
+
+
+# ---------------------------------------------------------------------------
 # วิเคราะห์ 1 position
 # ---------------------------------------------------------------------------
 
@@ -909,6 +982,9 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
 
     now = datetime.now() if as_of is None else pd.Timestamp(as_of).to_pydatetime()
     time_held_days = (now - entry_time).total_seconds() / 86400
+    # วันทำการ (หักเสาร์-อาทิตย์ถ้าไม่ใช่ CRYPTO) — ใช้กับกฎ slow trade เท่านั้น
+    # ดู comment ที่ market_days_held ว่าทำไม MAX_HOLD_DAYS ถึงไม่ใช้ตัวนี้
+    market_days = market_days_held(symbol, entry_time, now)
 
     # ── 2) รัน Exit Decision Checklist โดยใช้ r_multiple/time_held ข้างบน (ก่อนคิด Chandelier) ──
     strategy       = ctx.get("strategy") if ctx else journal.get_trade_strategy(pos.ticket)
@@ -936,8 +1012,8 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     # และ desired_sl ท้ายฟังก์ชันอ้างตัวเลขเดียวกัน ไม่ใช่คนละจุดเวลาตั้งค่าไม่เป็นศูนย์
     be_price         = (entry + BREAKEVEN_LEVEL_R * sl_range * (1 if direction == "Long" else -1)
                         if sl_range else entry)
-    slow_trade       = time_held_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
-    hold_cap         = time_held_days >= MAX_HOLD_DAYS
+    slow_trade       = market_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
+    hold_cap         = time_held_days >= MAX_HOLD_DAYS   # เพดานเงินทุน = วันปฏิทิน (ตรงกับ backtest)
 
     # ต่อท้ายเมื่อจุดล็อกไม่ใช่ entry — ไม่งั้นอ่าน log แล้วนึกว่าเสมอตัวทั้งที่ยอมเสียไว้แล้ว
     _be_note      = "" if not BREAKEVEN_LEVEL_R else f" ({BREAKEVEN_LEVEL_R:+g}R จาก entry)"
@@ -951,7 +1027,12 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     elif trend_broken_partial:
         final_decision = (f"ออก {100 - trend_keep_pct}% — {trend_info['reason']}", YELLOW)
     elif slow_trade:
-        final_decision = ("ออก 50% (Time exit) — รอ setup ใหม่", YELLOW)
+        # 🔴 2026-09-22: เดิมบรรทัดนี้ hardcode "ออก 50%" + "รอ setup ใหม่" ทั้งสองอย่างไม่ตรงกับ
+        # ที่โค้ดทำ — % มาจาก SLOW_TRADE_KEEP (กวาดค่าได้ ไม่ใช่ 50 ตายตัว) และการตัดบางส่วน
+        # **ไม่คืนช่องถือไม้** จึงไม่มี "setup ใหม่" ให้รอ (ช่องว่างเมื่อไม้ปิดหมดเท่านั้น)
+        # checklist ข้อ 4 ถูกแก้ถ้อยคำนี้ไปแล้วตั้งแต่ 2026-09-13 แต่บรรทัดนี้ถูกลืมไว้
+        final_decision = (f"ออก {100 - SLOW_TRADE_KEEP:g}% (Time exit) — "
+                          f"ลดความเสี่ยงของไม้ที่ยังไม่ไปไหน", YELLOW)
     elif be_lock:
         final_decision = (f"{BE_DECISION_PREFIX} = {be_price:,.3f}{_be_note}", YELLOW)
     else:
@@ -964,10 +1045,11 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                     f"ออก {100 - trend_keep_pct}% = เตือนภัย (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)" if trend_broken_partial else ""),
          "severity": "red" if trend_broken_full else "yellow",
          "note": trend_info["reason"]},
-        {"no": 0, "q": f"ถือมาครบ {MAX_HOLD_DAYS:g} วันแล้ว?", "answer": hold_cap,
-         "action": f"ออก 100% = ชนเพดานเวลา ({time_held_days:.0f} วัน)" if hold_cap else "",
+        {"no": 0, "q": f"ถือมาครบ {MAX_HOLD_DAYS:g} วันปฏิทินแล้ว?", "answer": hold_cap,
+         "action": f"ออก 100% = ชนเพดานเวลา ({time_held_days:.0f} วันปฏิทิน)" if hold_cap else "",
          "severity": "red",
-         "note": "ปิดโดยไม่สนว่า R เท่าไหร่ — ดู comment ที่ MAX_HOLD_DAYS"},
+         "note": f"ถือมา {time_held_days:.1f} วันปฏิทิน — เพดานนี้นับรวมเสาร์-อาทิตย์ตั้งใจ "
+                 f"(เงินทุนถูกล็อกอยู่จริง) ปิดโดยไม่สนว่า R เท่าไหร่ ดู comment ที่ MAX_HOLD_DAYS"},
         {"no": 2, "q": "Structure ที่ใช้เข้าพังแล้ว?",                 "answer": structure_broken,
          "action": "ออก 100% = Structure broken" if structure_broken else "",
          "severity": "red",
@@ -976,14 +1058,19 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
          "action": f"พิจารณาออก/ลดขนาดก่อนข่าว — {news_detail}" if has_news else "",
          "severity": "yellow",
          "note": f"เช็คจาก ForexFactory ({NEWS_CURRENCY}, {NEWS_IMPACT} เท่านั้น, ล่วงหน้า {NEWS_LOOKAHEAD_H} ชม.)"},
-        {"no": 4, "q": f"เข้ามา {SLOW_TRADE_DAYS} วันแล้ว ยังไม่ได้กำไร {SLOW_TRADE_R}R?", "answer": slow_trade,
+        {"no": 4, "q": f"ถือมา {SLOW_TRADE_DAYS:g} วันทำการแล้ว R ยังต่ำกว่า {SLOW_TRADE_R:g}R?",
+         "answer": slow_trade,
          # 2026-09-13: เดิมเขียน "รอ setup ใหม่" ซึ่ง **ไม่ตรงกับที่โค้ดทำ** — ตัด 50% ไม่ได้
          # คืนช่องถือไม้ (ช่องว่างเมื่อไม้ปิดหมดเท่านั้น) ไม้ที่โดนตัดครึ่งยังครองช่องต่อไป
          # สิ่งที่คืนจริงคือโควตา config.MAX_PORTFOLIO_RISK_R ซึ่งเป็นผลข้าม symbol
-         "action": "ออก 50% (Time exit) — ลดความเสี่ยงของไม้ที่ยังไม่ไปไหน" if slow_trade else "",
+         "action": (f"ออก {100 - SLOW_TRADE_KEEP:g}% (Time exit) — ลดความเสี่ยงของไม้ที่ยังไม่ไปไหน"
+                    if slow_trade else ""),
          "severity": "yellow",
-         "note": f"เจตนาเดิม: ถ้า setup ดี ราคาควรวิ่งภายใน {SLOW_TRADE_DAYS} วัน — ⚠️ ขัดกับข้อมูลจริง "
-                 f"(71% ของไม้ Scoring ถือเกิน 3 วัน) ดู comment ที่ SLOW_TRADE_DAYS"},
+         "note": f"ถือมา {market_days:.1f} วันทำการ (เกณฑ์ {SLOW_TRADE_DAYS:g}) · R ตอนนี้ "
+                 f"{'N/A' if r_multiple is None else f'{r_multiple:+.2f}'} (เกณฑ์ < {SLOW_TRADE_R:g}) — "
+                 f"⚠️ เจตนาเดิม 'setup ดีราคาควรวิ่งภายใน {SLOW_TRADE_DAYS:g} วัน' ขัดกับข้อมูลจริง "
+                 f"(71% ของไม้ Scoring ถือเกิน 3 วัน — เลขนั้นนับวันปฏิทิน ยังไม่ได้วัดใหม่แบบ"
+                 f"วันทำการ) ดู comment ที่ SLOW_TRADE_DAYS"},
         {"no": 5, "q": "กำไร >= 1R แล้ว? (ระยะกำไร = ระยะ SL)",       "answer": ge1r,
          "action": (f"{BE_DECISION_PREFIX} = {breakeven_str}" if be_lock else
                     "ถึง 1R แล้ว แต่ BREAKEVEN_ENABLED = False — ปล่อยให้ ATR trailing คุม SL" if ge1r else ""),
@@ -1147,6 +1234,8 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
 
     return {
         "now": now, "time_held_days": time_held_days,
+        # วันทำการ = ตัวที่กฎ slow trade ใช้จริง (ต่างจาก time_held_days เมื่อไม่ใช่ CRYPTO)
+        "market_days_held": market_days,
         "symbol": symbol, "ticket": pos.ticket, "direction": direction,
         "entry": entry, "sl": sl, "tp": tp, "lot": lot,
         "trail": trail, "initial_sl": initial_sl,
@@ -1188,7 +1277,12 @@ def print_report(m: dict):
     now_str   = m["now"].strftime("%d/%m/%Y %H:%M")
     print(f"  Entry Date/Time   : {entry_str}")
     print(f"  Current Date/Time : {now_str}")
+    # แสดง 2 ตัวเลขเมื่อไม่เท่ากัน — กฎคนละข้อใช้คนละตัว (ข้อ 0 = ปฏิทิน, ข้อ 4 = วันทำการ)
+    # ถ้าโชว์ตัวเดียวจะอ่าน checklist แล้วงงว่าทำไม "5.1 วัน" ยังไม่ชนเกณฑ์ 3 วัน
     held_str = f"{m['time_held_days']:.1f} days"
+    mkt_days = m.get("market_days_held")
+    if mkt_days is not None and abs(mkt_days - m["time_held_days"]) >= 0.05:
+        held_str += f"  ({mkt_days:.1f} วันทำการ — หักเสาร์-อาทิตย์ที่ตลาดปิด)"
     print(f"  Time Held         : {_y(held_str)}")
     print("-" * 62)
     print(f"  Entry           : {m['entry']:,.3f}")
@@ -1282,14 +1376,37 @@ def print_report(m: dict):
     basis_note = "" if m["original_lot"] is not None else f" {DIM}(ไม่พบ lot เปิดใน journal — ใช้ lot ปัจจุบันแทน){RESET}"
     print(f"  {_b('สรุป: ควรเหลือ Position')} = {keep_color}{keep_str}{RESET}"
           f" ของ lot ตอนเปิด {m['lot_basis']} = {keep_color}{lot_str}{RESET}{basis_note}")
+
+    # 🔴 2026-09-22: บล็อกนี้เคยโกหก 2 ทาง — (1) โชว์ lot เป้าหมายแบบไม่ปัดตาม step/min ของโบรก
+    # ทั้งที่ execute_decision ปัดด้วย clamp_lot เสมอ  (2) พอส่วนเกินต่ำกว่า min lot กลับพิมพ์ว่า
+    # "ถึงเป้าแล้ว" ทั้งที่ยังถือเต็มไม้และกฎยิงค้างอยู่  เคสจริง XAUUSDm lot 0.01 keep 50% ->
+    # เป้า 0.005 ซึ่งโบรกไม่รับ: จอขึ้น "ควรเหลือ 0.005 ... ถึงเป้าแล้ว" พร้อมกับ ACTION
+    # "ขาย 50%" ในหน้าจอเดียวกัน  ตอนนี้คิดเป้าด้วย clamp_lot ตัวเดียวกับที่สั่งจริง
+    blocked_note = ""      # เก็บ "เหตุผล" ล้วน — คนเรียกเติมคำนำหน้าเองตามบริบทของบรรทัด
+    if keep_pct < 100 and m["original_lot"] is None:
+        # execute_decision ข้ามปิดบางส่วนทั้งดุ้นเมื่อไม่รู้ lot ตอนเปิด (คิด % จาก lot ปัจจุบัน
+        # จะปิดทบซ้ำทุกชั่วโมง) — จอต้องบอกตรงกัน
+        blocked_note = "ไม่พบ lot ตอนเปิดใน journal"
     held_color = GREEN if m["held_pct"] >= 100 else YELLOW
     print(f"  ตอนนี้ถืออยู่ {held_color}{m['lot']} ({m['held_pct']:g}% ของไม้เดิม){RESET}", end="")
-    diff = round(m["lot"] - m["remaining_lot"], 3)
-    info = mt5.symbol_info(m["symbol"])
-    min_lot = info.volume_min if info else 0.01
-    if diff >= min_lot:
-        print(f" -> {YELLOW}ต้องปิดเพิ่ม {diff:g} lot{RESET}")
+    info       = mt5.symbol_info(m["symbol"])
+    min_lot    = info.volume_min if info else 0.01
+    step       = info.volume_step if info else 0.01
+    # เป้าจริงที่ execute_decision ใช้ — keep=0 คือปิดเต็มจำนวน (close_order) ไม่ผ่าน clamp_lot
+    # ซึ่งมี min_lot เป็นพื้น ถ้าเผลอ clamp ตรงนี้จะกลายเป็น "เหลือ 0.01" ทั้งที่จะปิดหมด
+    target_lot = 0.0 if keep_pct <= 0 else clamp_lot(m["symbol"], m["remaining_lot"])
+    diff       = round(m["lot"] - target_lot, 3)
+    # "กฎสั่งให้ถือน้อยกว่าที่ถืออยู่" — เทียบกับเป้าดิบก่อนปัด ไม่ใช่เป้าหลังปัด
+    wants_cut  = keep_pct < 100 and m["lot"] > m["remaining_lot"] + 1e-9
+    if diff >= min_lot and not blocked_note:
+        print(f" -> {YELLOW}ต้องปิดเพิ่ม {diff:g} lot (เหลือ {target_lot:g}){RESET}")
+    elif wants_cut:
+        if not blocked_note:
+            blocked_note = (f"เป้า {m['remaining_lot']:g} lot โบรกรับไม่ได้ (min {min_lot:g} / "
+                            f"step {step:g}) ปัดแล้วได้ {target_lot:g} = ไม่มีส่วนเกินให้ปิด")
+        print(f" -> {YELLOW}ปิดเพิ่มไม่ได้ — {blocked_note} ไม้จึงยังเท่าเดิม{RESET}")
     else:
+        blocked_note = ""
         print(f" -> {DIM}ถึงเป้าแล้ว ไม่ต้องทำอะไรเพิ่ม{RESET}")
 
     label, color = m["final_decision"]
@@ -1299,6 +1416,9 @@ def print_report(m: dict):
 
     combo_label, combo_color = m["combined_decision"]
     print(f"  {_b('>>> ACTION จริงที่ควรทำ')} : {combo_color}{combo_label}{RESET}")
+    if blocked_note:
+        # บรรทัด ACTION พูดถึง "กฎบอกให้ขายเท่าไหร่" ส่วนบรรทัดนี้คือ "รอบนี้ทำได้จริงแค่ไหน"
+        print(f"  {YELLOW}⚠️ รอบนี้ทำจริงไม่ได้ — {blocked_note}{RESET}")
     print(f"  {DIM}(กติกา: Final=0% หยุดคิดทันที | Final=50%/100% คิดต่อด้วย Position Sizing แล้วคูณกันเป็นทอด){RESET}")
     print("=" * 62)
 

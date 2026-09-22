@@ -122,6 +122,9 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
      --max-hold=N  ทับ exit_monitor.MAX_HOLD_DAYS (ปกติ 30) — เพดานเวลาถือไม้ 0 = ปิดเพดาน
                  เพดานนี้เคยวัดตัวเองไม่ได้: backtest ตั้งเลขไว้เองตั้งแต่ก่อนมันเข้าระบบจริง
                  ทุกรอบที่เคยรันจึงสมมติว่ามีเพดานอยู่แล้ว (ไฟล์ผลติด tag _nomaxhold / _maxholdN)
+     --slow-calendar  ให้ SLOW_TRADE_DAYS นับวันปฏิทิน (รวมเสาร์-อาทิตย์) แบบก่อน 2026-09-22
+                 ระบบจริงนับวันทำการแล้ว — ธงนี้คือ "ของเดิม" ไว้วัดส่วนต่าง (tag _slowcal)
+                 ชุดไม้ไม่เปลี่ยน (กฎตัดแต่ขนาด ไม่คืนช่อง) จึงเทียบ direct แบบ paired ได้
 """
 import re
 import sys
@@ -508,6 +511,12 @@ for _flag, _attr, _cast in (("--slow-r=",     "SLOW_TRADE_R",    float),
     _a = next((a for a in sys.argv if a.startswith(_flag)), None)
     if _a:
         setattr(em, _attr, _cast(_a.split("=", 1)[1]))
+# --slow-calendar : ย้อนกลับไปนับ "วันปฏิทิน" แบบก่อน 2026-09-22 (รวมเสาร์-อาทิตย์)
+# ระบบจริงนับวันทำการแล้ว (ดู exit_monitor.market_days_held) ธงนี้มีไว้วัดส่วนต่างของสองนิยาม
+# เท่านั้น — กฎตัดแค่ขนาดไม้ ไม่คืนช่อง **ชุดไม้จึงไม่เปลี่ยน** เทียบ direct (paired) ได้เลย
+slow_calendar = "--slow-calendar" in sys.argv
+if slow_calendar:
+    em.SLOW_TRADE_SKIP_WEEKENDS = False
 # ปิดกฎ trend invalidation: คง code path เดิมไว้ทุกบรรทัด แค่ให้ทุกระดับความต่อเนื่องคืน 100%
 # ปิดกฎ structure break: patch ที่ตัวฟังก์ชันเลย — analyze_position เรียกผ่านชื่อใน module
 # globals ทุกครั้ง การแทนที่ตรงนี้จึงมีผลทันทีโดยไม่ต้องแก้ exit_monitor.py
@@ -1216,6 +1225,8 @@ for _flag, _attr, _short in (("--slow-r=",    "SLOW_TRADE_R",    "slowr"),
                              ("--slow-keep=", "SLOW_TRADE_KEEP", "slowkeep")):
     if any(a.startswith(_flag) for a in sys.argv):
         _tag += f"_{_short}{getattr(em, _attr):g}"
+if slow_calendar:
+    _tag += "_slowcal"
 if no_trend_inval:
     _tag += "_notrendinval"
 if "--structure-break" in sys.argv and not no_struct_break:
