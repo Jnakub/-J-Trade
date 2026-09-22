@@ -194,6 +194,31 @@ NEWS_IMMINENT_KEEP = 100      # 100 = ปิดกฎ · ค่าเดิม 5
 
 NEWS_POST_H       = 6         # ข่าวผ่านไปกี่ชั่วโมงถือว่า "สงบ" แล้ว
 
+# 🔴 2026-09-23: **ปิดกฎนี้ตามคำสั่งผู้ใช้** (checklist ข้อ 6 — "ข่าวสงบ 6 ชม. แล้วยังไม่กำไร
+# -> ออก 100%")  False = ยังคำนวณและรายงานบน checklist เหมือนเดิม แต่ไม่ปิดไม้
+# ตั้งใจไม่ลบเงื่อนไขทิ้ง เพื่อให้ log ยังบอกความจริงว่า "เข้าเงื่อนไขแล้ว" แค่ไม่ลงมือ
+# — แบบเดียวกับที่ทำกับกฎ B (NEWS_IMMINENT_KEEP 50 -> 100) เมื่อ 2026-09-19
+#
+# วัดด้วย news_sensitivity.py (โปรยหน้าต่างข่าวสุ่มที่อัตราจริง ~5 ครั้ง/เดือน 400 รอบ บนเส้นทาง
+# ราคารายชั่วโมงของไม้ทุกไม้ — ไม่ต้องใช้ปฏิทินย้อนหลังซึ่งหาไม่ได้):
+#   กฎ A เดี่ยวๆ **-4.33R**  ·  A+B รวมกัน -6.95R = 17% ของกำไรทั้งระบบตอนนั้น
+#
+# 🔑 เหตุผลเชิงกลไกที่สำคัญกว่าตัวเลข — **กฎนี้คัดถูกทางจริง แต่ยังแพ้**
+#   dead:good ของมันคือ 3.1 เทียบฐาน 2.0 = มันเล็งไม้ที่จะตายได้แม่นกว่าสุ่มจริงๆ
+#   แต่มันปิด**กลางทาง**: ตอนกฎยิง ไม้ที่จะตายขาดทุนไปเกือบเต็มแล้ว ประหยัดได้นิดเดียว
+#   ส่วนไม้ดีที่โดนฆ่าเสียทั้งขาขึ้น => เกณฑ์ dead:good >= 1.26 ของกติกาข้อ 3e **ใช้กับกฎ exit
+#   ไม่ได้** มันคิดจากการ "ไม่เข้าตั้งแต่แรก" ซึ่งได้ +0.945R เต็มจากไม้ dead กฎกลางทางไม่ได้
+#
+# ⚠️ **backtest ตรวจการเปลี่ยนนี้ให้ไม่ได้เลยสักตัว** — analyze_position ปิด news guard ทิ้ง
+#    เมื่อมี as_of (ForexFactory ให้แค่ปฏิทินสัปดาห์ปัจจุบัน) ทุกตัวเลข backtest จึงไม่เคยนับ
+#    กฎนี้มาตั้งแต่ต้น **ไฟล์ replay จึงไม่เปลี่ยนแม้แต่ไม้เดียว ไม่ต้องรัน replay ใหม่**
+#    หลักฐานที่มีคือ news_sensitivity.py ชุดเดียว
+# ⚠️ สิ่งที่หลักฐานชุดนี้มองไม่เห็น และเป็นเหตุผลเดียวที่จะเอากลับมา: **ความเสี่ยงขาลงตอนข่าว
+#    ที่ SL กันไม่อยู่** (slippage/gap) — วัดไว้แล้วตอนปิดกฎ B ว่าจาก 21,374 แท่ง-ชั่วโมงที่ถือไม้
+#    ตอนตลาดเปิดต่อเนื่อง gap > 0.25R เกิด 0 ครั้ง แต่ถ้าเจอไม้จริงที่ฟิลแย่กว่าราคา SL ชัดๆ
+#    ช่วงข่าว ให้กลับมาวัดใหม่ทั้งบล็อก
+NEWS_POST_EXIT_ENABLED = False
+
 # Position Sizing Rules — "ถ้า trigger ควรเหลือกี่ %"
 #
 # 2026-08-27: เพิ่มกฎ "ถึง 1R" — คู่กับ checklist ข้อ 5 ที่เลื่อน SL ไป breakeven ที่ 1R อยู่แล้ว
@@ -1055,7 +1080,11 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         has_news, news_detail, news_hours_left = False, "", None
         has_recent_news, recent_news_detail = False, ""
     news_imminent = has_news and news_hours_left is not None and news_hours_left <= NEWS_IMMINENT_H
+    # post_news_no_profit = "เข้าเงื่อนไขไหม" (ข้อเท็จจริง ใช้แสดงผลเสมอ)
+    # post_news_exit      = "แล้วจะปิดไม้ไหม" — แยกกันเพื่อให้ตอนปิดสวิตช์ checklist
+    # ยังรายงานตามจริง ไม่ใช่เงียบไปเฉยๆ (ดู NEWS_POST_EXIT_ENABLED)
     post_news_no_profit = has_recent_news and pnl_pct <= 0
+    post_news_exit      = post_news_no_profit and NEWS_POST_EXIT_ENABLED
     ge1r             = r_multiple is not None and r_multiple >= BREAKEVEN_TRIGGER_R
     # ge1r = "ถึงเกณฑ์แล้วจริงไหม" (ข้อเท็จจริง ใช้แสดงผลเสมอ)  be_lock = "แล้วจะบังคับ BE ไหม"
     # แยกสองอย่างนี้ออกจากกัน ไม่งั้นตอนปิดสวิตช์ checklist จะยังประกาศว่าขยับ SL ทั้งที่ไม่ได้ขยับ
@@ -1072,10 +1101,10 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     _be_note      = "" if not BREAKEVEN_LEVEL_R else f" ({BREAKEVEN_LEVEL_R:+g}R จาก entry)"
     breakeven_str = f"{be_price:,.3f}{_be_note}"
 
-    invalidated = trend_broken_full or structure_broken or post_news_no_profit or hold_cap
+    invalidated = trend_broken_full or structure_broken or post_news_exit or hold_cap
     if trend_broken_full or structure_broken:
         final_decision = ("ออก 100% ทันที — Trend/Structure พัง", RED)
-    elif post_news_no_profit:
+    elif post_news_exit:
         final_decision = ("ออก 100% ทันที — ข่าวสงบแล้วแต่ไม่กำไร", RED)
     elif trend_broken_partial:
         final_decision = (f"ออก {100 - trend_keep_pct}% — {trend_info['reason']}", YELLOW)
@@ -1131,9 +1160,14 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
          "severity": "yellow",
          "note": "ป้องกัน winner กลายเป็น loser — นี่คือขยับ SL ไม่ใช่การออก"},
         {"no": 6, "q": f"ข่าวสงบแล้ว ({NEWS_POST_H} ชม.) แต่ยังไม่กำไร?", "answer": post_news_no_profit,
-         "action": "ออก 100% = ข่าวสงบแล้วแต่ไม่กำไร" if post_news_no_profit else "",
-         "severity": "red",
-         "note": f"เช็คว่ามีข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ออกภายใน {NEWS_POST_H} ชม.ที่ผ่านมาไหม — {recent_news_detail if has_recent_news else 'ไม่มีข่าวล่าสุด'}"},
+         "action": ("ออก 100% = ข่าวสงบแล้วแต่ไม่กำไร" if post_news_exit else
+                    "เข้าเงื่อนไขแล้ว แต่ NEWS_POST_EXIT_ENABLED = False — ไม่ปิดไม้"
+                    if post_news_no_profit else ""),
+         "severity": "red" if post_news_exit else "yellow",
+         "note": (f"เช็คว่ามีข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ออกภายใน {NEWS_POST_H} ชม.ที่ผ่านมาไหม"
+                  + ("" if NEWS_POST_EXIT_ENABLED else " · **กฎปิดอยู่ ไม่ปิดไม้** (วัดได้ −4.33R"
+                     " ดู NEWS_POST_EXIT_ENABLED)")
+                  + f" — {recent_news_detail if has_recent_news else 'ไม่มีข่าวล่าสุด'}")},
     ]
 
     # ── 4) Final Decision แปลงเป็น % ฐาน — 0% หยุดคิดทันที (คูณอะไรก็ยังเป็น 0) ──
