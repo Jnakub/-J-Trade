@@ -419,6 +419,8 @@ def _price_tol(df: pd.DataFrame, idx: int) -> float:
     atr = calc_atr(df).iloc[idx]
     return 0.0 if pd.isna(atr) else float(atr) * DIV_PRICE_TOLERANCE_ATR
 
+# 🔻 สถานะปัจจุบัน: DIV_MIN_SPACING_BARS = 5 (**ไม่เคยกวาดเลย ยังเป็น TODO จริง**) ·
+#    DIV_MAX_LOOKBACK_BARS = 20 (กวาดครบแล้ว 2026-09-22 ดูบล็อกที่ค่านั้น)
 # Min spacing / max lookback (2026-07-25) — swing point ที่ผ่านเกณฑ์อาจอยู่ติดกันเกินไป
 # (window หา swing overlap กัน) โดยเฉพาะ XAU ที่เพิ่งเปิด volume OR wick ratio: backtest
 # สำรวจ (ไม่ใช่ optimize) เจอคู่ห่าง <=2-3 แท่ง ~8-13% ของ XAU, BTC แทบไม่เจอ (0-4.8%)

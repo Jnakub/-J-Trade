@@ -41,6 +41,9 @@ AUTO_EXECUTE = True   # False = แค่แนะนำเหมือนเด
 
 STRUCTURE_LEFT_RIGHT  = 4
 STRUCTURE_TOLERANCE   = 0.22   # 2026-07-24: เปลี่ยนจาก 0.25 — ยังไม่มี backtest ยืนยัน
+# 🔻 สองกฎที่ **ยังทำงานอยู่จริง** อยู่ในบล็อกยาวนี้: MAX_HOLD_DAYS (เพดาน 30 วันปฏิทิน ปิด
+#    100%) และ slow trade (SLOW_TRADE_DAYS วันทำการ ยังไม่ถึง SLOW_TRADE_R -> เหลือ
+#    SLOW_TRADE_KEEP%) ที่เหลือใต้นี้คือประวัติการวัด — ดูสถานะจริงที่ `--rules`
 # กฎ "ถือครบ N วันแล้วยังไม่ถึง R" -> base_keep_pct = SLOW_TRADE_KEEP (ดูค่านั้นด้านล่าง —
 # 2026-09-22 แก้บรรทัดนี้: เดิมเขียนว่า "50 hardcode ใน analyze_position" ซึ่งไม่จริงตั้งแต่
 # 2026-09-14 ที่แยก SLOW_TRADE_KEEP ออกมา เหลือแต่ข้อความบนจอที่ยัง hardcode 50 อยู่ ซึ่งแก้แล้ว)
@@ -515,6 +518,7 @@ TRAIL_EXTREME_ATR_MULT = 2.0
 #    กับ progress (หลวมตอนต้นทาง) **ไม่ช่วย** เพราะไม้ใหญ่ใช้เวลาเดินนาน = มีจังหวะย่อเยอะกว่า
 #    ที่ไหนสักแห่งเสมอ  ⚠️ แกน "ปกป้องกำไรระหว่าง BE กับ TP" วัดครบ 3 สูตรแล้ว แพ้ทุกสูตร
 #    ด้วยเหตุผลเดียวกัน — ถ้าจะลองอีก ต้องเป็นกลไกที่ **ไม่ปิดไม้ก่อนถึง TP** เท่านั้น
+# 🔻 สถานะปัจจุบัน: **ปิดอยู่** — ข้อความด้านบนอธิบายดีไซน์ตอนเปิด อ่านเป็นประวัติ
 TP_PROGRESS_LOCK       = False
 TP_PROGRESS_LOCK_KEEP  = 0.5
 
@@ -539,6 +543,8 @@ TP_PROGRESS_LOCK_KEEP  = 0.5
 #
 # หมายเหตุวิธีวัด: ค่าที่เป็น no-op **ไม่ต้องยืนยันด้วย backtest_replay เต็ม** เพราะไม่มีไม้ไหน
 # เปลี่ยนเวลาออก จึงไม่มีผลต่อช่องถือไม้ให้ backtest_exit_rules มองพลาด (ข้อจำกัดปกติของมัน)
+# 🔻 สถานะปัจจุบัน: **เปิดอยู่แต่ไม่เคยยิงเลยสักครั้ง** — ไม้ที่ขยาย SL มากสุดใน 200 ไม้คือ
+#    1.107 เท่า เพดาน 1.2 จึงเป็นนโยบายความเสี่ยง ไม่ใช่กลไกที่มีผลต่อ R
 MAX_SL_WIDEN_R   = 1.2   # SL ห่างจาก entry ได้ไม่เกินกี่เท่าของระยะ 1R เริ่มต้น
 
 # TP Trailing (2026-07-23) — เริ่มขยับ TP เข้ามาเมื่อราคาใกล้ TP เดิมมากพอ กันเคส "เกือบถึง
@@ -720,6 +726,9 @@ def calc_atr_trailing_sl(df_swing: pd.DataFrame, symbol: str,
 # ---------------------------------------------------------------------------
 # ข้อ 1 — Daily ปิดสวน trend ที่ใช้เข้า? (EMA50 บน 1D เท่านั้น — 2026-08-07 ตัด 4H ออก)
 # ---------------------------------------------------------------------------
+# 🔻 สถานะปัจจุบัน: **ปิดอยู่** (TREND_CHECK_KEEP_BY_CONSEC = 100 ทุกระดับ ตั้งแต่ 2026-09-13)
+#    ไม่ถูกพิมพ์ในรายงาน · ทุกอย่างใต้บรรทัดนี้คือ**ดีไซน์เดิมตอนกฎยังเปิด** อ่านเป็นประวัติ
+#    เช็คสถานะจริงเสมอด้วย `exit_monitor.py --rules` อย่าอนุมานจาก comment
 # เดิมเช็ค 1D OR 4H — 4H ไวเกินไป (เคสจริง: ราคาหลุด EMA50 บน 4H อยู่ 15 แท่ง (~2.5 วัน) ก่อนดีด
 # กลับไปกำไร >1R ออกไปก่อนหน้านั้นเสียโอกาสฟรีทั้งที่ trend ใหญ่ยังไม่พัง) Daily กรอง noise ในตัว
 # อยู่แล้ว (ต้องปิดทั้งวันถึงนับ) จึงตัด 4H ออกจากเงื่อนไข hard-invalidation ไปเลย เหลือ Daily อย่างเดียว
@@ -1642,12 +1651,55 @@ def scan_once():
         mt5.shutdown()
 
 
+def rules_status() -> list[tuple[str, bool, str]]:
+    """สถานะกฎ exit ทุกตัว **คำนวณจากค่าคงที่จริง ไม่ใช่สำเนาใน comment**
+
+    มีไว้เพราะ comment ในไฟล์นี้อธิบายค่า*เดิม*ของกฎที่ปิดไปแล้วยาวหลายสิบบรรทัด จนอ่านผ่านๆ
+    แล้วนึกว่าเป็นค่าปัจจุบันได้ง่ายมาก (เกิดขึ้นจริง 2026-09-23 กับ TREND_CHECK_KEEP_BY_CONSEC)
+    ตารางที่เขียนด้วยมือจะกลายเป็นสำเนาที่ล้าสมัยอีกใบ — ตัวนี้จึงอ่านจากตัวแปรตรงๆ
+    ใช้: `./run_wine.sh exit_monitor.py --rules`  (และพิมพ์อัตโนมัติตอน run_monitor เริ่ม)"""
+    return [
+        ("SL / TP ที่ broker",        True,  "ทางออกหลักของระบบ"),
+        (f"เพดานเวลา {MAX_HOLD_DAYS:g} วันปฏิทิน", True, "checklist ข้อ 0 — ปิด 100%"),
+        (f"slow trade {SLOW_TRADE_DAYS:g} วันทำการ", SLOW_TRADE_KEEP < 100,
+         f"checklist ข้อ 4 — เหลือ {SLOW_TRADE_KEEP:g}%"),
+        (f"breakeven ที่ {BREAKEVEN_TRIGGER_R:g}R", BREAKEVEN_ENABLED,
+         f"checklist ข้อ 5 — ล็อก SL ที่ {BREAKEVEN_LEVEL_R:+g}R จาก entry"),
+        ("trend invalidation",        TREND_CHECK_ENABLED,
+         f"checklist ข้อ 1 — TREND_CHECK_KEEP_BY_CONSEC = {TREND_CHECK_KEEP_BY_CONSEC}"),
+        ("structure break",           STRUCTURE_BREAK_ENABLED, "checklist ข้อ 2"),
+        ("กฎข่าว A (ข่าวสงบไม่กำไร)",  NEWS_POST_EXIT_ENABLED,  "checklist ข้อ 6 — วัดได้ -4.33R"),
+        ("กฎข่าว B (ใกล้ข่าว)",        NEWS_IMMINENT_KEEP < 100, "sizing 5 — วัดได้ -4.57R"),
+        ("sizing 1 ถึง 1R",           RULE_1R_KEEP < 100,      f"RULE_1R_KEEP = {RULE_1R_KEEP:g}"),
+        ("sizing 2 Indicator ร้อน",    RULE_HOT_KEEP < 100,     f"RULE_HOT_KEEP = {RULE_HOT_KEEP:g}"),
+        ("sizing 3 เดินทาง >=50% TP",  RULE_HALFWAY_KEEP < 100, f"RULE_HALFWAY_KEEP = {RULE_HALFWAY_KEEP:g}"),
+        ("sizing 4 Climax",           RULE_CLIMAX_KEEP < 100,  f"RULE_CLIMAX_KEEP = {RULE_CLIMAX_KEEP:g}"),
+        ("TP progress lock",          bool(TP_PROGRESS_LOCK),  "ล็อก SL ตามระยะทางไป TP"),
+        ("ATR trailing (ดึง SL แคบลง)", False,
+         "เปิดอยู่แต่ทำไม่ได้โดยโครงสร้าง — ฐานตรึงที่ swing ตอนเข้า ขึ้นไม่ถึง entry"),
+    ]
+
+
+def print_rules_status() -> None:
+    on  = [r for r in rules_status() if r[1]]
+    off = [r for r in rules_status() if not r[1]]
+    print("-" * 62)
+    print(_b(f"  กฎ exit ที่ทำงานจริง {len(on)} ตัว"))
+    for name, _, detail in on:
+        print(f"    {GREEN}ON {RESET} {name:26s} {DIM}{detail}{RESET}")
+    print(f"  {DIM}ปิดอยู่ {len(off)} ตัว — ไม่ถูกพิมพ์ในรายงานรายไม้{RESET}")
+    for name, _, detail in off:
+        print(f"    {DIM}off  {name:26s} {detail}{RESET}")
+    print("-" * 62)
+
+
 def run_monitor():
     load_dotenv()
     print("=" * 62)
     print(_b("  EXIT MONITOR  (กด Ctrl+C เพื่อหยุด)"))
     print(f"  Timeframe : 1H   Interval : {INTERVAL_SECONDS // 60} นาที")
     print("=" * 62)
+    print_rules_status()   # ให้ log ของทุกรอบการรันจริงบันทึกไว้เสมอว่าตอนนั้นเปิดกฎอะไรอยู่
 
     while True:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1669,6 +1721,9 @@ def run_monitor():
 
 if __name__ == "__main__":
     load_dotenv()
+    if "--rules" in sys.argv:
+        print_rules_status()
+        sys.exit(0)
     if "--once" in sys.argv:
         scan_once()
     else:
