@@ -754,6 +754,9 @@ TREND_CHECK_GRACE_BARS = 5
 # ปิดอยู่ — ค่าเดิมก่อน 2026-09-13 คือ {1: 75, 2: 50, 3: 0} (ดูบล็อกด้านบน)
 TREND_CHECK_KEEP_BY_CONSEC = {1: 100, 2: 100, 3: 100}   # แท่งปิดสวนติดกัน -> % lot ที่ควรเหลือ
 TREND_CHECK_MAX_CONSEC     = max(TREND_CHECK_KEEP_BY_CONSEC)
+# ทุกระดับ = 100 แปลว่ากฎไม่มีทางตัดอะไร -> ไม่ต้องพิมพ์ในรายงาน (คำนวณต่อเหมือนเดิม
+# เพื่อให้ trend_info['reason'] ยังใช้ได้ถ้าเปิดกลับ) ตั้งค่าใดค่าหนึ่ง < 100 กฎโผล่กลับมาเอง
+TREND_CHECK_ENABLED = any(v < 100 for v in TREND_CHECK_KEEP_BY_CONSEC.values())
 
 
 def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timestamp,
@@ -1121,12 +1124,17 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         final_decision = ("ถือต่อ — ยังไม่มี signal ให้ออก", GREEN)
 
     checklist = [
-        {"no": 1, "q": "Daily ปิดสวน trend ที่ใช้เข้า? (พ้น grace period แล้ว)",
-         "answer": trend_broken_full or trend_broken_partial,
-         "action": (f"ออก 100% = Invalidation (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)" if trend_broken_full else
-                    f"ออก {100 - trend_keep_pct}% = เตือนภัย (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)" if trend_broken_partial else ""),
-         "severity": "red" if trend_broken_full else "yellow",
-         "note": trend_info["reason"]},
+        # กฎนี้ปิดเมื่อ TREND_CHECK_KEEP_BY_CONSEC เป็น 100 ทุกระดับ (สถานะปัจจุบัน)
+        # -> ไม่ต้องพิมพ์ ตามหลักเดียวกับกฎอื่นที่ปิดอยู่ (คำสั่งผู้ใช้ 2026-09-23)
+        *([{"no": 1, "q": "Daily ปิดสวน trend ที่ใช้เข้า? (พ้น grace period แล้ว)",
+            "answer": trend_broken_full or trend_broken_partial,
+            "action": (f"ออก 100% = Invalidation (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)"
+                       if trend_broken_full else
+                       f"ออก {100 - trend_keep_pct}% = เตือนภัย (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)"
+                       if trend_broken_partial else ""),
+            "severity": "red" if trend_broken_full else "yellow",
+            "note": trend_info["reason"]}]
+          if TREND_CHECK_ENABLED else []),
         *([{"no": 2, "q": "Structure ที่ใช้เข้าพังแล้ว?", "answer": structure_broken,
             "action": "ออก 100% = Structure broken" if structure_broken else "",
             "severity": "red",
