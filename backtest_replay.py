@@ -511,6 +511,9 @@ for _flag, _attr, _cast in (("--slow-r=",     "SLOW_TRADE_R",    float),
     _a = next((a for a in sys.argv if a.startswith(_flag)), None)
     if _a:
         setattr(em, _attr, _cast(_a.split("=", 1)[1]))
+        # กฎถูกปิดเป็น default ตั้งแต่ 2026-09-23 (em.SLOW_TRADE_ENABLED = False) — การส่งธง
+        # ใดธงหนึ่งของชุดนี้แปลว่าตั้งใจจะวัดกฎนี้ จึงเปิดให้อัตโนมัติ ไม่งั้นทุกค่าจะเป็น no-op
+        em.SLOW_TRADE_ENABLED = True
 # --slow-calendar : ย้อนกลับไปนับ "วันปฏิทิน" แบบก่อน 2026-09-22 (รวมเสาร์-อาทิตย์)
 # ระบบจริงนับวันทำการแล้ว (ดู exit_monitor.market_days_held) ธงนี้มีไว้วัดส่วนต่างของสองนิยาม
 # เท่านั้น — กฎตัดแค่ขนาดไม้ ไม่คืนช่อง **ชุดไม้จึงไม่เปลี่ยน** เทียบ direct (paired) ได้เลย

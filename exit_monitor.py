@@ -101,6 +101,39 @@ STRUCTURE_TOLERANCE   = 0.22   # 2026-07-24: เปลี่ยนจาก 0.25
 #    ทดลอง (0 = ปิดเพดาน) — วัดแล้วเพดานนี้ได้ +1.86R แตะ 6/199 ไม้ churn เป็นศูนย์
 MAX_HOLD_DAYS         = 30
 
+# 🔴 2026-09-23: **ปิดกฎนี้ตามคำสั่งผู้ใช้** — ผลบวกตัวแรกของโปรเจกต์ที่ผ่านเกณฑ์ครบ 3 ข้อ
+# (ค่าคงที่ทั้ง 3 ตัวด้านล่างยังอยู่ครบ ตั้ง SLOW_TRADE_ENABLED = True เมื่อไหร่กฎกลับมาทันที
+#  และธง --slow-days / --slow-r / --slow-keep ของ backtest_replay เปิดให้เองอัตโนมัติ)
+#
+# 📊 replay เต็ม 8 symbol 730 วัน (--slow-days=9999) เทียบ base 168 ไม้ +74.92R:
+#   **168 ไม้ +87.54R = ΔR +12.63R**
+#   direct 66 ไม้ · sd/ไม้ 0.724 -> SE 5.88R -> **|t| = 2.15 ผ่านเกณฑ์ 1.96**
+#   churn: **ไม่มีเลย** ชุดไม้เท่าเดิมเป๊ะ (กฎตัดแค่ขนาด ไม่คืนช่องถือไม้)
+#   5 ไม้ใหญ่ +8.11R ตัดออกเหลือ **+4.51R ยังบวก** · **บวก 7/8 symbol** (เกณฑ์ที่เคยรับ 6/7)
+#   XAU +3.16 · BTC +3.06 · USDJPY +1.97 · EUR +1.94 · ETH +1.92 · HK50 +1.04 ·
+#   US500 +0.49 · UKOIL -0.94    WR 55.4% -> 56.5%
+#
+# 🔑 กลไก — **ขาลงมีเพดาน ขาขึ้นไม่มี**: ดีขึ้น 31 ไม้ (median +0.894R) · แย่ลง 35 ไม้
+#   (median -0.448R) แพ้บ่อยกว่าชนะแต่ยังกำไร เพราะไม้ที่รอดจากการโดนหั่นครึ่งไปได้เต็มตัว
+#   ส่วนไม้ที่เสียคือเสีย "ครึ่งที่เคยถูกป้องกัน" เท่านั้น — 5 ไม้ที่แย่สุดคือ -0.51/-0.52 เป๊ะ
+#   ทุกไม้ = ครึ่งหนึ่งของ -1R พอดี  Scoring 53 ไม้ +8.16 · Breakout 9 +3.79 · Reversal 4 +0.67
+#
+# 🔴 **ทำไมผลถึงพลิกจากรอบ 2026-09-13 ที่เคยปฏิเสธ** (ตอนนั้นสรุปว่า "ข้อมูลไม่มีทิศ" และ
+#   "ปิดกฎ +4.67R ตัด XAU ออกเหลือ -0.14R" = กระจุกที่ตัวเดียว) เปลี่ยนไป 2 อย่าง:
+#     1. **หน่วยเปลี่ยนเป็นวันทำการ** (2026-09-22) ตารางเดิมวัดบนวันปฏิทินทั้งหมด
+#     2. **base เปลี่ยนสองรอบในวันเดียว** — BREAKEVEN_TRIGGER_R 1.5 (ปล่อยไม้ดีวิ่ง) และ
+#        DIV_MAX_LOOKBACK_BARS 20 (ตัดไม้เสียออก) ทั้งคู่ผลักไปทางเดียวกัน = ไม้ที่เหลือใน
+#        ระบบเป็นไม้ "ไปช้าแต่ไปถึง" มากขึ้น กฎที่หั่นครึ่งเพราะช้าจึงยิ่งกินของดี
+#   คราวนี้ monotone ทุกขั้น (คัดกรอง: 2วัน -9.04 · 4วัน +0.14 · 5วัน +2.59 · 7วัน +7.93 ·
+#   ปิดกฎ +12.64) และกระจาย 7/8 ไม่ใช่กระจุกที่ XAU เหมือนเดิม
+#
+# ⚠️ กวาด 5 ค่าแล้วเลือกตัวดีที่สุด — แต่ "ปิดกฎ" เป็น**ปลายแกนของเส้นที่เรียงตัวทุกขั้น**
+#    ไม่ใช่ยอดแหลมกลางแกน เสี่ยง selection bias น้อยกว่าเคส BREAKEVEN_TRIGGER_R มาก
+# ⚠️ ผลข้างเคียงเชิงโครงสร้าง: **ระบบไม่เหลือการปิดบางส่วนเลย** (กฎ sizing ปิดหมด · trend ปิด ·
+#    ตัวนี้เป็นตัวสุดท้าย) ทุกไม้กลายเป็น all-or-nothing — ไม้ที่ยังมี cuts ในไฟล์ผลคือการปิดจบ
+#    ที่ rem = 0.0 ไม่ใช่ partial
+SLOW_TRADE_ENABLED    = False
+
 SLOW_TRADE_DAYS       = 3
 # 🔴 2026-09-22 (คำสั่งผู้ใช้): **หน่วยของค่านี้เปลี่ยนจาก "วันปฏิทิน" เป็น "วันทำการ"** —
 # symbol ที่ไม่ใช่ CRYPTO หักเสาร์-อาทิตย์ออก (ดู market_days_held) ตัวเลขยังเป็น 3 เท่าเดิม
@@ -1106,7 +1139,8 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     # และ desired_sl ท้ายฟังก์ชันอ้างตัวเลขเดียวกัน ไม่ใช่คนละจุดเวลาตั้งค่าไม่เป็นศูนย์
     be_price         = (entry + BREAKEVEN_LEVEL_R * sl_range * (1 if direction == "Long" else -1)
                         if sl_range else entry)
-    slow_trade       = market_days >= SLOW_TRADE_DAYS and r_multiple is not None and r_multiple < SLOW_TRADE_R
+    slow_trade       = (SLOW_TRADE_ENABLED and market_days >= SLOW_TRADE_DAYS
+                        and r_multiple is not None and r_multiple < SLOW_TRADE_R)
     hold_cap         = time_held_days >= MAX_HOLD_DAYS   # เพดานเงินทุน = วันปฏิทิน (ตรงกับ backtest)
 
     # ต่อท้ายเมื่อจุดล็อกไม่ใช่ entry — ไม่งั้นอ่าน log แล้วนึกว่าเสมอตัวทั้งที่ยอมเสียไว้แล้ว
@@ -1160,19 +1194,21 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
          "answer": has_news, "action": "",
          "severity": "yellow",
          "note": f"บรรทัดข้อมูล ไม่ใช่กฎ ไม่มีผลต่อการตัดสินใจ — {news_detail if has_news else 'ไม่มีข่าวใกล้'}"},
-        {"no": 4, "q": f"ถือมา {SLOW_TRADE_DAYS:g} วันทำการแล้ว R ยังต่ำกว่า {SLOW_TRADE_R:g}R?",
-         "answer": slow_trade,
-         # 2026-09-13: เดิมเขียน "รอ setup ใหม่" ซึ่ง **ไม่ตรงกับที่โค้ดทำ** — ตัด 50% ไม่ได้
-         # คืนช่องถือไม้ (ช่องว่างเมื่อไม้ปิดหมดเท่านั้น) ไม้ที่โดนตัดครึ่งยังครองช่องต่อไป
-         # สิ่งที่คืนจริงคือโควตา config.MAX_PORTFOLIO_RISK_R ซึ่งเป็นผลข้าม symbol
-         "action": (f"ออก {100 - SLOW_TRADE_KEEP:g}% (Time exit) — ลดความเสี่ยงของไม้ที่ยังไม่ไปไหน"
-                    if slow_trade else ""),
-         "severity": "yellow",
-         "note": f"ถือมา {market_days:.1f} วันทำการ (เกณฑ์ {SLOW_TRADE_DAYS:g}) · R ตอนนี้ "
-                 f"{'N/A' if r_multiple is None else f'{r_multiple:+.2f}'} (เกณฑ์ < {SLOW_TRADE_R:g}) — "
-                 f"⚠️ เจตนาเดิม 'setup ดีราคาควรวิ่งภายใน {SLOW_TRADE_DAYS:g} วัน' ขัดกับข้อมูลจริง "
-                 f"(71% ของไม้ Scoring ถือเกิน 3 วัน — เลขนั้นนับวันปฏิทิน ยังไม่ได้วัดใหม่แบบ"
-                 f"วันทำการ) ดู comment ที่ SLOW_TRADE_DAYS"},
+        # กฎนี้ปิดอยู่ (SLOW_TRADE_ENABLED = False) -> ไม่พิมพ์ ตามหลักเดียวกับกฎอื่น
+        *([{"no": 4, "q": f"ถือมา {SLOW_TRADE_DAYS:g} วันทำการแล้ว R ยังต่ำกว่า {SLOW_TRADE_R:g}R?",
+            "answer": slow_trade,
+            # 2026-09-13: เดิมเขียน "รอ setup ใหม่" ซึ่ง **ไม่ตรงกับที่โค้ดทำ** — ตัด 50% ไม่ได้
+            # คืนช่องถือไม้ (ช่องว่างเมื่อไม้ปิดหมดเท่านั้น) ไม้ที่โดนตัดครึ่งยังครองช่องต่อไป
+            # สิ่งที่คืนจริงคือโควตา config.MAX_PORTFOLIO_RISK_R ซึ่งเป็นผลข้าม symbol
+            "action": (f"ออก {100 - SLOW_TRADE_KEEP:g}% (Time exit) — ลดความเสี่ยงของไม้ที่ยังไม่ไปไหน"
+                       if slow_trade else ""),
+            "severity": "yellow",
+            "note": f"ถือมา {market_days:.1f} วันทำการ (เกณฑ์ {SLOW_TRADE_DAYS:g}) · R ตอนนี้ "
+                    f"{'N/A' if r_multiple is None else f'{r_multiple:+.2f}'} (เกณฑ์ < {SLOW_TRADE_R:g}) — "
+                    f"⚠️ เจตนาเดิม 'setup ดีราคาควรวิ่งภายใน {SLOW_TRADE_DAYS:g} วัน' ขัดกับข้อมูลจริง "
+                    f"(71% ของไม้ Scoring ถือเกิน 3 วัน — เลขนั้นนับวันปฏิทิน ยังไม่ได้วัดใหม่แบบ"
+                    f"วันทำการ) ดู comment ที่ SLOW_TRADE_DAYS"}]
+          if SLOW_TRADE_ENABLED else []),
         {"no": 5, "q": f"กำไร >= {BREAKEVEN_TRIGGER_R:g}R แล้ว? (ระยะกำไร = ระยะ SL)", "answer": ge1r,
          "action": (f"{BE_DECISION_PREFIX} = {breakeven_str}" if be_lock else
                     f"ถึง {BREAKEVEN_TRIGGER_R:g}R แล้ว แต่ BREAKEVEN_ENABLED = False — "
@@ -1661,8 +1697,8 @@ def rules_status() -> list[tuple[str, bool, str]]:
     return [
         ("SL / TP ที่ broker",        True,  "ทางออกหลักของระบบ"),
         (f"เพดานเวลา {MAX_HOLD_DAYS:g} วันปฏิทิน", True, "checklist ข้อ 0 — ปิด 100%"),
-        (f"slow trade {SLOW_TRADE_DAYS:g} วันทำการ", SLOW_TRADE_KEEP < 100,
-         f"checklist ข้อ 4 — เหลือ {SLOW_TRADE_KEEP:g}%"),
+        (f"slow trade {SLOW_TRADE_DAYS:g} วันทำการ", SLOW_TRADE_ENABLED and SLOW_TRADE_KEEP < 100,
+         f"checklist ข้อ 4 — เหลือ {SLOW_TRADE_KEEP:g}% · วัดได้ +12.63R ตอนปิด |t| 2.15"),
         (f"breakeven ที่ {BREAKEVEN_TRIGGER_R:g}R", BREAKEVEN_ENABLED,
          f"checklist ข้อ 5 — ล็อก SL ที่ {BREAKEVEN_LEVEL_R:+g}R จาก entry"),
         ("trend invalidation",        TREND_CHECK_ENABLED,
