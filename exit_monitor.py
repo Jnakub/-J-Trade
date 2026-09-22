@@ -1127,19 +1127,22 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                     f"ออก {100 - trend_keep_pct}% = เตือนภัย (ปิดสวนติดกัน {trend_info['consec_break']} แท่ง)" if trend_broken_partial else ""),
          "severity": "red" if trend_broken_full else "yellow",
          "note": trend_info["reason"]},
+        *([{"no": 2, "q": "Structure ที่ใช้เข้าพังแล้ว?", "answer": structure_broken,
+            "action": "ออก 100% = Structure broken" if structure_broken else "",
+            "severity": "red",
+            "note": "swing low/high ที่ใช้ตัดสินใจถูก break"}]
+          if STRUCTURE_BREAK_ENABLED else []),
         {"no": 0, "q": f"ถือมาครบ {MAX_HOLD_DAYS:g} วันปฏิทินแล้ว?", "answer": hold_cap,
          "action": f"ออก 100% = ชนเพดานเวลา ({time_held_days:.0f} วันปฏิทิน)" if hold_cap else "",
          "severity": "red",
          "note": f"ถือมา {time_held_days:.1f} วันปฏิทิน — เพดานนี้นับรวมเสาร์-อาทิตย์ตั้งใจ "
                  f"(เงินทุนถูกล็อกอยู่จริง) ปิดโดยไม่สนว่า R เท่าไหร่ ดู comment ที่ MAX_HOLD_DAYS"},
-        {"no": 2, "q": "Structure ที่ใช้เข้าพังแล้ว?",                 "answer": structure_broken,
-         "action": "ออก 100% = Structure broken" if structure_broken else "",
-         "severity": "red",
-         "note": "swing low/high ที่ใช้ตัดสินใจถูก break"},
-        {"no": 3, "q": "มี major news/event เปลี่ยน fundamental?",    "answer": has_news,
-         "action": f"พิจารณาออก/ลดขนาดก่อนข่าว — {news_detail}" if has_news else "",
+        {"no": 3, "q": f"[ข้อมูล] มีข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ใน {NEWS_LOOKAHEAD_H} ชม.ข้างหน้าไหม?",
+         # ไม่ใช่กฎ — ไม่เคยมีโค้ดที่ทำอะไรกับ has_news เลยตั้งแต่ต้น (ข้อความเดิมเขียนว่า
+         # "พิจารณาออก/ลดขนาดก่อนข่าว" ซึ่งไม่มีอะไรรองรับ) เก็บไว้เป็นบรรทัดข้อมูลล้วน
+         "answer": has_news, "action": "",
          "severity": "yellow",
-         "note": f"เช็คจาก ForexFactory ({NEWS_CURRENCY}, {NEWS_IMPACT} เท่านั้น, ล่วงหน้า {NEWS_LOOKAHEAD_H} ชม.)"},
+         "note": f"บรรทัดข้อมูล ไม่ใช่กฎ ไม่มีผลต่อการตัดสินใจ — {news_detail if has_news else 'ไม่มีข่าวใกล้'}"},
         {"no": 4, "q": f"ถือมา {SLOW_TRADE_DAYS:g} วันทำการแล้ว R ยังต่ำกว่า {SLOW_TRADE_R:g}R?",
          "answer": slow_trade,
          # 2026-09-13: เดิมเขียน "รอ setup ใหม่" ซึ่ง **ไม่ตรงกับที่โค้ดทำ** — ตัด 50% ไม่ได้
@@ -1159,15 +1162,13 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                     f"ปล่อยให้ ATR trailing คุม SL" if ge1r else ""),
          "severity": "yellow",
          "note": "ป้องกัน winner กลายเป็น loser — นี่คือขยับ SL ไม่ใช่การออก"},
-        {"no": 6, "q": f"ข่าวสงบแล้ว ({NEWS_POST_H} ชม.) แต่ยังไม่กำไร?", "answer": post_news_no_profit,
-         "action": ("ออก 100% = ข่าวสงบแล้วแต่ไม่กำไร" if post_news_exit else
-                    "เข้าเงื่อนไขแล้ว แต่ NEWS_POST_EXIT_ENABLED = False — ไม่ปิดไม้"
-                    if post_news_no_profit else ""),
-         "severity": "red" if post_news_exit else "yellow",
-         "note": (f"เช็คว่ามีข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ออกภายใน {NEWS_POST_H} ชม.ที่ผ่านมาไหม"
-                  + ("" if NEWS_POST_EXIT_ENABLED else " · **กฎปิดอยู่ ไม่ปิดไม้** (วัดได้ −4.33R"
-                     " ดู NEWS_POST_EXIT_ENABLED)")
-                  + f" — {recent_news_detail if has_recent_news else 'ไม่มีข่าวล่าสุด'}")},
+        *([{"no": 6, "q": f"ข่าวสงบแล้ว ({NEWS_POST_H} ชม.) แต่ยังไม่กำไร?",
+            "answer": post_news_no_profit,
+            "action": "ออก 100% = ข่าวสงบแล้วแต่ไม่กำไร" if post_news_exit else "",
+            "severity": "red",
+            "note": f"เช็คว่ามีข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ออกภายใน {NEWS_POST_H} "
+                    f"ชม.ที่ผ่านมาไหม — {recent_news_detail if has_recent_news else 'ไม่มีข่าวล่าสุด'}"}]
+          if NEWS_POST_EXIT_ENABLED else []),
     ]
 
     # ── 4) Final Decision แปลงเป็น % ฐาน — 0% หยุดคิดทันที (คูณอะไรก็ยังเป็น 0) ──
@@ -1222,6 +1223,13 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
              "cond": f"ข่าว {NEWS_IMPACT} ({NEWS_CURRENCY}) ภายใน {NEWS_IMMINENT_H} ชม. "
                      f"(กฎปิดอยู่ ไม่ลดขนาดไม้) — {news_detail if news_imminent else ''}"},
         ]
+        # 🔴 2026-09-23 (คำสั่งผู้ใช้): **ตัดกฎที่ keep = 100 ออกจากรายการไปเลย ไม่ต้องแสดง**
+        # keep = 100 แปลว่ากฎนั้นปิดอยู่ (min() ไม่มีทางถูก 100 ดึงลง) การพิมพ์มันออกมาพร้อม
+        # คำว่า "ควรเหลือ 100%" ทำให้อ่านเหมือนระบบมีขั้นที่สองที่ทำงานอยู่ ทั้งที่ไม่มี
+        # ตอนนี้ทั้ง 5 กฎเป็น 100 หมด -> รายการว่าง -> print_report ข้ามทั้งบล็อก
+        # ค่าคงที่ RULE_*_KEEP ยังอยู่ครบ เพราะธง --rule-1r-keep / --rule-hot-keep ฯลฯ ของ
+        # backtest_replay ใช้กวาดค่ากลับมาได้ตลอด พอตั้งค่าต่ำกว่า 100 กฎจะโผล่กลับมาเอง
+        position_rules  = [r for r in position_rules if r["keep_pct"] < 100]
         triggered_keeps = [r["keep_pct"] for r in position_rules if r["trigger"]]
         stage_keep_pct  = min(triggered_keeps) if triggered_keeps else 100
 
@@ -1248,7 +1256,10 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     else:
         sell_str    = f"{100 - recommended_keep_pct:g}%"
         keep_str_c  = f"{recommended_keep_pct:g}%"
-        combined_label = f"Final={base_keep_pct}% x Position Sizing={stage_keep_pct}% => ขาย {sell_str} (เหลือ {keep_str_c})"
+        # ไม่มีกฎ Position Sizing เหลือ = ไม่ต้องอธิบายการคูณสองขั้น บอกผลลัพธ์ตรงๆ พอ
+        combined_label = (f"Final={base_keep_pct}% x Position Sizing={stage_keep_pct}% => "
+                          f"ขาย {sell_str} (เหลือ {keep_str_c})" if position_rules else
+                          f"ขาย {sell_str} (เหลือ {keep_str_c})")
         combined_color = RED if recommended_keep_pct <= 0 else YELLOW
         combined_decision = (combined_label, combined_color)
 
@@ -1445,8 +1456,9 @@ def print_report(m: dict):
 
     if m["base_keep_pct"] == 0:
         print("-" * 62)
-        print(f"  {RED}Final Decision ฟันธงออก 100% แล้ว — ข้าม Position Sizing Rules (ไม่ต้องคิดต่อ){RESET}")
-    else:
+        _skip = " — ข้าม Position Sizing Rules (ไม่ต้องคิดต่อ)" if m["position_rules"] else ""
+        print(f"  {RED}Final Decision ฟันธงออก 100% แล้ว{_skip}{RESET}")
+    elif m["position_rules"]:
         print("-" * 62)
         print(_b("  Position Sizing Rules (ควรเหลือกี่ % ของ Lot)"))
         print("-" * 62)
@@ -1464,7 +1476,9 @@ def print_report(m: dict):
     lot_str  = f"{m['remaining_lot']}"
     base_str = f"{m['base_keep_pct']}%"
     stage_str = f"{m['stage_keep_pct']}%" if m["stage_keep_pct"] is not None else "-"
-    print(f"  Final % (ฐาน) = {base_str}   x   Position Sizing % = {stage_str}")
+    # ไม่มีกฎ Position Sizing เหลือ = ไม่ต้องโชว์การคูณสองขั้นที่ขั้นหนึ่งไม่มีอยู่จริง
+    if m["position_rules"]:
+        print(f"  Final % (ฐาน) = {base_str}   x   Position Sizing % = {stage_str}")
     # แสดงทั้ง 3 ตัวเลขให้ครบ กัน "100%" อ่านแล้วเข้าใจผิดว่าไม้ยังเต็มจำนวนทั้งที่ปิดไปบางส่วนแล้ว
     # (ทุกอย่างคิดจาก lot ตอนเปิดไม้ = ฐานเดียวกับ execute_decision เป๊ะ)
     basis_note = "" if m["original_lot"] is not None else f" {DIM}(ไม่พบ lot เปิดใน journal — ใช้ lot ปัจจุบันแทน){RESET}"
@@ -1513,7 +1527,9 @@ def print_report(m: dict):
     if blocked_note:
         # บรรทัด ACTION พูดถึง "กฎบอกให้ขายเท่าไหร่" ส่วนบรรทัดนี้คือ "รอบนี้ทำได้จริงแค่ไหน"
         print(f"  {YELLOW}⚠️ รอบนี้ทำจริงไม่ได้ — {blocked_note}{RESET}")
-    print(f"  {DIM}(กติกา: Final=0% หยุดคิดทันที | Final=50%/100% คิดต่อด้วย Position Sizing แล้วคูณกันเป็นทอด){RESET}")
+    if m["position_rules"]:
+        print(f"  {DIM}(กติกา: Final=0% หยุดคิดทันที | Final=50%/100% คิดต่อด้วย Position Sizing "
+              f"แล้วคูณกันเป็นทอด){RESET}")
     print("=" * 62)
 
 
