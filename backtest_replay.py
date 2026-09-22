@@ -557,6 +557,18 @@ no_breakeven = "--no-breakeven" in sys.argv
 if no_breakeven:
     em.BREAKEVEN_ENABLED = False
 
+# --be-trigger=X : R ที่กฎ BE เริ่มยิง (ปกติ 1.0) · --be-level=X : จุดที่ SL ไปนั่งเทียบ entry
+# ทั้งสองตัวต้องวัดที่นี่ ไม่ใช่ backtest_exit_rules ด้วยเหตุผลเดียวกับ --no-breakeven ข้างบน:
+# มันเปลี่ยนว่าไม้จบเมื่อไหร่ = ครองช่องนานขึ้น/สั้นลง = **ชุดไม้เปลี่ยน**
+# 🔴 be-level เคยถูกกวาดเฉพาะฝั่งลบ (0.0/-0.1/-0.2/-0.3/-0.5 ใน backtest_exit_rules --set=belevel)
+#    ซึ่งเป็นเครื่องคัดกรองที่มองไม่เห็นไม้ที่เข้ามาแทน — **ฝั่งบวก (ล็อกกำไรไว้เหนือ entry)
+#    ไม่เคยถูกวัดเลยทั้งสองเครื่องมือ**
+for _flag, _attr in (("--be-trigger=", "BREAKEVEN_TRIGGER_R"),
+                     ("--be-level=",   "BREAKEVEN_LEVEL_R")):
+    _a = next((a for a in sys.argv if a.startswith(_flag)), None)
+    if _a:
+        setattr(em, _attr, float(_a.split("=", 1)[1]))
+
 # --adx-period / --adx-choppy / --adx-gray-high / --adx-strong : ทับเกณฑ์ ADX เฉพาะรอบนี้
 # classify_regime อ่านค่าพวกนี้จาก module global ตอนถูกเรียกทุกครั้ง การ set ตรงนี้จึงมีผลทันที
 #   --adx-strong=999  = ปลด regime "TREND แรงจัด" ทิ้ง (ไม่มี ADX ไหนถึง 999) ไม้ที่เคยถูกล็อก
@@ -1243,6 +1255,10 @@ if live_spread:      # ผลรอบนี้ขึ้นกับเวลา
     _tag += "_livespread"
 if no_breakeven:
     _tag += "_nobe"
+if any(a.startswith("--be-trigger=") for a in sys.argv):
+    _tag += f"_betrig{em.BREAKEVEN_TRIGGER_R:g}"
+if any(a.startswith("--be-level=") for a in sys.argv):
+    _tag += f"_belevel{em.BREAKEVEN_LEVEL_R:g}"
 if div_wick_gold:
     _tag += "_divwickgold"
 if div_zone_legacy:
