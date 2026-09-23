@@ -69,7 +69,12 @@ for s in CONTRACT:
     got = order.position_risk_amount(s, "Long", p.price_open, p.sl, p.volume)
     print(f"  {s:9} 1R = {got:8.2f} USD  {'ok' if abs(got-200) < 0.01 else 'FAIL'}")
 
-print("\nเพดานรวม (3.0R):")
+# ทดสอบ "กลไก" ของเพดาน ไม่ใช่ "ค่าที่ตั้ง" — ตรึงไว้ที่ 3.0R ตามเคสที่เขียนไว้ แล้วคืนค่าจริง
+# ทีหลัง (ค่าใน config เปลี่ยนเป็น 6.0R เมื่อ 2026-09-24 ถ้าไม่ตรึง เคส "3.5R เกิน" จะพังเพราะ
+# เพดานสูงขึ้น ไม่ใช่เพราะกลไกผิด)
+_LIVE_CAP = scheduler.MAX_PORTFOLIO_RISK_R
+scheduler.MAX_PORTFOLIO_RISK_R = 3.0
+print("\nเพดานรวม (ตรึงที่ 3.0R เพื่อทดสอบกลไก):")
 results = [
     check("ไม่มีไม้เปิดอยู่เลย", [], "BTCUSDm", True),
     check("เปิดอยู่ 2.0R + ไม้ใหม่ 1R = 3.0R พอดี", [
@@ -84,6 +89,18 @@ results = [
         FakePos("XAUUSDm", "Long", 4000.0, 4100.0, 0.1),
         pos_at("US500m", "Long", 1.0), pos_at("USDJPYm", "Short", 1.0)],
         "BTCUSDm", True),
+]
+
+scheduler.MAX_PORTFOLIO_RISK_R = _LIVE_CAP
+print(f"\nเพดานรวมค่าจริงใน config ({_LIVE_CAP:g}R):")
+# กระจายความเสี่ยง (cap-1)R ไว้ 4 symbol ที่อยู่คนละกลุ่ม (XAU/US500/USDJPY/EUR) แล้วให้ไม้ใหม่
+# เป็น BTC ซึ่งกลุ่ม CRYPTO ยังว่าง -> ทดสอบเพดานรวมล้วน ไม่ปนเพดานกลุ่ม
+_each = (_LIVE_CAP - 1) / 4
+_base = [pos_at(x, "Long", _each) for x in ("XAUUSDm", "US500m", "USDJPYm", "EURUSDm")]
+results += [
+    check(f"เปิดอยู่ {_LIVE_CAP-1:g}R + ไม้ใหม่ 1R = {_LIVE_CAP:g}R พอดี", _base, "BTCUSDm", True),
+    check(f"เปิดอยู่ {_LIVE_CAP-0.5:g}R + ไม้ใหม่ 1R เกิน",
+          _base + [pos_at("ETHUSDm", "Long", 0.5)], "BTCUSDm", False),
 ]
 
 print("\nเพดานกลุ่ม (2.0R) — CRYPTO = BTC+ETH, EURGBP = EUR+GBP:")
@@ -102,7 +119,10 @@ results += [
         pos_at("US500m", "Long", 1.5)], "XAUUSDm", True),
 ]
 
-print("\nเคสขอบ:")
+# เคส "ไม่มี SL = 1R" พิสูจน์ด้วยการให้ 2R + 0.5R + ไม้ใหม่ 1R = 3.5R ทะลุเพดาน -> ต้องตรึงที่ 3.0R
+# เหมือนชุดกลไกด้านบน ไม่งั้นที่เพดาน 6R มันผ่านเสมอและไม่ได้ทดสอบอะไรเลย
+scheduler.MAX_PORTFOLIO_RISK_R = 3.0
+print("\nเคสขอบ (ตรึงที่ 3.0R):")
 results += [
     check("ไม้ที่ไม่มี SL ถูกนับเป็น 1R เต็ม (2 ไม้ = 2R)", [
         FakePos("XAUUSDm", "Long", 4000.0, 0.0, 0.1),
@@ -112,4 +132,5 @@ results += [
         pos_at("XAUUSDm", "Long", 1.0)], "BTCUSDm", False, balance=0.0),
 ]
 
+scheduler.MAX_PORTFOLIO_RISK_R = _LIVE_CAP
 print(f"\n{sum(results)}/{len(results)} ผ่าน")
