@@ -337,6 +337,19 @@ _dml_arg = next((a for a in sys.argv if a.startswith("--div-max-lookback=")), No
 _DIV_LOOKBACK_LIVE = regime_check.DIV_MAX_LOOKBACK_BARS
 if _dml_arg:
     regime_check.DIV_MAX_LOOKBACK_BARS = int(_dml_arg.split("=")[1])
+# --div-min-spacing=N : ทับ DIV_MIN_SPACING_BARS (ปกติ 5) — คู่เทียบ divergence ต้องห่างจาก
+# จุดล่าสุดอย่างน้อยกี่แท่ง ถ้าใกล้กว่านี้ให้ถอยไปหาจุดก่อนหน้าแทน (ไม่ข้ามทิ้ง)
+# 🔴 **ไม่ใช่ subset แท้ ต่างจาก --div-max-lookback** — ขยับแล้วมัน **สลับคู่** ไม่ใช่ทำให้
+#    "เจอ -> ไม่เจอ" เฉยๆ: divergence ยังเจอเหมือนเดิมแต่เทียบกับคนละจุด -> SL คนละที่ ->
+#    คนละไม้ = กลไกเดียวกับเคส wick ที่ได้ |t| 2.93 แล้วตีความผิดอยู่เป็นเดือน
+#    อ่านผลด้วยกติกาข้อ 3b (ดู "ไม้ที่หายเป็นแบบไหน" ก่อนยอดรวม) เสมอ
+# ⚠️ 2026-09-23: ค่า 5 ถูกตั้งตอน DIV_MAX_LOOKBACK_BARS ยังเป็น 180 = หน้าต่าง [5,180] กว้าง
+#    175 แท่ง พื้นแทบไม่มีความหมาย · ตอนนี้เพดานเป็น 20 แล้ว หน้าต่างเหลือ [5,20] = พื้นกิน
+#    พื้นที่ 1 ใน 4 **บทบาทของค่านี้เปลี่ยนไปโดยไม่มีใครตั้งใจ**
+# 👉 ใส่ 5 ในชุดกวาดด้วยเสมอ = identity check ฟรี (ต้องออกมาเท่า base เป๊ะ)
+_dms_arg = next((a for a in sys.argv if a.startswith("--div-min-spacing=")), None)
+if _dms_arg:
+    regime_check.DIV_MIN_SPACING_BARS = int(_dms_arg.split("=")[1])
 # --div-rsi-period=N : ทับ regime_check.DIV_RSI_PERIOD เฉพาะรอบนี้
 # ⚠️ ค่านี้ไม่ได้คุมแค่ divergence — reversal.py:207 เรียก calc_rsi() โดยไม่ส่ง period จึงรับ
 # ค่านี้เป็น default ด้วย = เกณฑ์ "RSI extreme" (30/70) ของ Reversal ขยับตามไปพร้อมกัน
@@ -1218,6 +1231,8 @@ if regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE:    # ติด tag เฉพ�
     _tag += f"_divage{regime_check.DIV_MAX_AGE_BARS}"
 if _dml_arg:      # ติด tag ทุกครั้งที่ส่งธง รวม 180 ที่เป็น identity check (กันทับไฟล์ base)
     _tag += f"_divlook{regime_check.DIV_MAX_LOOKBACK_BARS}"
+if _dms_arg:
+    _tag += f"_divspace{regime_check.DIV_MIN_SPACING_BARS}"
 if regime_check.DIV_RSI_PERIOD != _DIV_RSI_LIVE:
     _tag += f"_divrsi{regime_check.DIV_RSI_PERIOD}"
 if em.RSI_PERIOD != _EXIT_RSI_LIVE:
