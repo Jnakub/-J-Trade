@@ -7,6 +7,7 @@ backtest_replay.py เดินทีละ symbol ตามด่านจร�
 
     python3 backtest_portfolio.py                    # ตารางเปรียบเทียบเพดานทุกระดับ
     python3 backtest_portfolio.py --cap=3 --group=2  # ดูค่าที่ตั้งไว้จริงใน config
+    python3 backtest_portfolio.py --daily            # MAX_DAILY_LOSS ระดับพอร์ต (replay เห็นแค่ต่อ symbol)
 
 ⚠️ **ตัวเลข ΔR ที่ได้คือขอบบนของต้นทุน ไม่ใช่ต้นทุนจริง**
 ไฟล์นี้ไม่ได้ replay ใหม่ — มันหยิบไม้ที่ replay รายตัวสร้างไว้แล้วมาคัดออก ไม้ที่ถูก
@@ -25,7 +26,7 @@ from collections import defaultdict
 
 import exit_monitor as em
 from config import (SYMBOLS, RISK_PER_TRADE, MAX_PORTFOLIO_RISK_R,
-                    MAX_GROUP_RISK_R, CORRELATION_GROUPS)
+                    MAX_GROUP_RISK_R, CORRELATION_GROUPS, MAX_DAILY_LOSS)
 
 P = datetime.datetime.fromisoformat
 # อ่านจาก exit_monitor ไม่ hardcode — สตริงนี้เคยถูก rename แล้วที่นี่ไม่รู้ตัว ผลคือไม้ที่ล็อก
@@ -88,11 +89,21 @@ def risk_of(t, now):
     return cur
 
 
-def run(trades, cap_r=None, cap_n=None, grp_r=None):
+def run(trades, cap_r=None, cap_n=None, grp_r=None, daily_r=None):
+    """daily_r = MAX_DAILY_LOSS เป็นหน่วย R — net R ของไม้ที่ **ปิดไปแล้ววันเดียวกัน**
+    รวมทุก symbol ถึง −daily_r เมื่อไหร่ ห้ามเปิดไม้ใหม่ทั้งวัน (แบบเดียวกับ scheduler)
+    ⚠️ ขอบวันใช้วันที่ของเวลาปิดในไฟล์ replay ส่วนระบบจริงใช้ date.today() ของเครื่อง
+    ถ้า timezone ต่างกัน ไม้ที่ปิดใกล้เที่ยงคืนจะตกคนละวัน"""
     taken, blocked, opens = [], [], []
     for t in sorted(trades, key=lambda t: t["t_in"]):
         now = t["t_in"]
         opens = [p for p in opens if p["t_out"] > now]
+        if daily_r is not None:
+            day_net = sum(p["R"] for p in taken
+                          if p["t_out"] <= now and p["t_out"].date() == now.date())
+            if day_net <= -daily_r + 1e-9:
+                blocked.append(t)
+                continue
         risks = [(p, risk_of(p, now)) for p in opens]
         if cap_n is not None and len(opens) + 1 > cap_n:
             blocked.append(t)
@@ -147,6 +158,29 @@ def main():
     args = [a for a in sys.argv[1:] if a.startswith("--")]
     cap = next((float(a.split("=")[1]) for a in args if a.startswith("--cap=")), None)
     grp = next((float(a.split("=")[1]) for a in args if a.startswith("--group=")), None)
+
+    if "--daily" in args:
+        daily_r = MAX_DAILY_LOSS / RISK_PER_TRADE
+        print(f"\n── MAX_DAILY_LOSS {MAX_DAILY_LOSS*100:g}% = {daily_r:g}R "
+              f"(net ของไม้ที่ปิดวันนั้น รวมทุก symbol) + group {MAX_GROUP_RISK_R}R ──")
+        for c in sorted({3.0, MAX_PORTFOLIO_RISK_R}):
+            taken, _ = run(trades, cap_r=c, grp_r=MAX_GROUP_RISK_R)
+            show(f"cap {c:g}R ไม่มี daily", taken, _)
+            taken_d, blocked_d = run(trades, cap_r=c, grp_r=MAX_GROUP_RISK_R,
+                                     daily_r=daily_r)
+            show(f"cap {c:g}R + daily", taken_d, blocked_d)
+            byday = defaultdict(float)
+            for t in taken:
+                byday[t["t_out"].date()] += t["R"]
+            worst = min(byday.values())
+            extra = [t for t in taken if t not in taken_d]
+            print(f"    วันที่แย่สุด {worst:+.2f}R ({worst*RISK_PER_TRADE*100:+.1f}%) · "
+                  f"วัน ≤ −{daily_r:g}R: {sum(v <= -daily_r + 1e-9 for v in byday.values())} · "
+                  f"วัน ≤ −2R: {sum(v <= -2 + 1e-9 for v in byday.values())}"
+                  + (f" · daily ตัดไม้ {len(extra)} ไม้ ΣR {sum(t['R'] for t in extra):+.2f}"
+                     if extra else ""))
+        print()
+        return
 
     if cap is not None or grp is not None:
         print(f"\n── cap={cap}R  group={grp}R ──")
