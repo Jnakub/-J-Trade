@@ -23,14 +23,21 @@ import order      # noqa: E402
 
 BALANCE = 10_000.0          # 1R = 2% = 200 USD
 
-CONTRACT = {"BTCUSDm": 1.0, "ETHUSDm": 1.0, "XAUUSDm": 100.0,
-            "EURUSDm": 100_000.0, "GBPUSDm": 100_000.0,
-            "USDJPYm": 100_000.0, "US500m": 1.0}
+# (tick_size, tick_value เป็น USD) — ค่าจริงจากโบรก 2026-09-24 ยกเว้น USDJPY ที่คิดที่ราคา 150
+# ให้ตรงกับ entry ของ pos_at  HK50m กำไรเป็น HKD: 0.1 จุด = $0.01275 ไม่ใช่ $0.1 (ดู
+# order.money_per_price_unit — เดิมสูตรใช้ contract size ล้วน แล้ว HK50 เล็กไป 7.8 เท่า)
+SPEC = {"BTCUSDm": (0.01, 0.01), "ETHUSDm": (0.01, 0.01), "XAUUSDm": (0.001, 0.1),
+        "EURUSDm": (1e-5, 1.0), "GBPUSDm": (1e-5, 1.0),
+        "USDJPYm": (0.001, 0.001 * 100_000 / 150.0), "US500m": (0.01, 0.01),
+        "UKOILm": (0.001, 1.0), "HK50m": (0.1, 0.01274770381984945)}
 
 
 class FakeInfo:
     def __init__(self, sym):
-        self.trade_contract_size = CONTRACT[sym]
+        self.name = sym
+        self.trade_tick_size, self.trade_tick_value = SPEC[sym]
+        self.trade_tick_value_loss = self.trade_tick_value
+        self.volume_step = 0.01
 
 
 class FakePos:
@@ -51,13 +58,11 @@ def pos_at(symbol, direction, r, lot=None):
     """สร้าง position ที่มีความเสี่ยงคงเหลือ = r R พอดี (r=0 คือ SL ที่ breakeven)"""
     entry = {"BTCUSDm": 60_000.0, "ETHUSDm": 3_000.0, "XAUUSDm": 4_000.0,
              "EURUSDm": 1.1, "GBPUSDm": 1.3, "USDJPYm": 150.0,
-             "US500m": 6_000.0}[symbol]
+             "US500m": 6_000.0, "UKOILm": 95.0, "HK50m": 24_000.0}[symbol]
     lot = lot if lot is not None else 0.1
     risk_money = BALANCE * 0.02 * r
-    cs = CONTRACT[symbol]
-    dist = risk_money / (lot * cs) * (entry / 1.0 if "JPY" in symbol else 1.0)
-    if "JPY" in symbol:
-        dist = risk_money * entry / (lot * cs)
+    tick_size, tick_value = SPEC[symbol]
+    dist = risk_money / (lot * tick_value / tick_size)
     sl = entry - dist if direction == "Long" else entry + dist
     return FakePos(symbol, direction, entry, sl, lot)
 
@@ -75,10 +80,28 @@ def check(label, positions, symbol, want_ok, balance=BALANCE):
 print("\nconfig: MAX_PORTFOLIO_RISK_R =", scheduler.MAX_PORTFOLIO_RISK_R,
       " MAX_GROUP_RISK_R =", scheduler.MAX_GROUP_RISK_R)
 print("\nสูตรความเสี่ยง (ต้องได้ 1R = 200 USD ทุก symbol):")
-for s in CONTRACT:
+_formula = []
+for s in SPEC:
     p = pos_at(s, "Long", 1.0)
     got = order.position_risk_amount(s, "Long", p.price_open, p.sl, p.volume)
-    print(f"  {s:9} 1R = {got:8.2f} USD  {'ok' if abs(got-200) < 0.01 else 'FAIL'}")
+    _formula.append(abs(got - 200) < 0.01)
+    print(f"  {s:9} 1R = {got:8.2f} USD  {'ok' if _formula[-1] else 'FAIL'}")
+
+
+def money_check(label, got, want, tol=0.01):
+    _formula.append(abs(got - want) <= tol)
+    print(f"  [{'ok  ' if _formula[-1] else 'FAIL'}] {label:52} -> {got:.2f} (ต้องได้ {want:g})")
+
+
+# เทียบกับเงินที่โบรกลงบัญชีจริง — ตัวเลขจากดีลที่เกิดขึ้นแล้ว ไม่ใช่สูตรตรวจสูตรตัวเอง
+print("\nเทียบกับดีลจริงในบัญชี:")
+money_check("HK50 ดีล #4193547532 0.18 lot ห่าง 84.3 จุด = −$1.93",
+            order.position_risk_amount("HK50m", "Long", 24755.7, 24671.4, 0.18), 1.93)
+money_check("UKOIL #4741691609 โดน SL 0.06 lot = −$178.32",
+            order.position_risk_amount("UKOILm", "Long", 99.95, 96.978, 0.06), 178.32)
+_lot, _ = order.calculate_lot_size("HK50m", 24755.7, 24155.7, BALANCE, 0.02)
+money_check(f"HK50 SL 600 จุด ได้ lot {_lot} เสี่ยง ~2% (สูตรเดิมได้ 0.33)",
+            order.risk_pct_of("HK50m", 24755.7, 24155.7, _lot, BALANCE), 1.975, tol=0.025)
 
 # ทดสอบ "กลไก" ของเพดาน ไม่ใช่ "ค่าที่ตั้ง" — ตรึงไว้ที่ 3.0R ตามเคสที่เขียนไว้ แล้วคืนค่าจริง
 # ทีหลัง (ค่าใน config เปลี่ยนเป็น 6.0R เมื่อ 2026-09-24 ถ้าไม่ตรึง เคส "3.5R เกิน" จะพังเพราะ
@@ -153,5 +176,6 @@ _ok = not _file_logs
 print(f"\n  [{'ok  ' if _ok else 'FAIL'}] {'ไม่แตะ log จริงของบอท':52} -> "
       f"{'ไม่มี file handler' if _ok else ', '.join(os.path.basename(f) for f in _file_logs)}")
 results.append(_ok)
+results += _formula   # เดิมบรรทัด "1R = 200 USD" พิมพ์ FAIL ได้แต่ไม่ถูกนับในยอดรวม
 
 print(f"\n{sum(results)}/{len(results)} ผ่าน")
