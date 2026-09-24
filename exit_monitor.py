@@ -24,7 +24,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import MT5_TIMEFRAMES, get_asset_class
-from mt5_connect import connect, get_tick_or_raise, is_demo_account
+from mt5_connect import connect, get_tick_or_raise, is_demo_account, mt5_now
 from scoring import get_ohlcv, get_ohlcv_real, ema
 from swing import calc_atr, find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
 from indicators import calc_rsi as _calc_rsi
@@ -1129,7 +1129,8 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         dist_sl_pct = (effective_sl - current_price) / effective_sl * 100 if effective_sl else None
         dist_tp_pct = (current_price - tp) / tp * 100 if tp else None
 
-    now = datetime.now() if as_of is None else pd.Timestamp(as_of).to_pydatetime()
+    # นาฬิกาเดียวกับ entry_time (เวลา MT5) — ห้ามใช้ datetime.now() ที่นี่ ดูที่ mt5_now()
+    now = mt5_now() if as_of is None else pd.Timestamp(as_of).to_pydatetime()
     time_held_days = (now - entry_time).total_seconds() / 86400
     # วันทำการ (หักเสาร์-อาทิตย์ถ้าไม่ใช่ CRYPTO) — ใช้กับกฎ slow trade เท่านั้น
     # ดู comment ที่ market_days_held ว่าทำไม MAX_HOLD_DAYS ถึงไม่ใช้ตัวนี้
@@ -1459,8 +1460,9 @@ def print_report(m: dict):
     print("=" * 62)
     entry_str = m["entry_time"].strftime("%d/%m/%Y %H:%M")
     now_str   = m["now"].strftime("%d/%m/%Y %H:%M")
-    print(f"  Entry Date/Time   : {entry_str}")
-    print(f"  Current Date/Time : {now_str}")
+    # ทั้งคู่เป็นเวลา MT5 (UTC) ไม่ใช่เวลาเครื่อง — ช้ากว่า timestamp หัวบรรทัดของ log 7 ชม.
+    print(f"  Entry Date/Time   : {entry_str}  (เวลา MT5 · UTC)")
+    print(f"  Current Date/Time : {now_str}  (เวลา MT5 · UTC)")
     # แสดง 2 ตัวเลขเมื่อไม่เท่ากัน — กฎคนละข้อใช้คนละตัว (ข้อ 0 = ปฏิทิน, ข้อ 4 = วันทำการ)
     # ถ้าโชว์ตัวเดียวจะอ่าน checklist แล้วงงว่าทำไม "5.1 วัน" ยังไม่ชนเกณฑ์ 3 วัน
     held_str = f"{m['time_held_days']:.1f} days"

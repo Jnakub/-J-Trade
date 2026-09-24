@@ -5,7 +5,7 @@ import MetaTrader5 as mt5
 import pandas as pd
 
 import notify
-from mt5_connect import is_demo_account
+from mt5_connect import is_demo_account, mt5_now
 
 LOG_FILE = os.path.join(os.path.dirname(__file__), "trades_log.csv")
 
@@ -206,12 +206,13 @@ def log_cut(m: dict, closed_lot: float, remaining_lot: float) -> None:
     replay_cuts_*.csv ให้มากที่สุด เพื่อให้เอาไม้จริงมาต่อท้าย backtest แล้วอ่านด้วยสายตา
     เดียวกันได้
     """
-    now = datetime.now()
+    now = datetime.now()   # เวลาเครื่อง — ใช้กับ cut_date/cut_time ให้ตรงกับ trades_log เท่านั้น
     held_h = ""
     entry_time = m.get("entry_time")
     if entry_time is not None:
         try:
-            held_h = round((now - entry_time).total_seconds() / 3600, 1)
+            # entry_time เป็นเวลา MT5 (UTC) — ลบด้วย now ข้างบนจะเกินไป 7 ชม. ดู mt5_now()
+            held_h = round((mt5_now() - entry_time).total_seconds() / 3600, 1)
         except TypeError:
             held_h = ""
 

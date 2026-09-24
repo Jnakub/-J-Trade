@@ -7,12 +7,14 @@
 import os
 import shutil
 import tempfile
+import time
 from datetime import datetime, timedelta
 
 import MetaTrader5 as mt5
 import pandas as pd
 
 import journal
+from mt5_connect import mt5_now
 
 TMP = tempfile.mkdtemp(prefix="jtrade_test_")
 journal.LOG_FILE = os.path.join(TMP, "trades_log.csv")
@@ -103,7 +105,10 @@ m = {
     "ticket": 555003, "symbol": "XAUUSDm", "direction": "Long",
     "entry": 4000.0, "sl": 3950.0, "current_price": 4060.0,
     "r_multiple": 1.2, "base_keep_pct": 100, "stage_keep_pct": 50,
-    "entry_time": datetime.now() - timedelta(hours=9),
+    # สร้างแบบเดียวกับ analyze_position เป๊ะ (epoch วินาทีจาก pos.time -> เวลา MT5/UTC)
+    # เดิมใช้ datetime.now() - 9 ชม. = เวลาเครื่อง ซึ่ง pos.time ไม่เคยเป็น เทสต์จึงผ่านทั้งที่
+    # ของจริงเกินไป 7 ชม. (2026-09-24 ดู mt5_connect.mt5_now)
+    "entry_time": pd.to_datetime(int(time.time()) - 9 * 3600, unit="s"),
     "position_rules": [{"name": "ถึง 1R", "trigger": True, "keep_pct": 50},
                        {"name": "แท่ง Climax", "trigger": False, "keep_pct": 50},
                        {"name": "Indicator ร้อน", "trigger": True, "keep_pct": 60}],
@@ -123,6 +128,9 @@ ok(abs(c["R_ตอนตัด"] - 1.2) < 1e-9 and c["ตัดไป_lot"] == 0
    "R / lot ที่ตัด / lot ที่เหลือ ถูกต้อง")
 ok(8.5 < c["ชม.ที่ถือมา"] < 9.5, "ชม.ที่ถือมา คำนวณจาก entry_time", str(c["ชม.ที่ถือมา"]))
 ok(c["strategy"] == "Reversal", "ดึง strategy จาก trades_log ได้", repr(c["strategy"]))
+_skew_h = (mt5_now() - pd.to_datetime(int(time.time()), unit="s")).total_seconds() / 3600
+ok(abs(_skew_h) < 0.01, "mt5_now() อยู่นาฬิกาเดียวกับ pos.time (ไม่เหลื่อมตาม timezone เครื่อง)",
+   f"เหลื่อม {_skew_h:+.2f} ชม.")
 
 # ---------------------------------------------------------------------------
 print("\n5) ของเดิมต้องไม่พัง")
