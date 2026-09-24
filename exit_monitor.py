@@ -606,6 +606,16 @@ TP_PROGRESS_LOCK_KEEP  = 0.5
 #    1.107 เท่า เพดาน 1.2 จึงเป็นนโยบายความเสี่ยง ไม่ใช่กลไกที่มีผลต่อ R
 MAX_SL_WIDEN_R   = 1.2   # SL ห่างจาก entry ได้ไม่เกินกี่เท่าของระยะ 1R เริ่มต้น
 
+# 🔻 สถานะปัจจุบัน: **เปิดอยู่และยิงบ่อย แต่ไม่เคยถูกวัดว่าคุ้มไหม** (2026-09-24)
+#    base 168 ไม้: ดึง TP เข้า 67 ไม้ (40%) · median 0.106R · มากสุด 0.266R · จบ TP 54 / SL 7 / BE 4
+#    ต้นทุนขอบบน = Σ ระยะที่ดึงเข้าของไม้ที่จบ TP = 5.66R (ถ้าทุกไม้จะถึง TP เดิมอยู่แล้ว)
+#    ส่วนประโยชน์ (ไม้ที่ถึง TP ใหม่แต่ไม่ถึง TP เดิม) มองไม่เห็นจากไฟล์ base ต้อง replay เต็ม
+#    เพราะเปลี่ยนเวลาออก = คืนช่องถือไม้ (กติกาข้อ 4)  ตัวเลข base ทุกตัว**รวมกฎนี้ไว้แล้ว**
+#    (backtest_replay.py:802 ใช้ desired_tp) ระบบจริงกับ backtest จึงตรงกัน แค่ไม่เคยเทียบกับ "ไม่มี"
+#    ⚠️ เกณฑ์ 1% เป็น % ของราคา ไม่ใช่ระยะที่เทียบข้าม asset ได้: ระยะ TP median ของ EUR = 1.67%
+#    (6/18 ไม้อยู่ในเขต 1% ตั้งแต่ตอนเข้า = trail ตั้งแต่ชั่วโมงแรก) ขณะที่ BTC 8.55% (0/33)
+#    เดิมกฎนี้ไม่อยู่ใน rules_status() เลย CLAUDE.md จึงเขียนว่ากฎ exit ที่ทำงานเหลือ 2 ตัว
+#    ปิดได้ด้วย TRAIL_TP_ATR_BUFFER = 0 (desired_tp = TP เดิม -> execute_decision ไม่ส่งคำสั่ง)
 # TP Trailing (2026-07-23) — เริ่มขยับ TP เข้ามาเมื่อราคาใกล้ TP เดิมมากพอ กันเคส "เกือบถึง
 # TP แล้วราคากลับตัวจนโดน SL" (ไม้เต็มกำไรกลายเป็นขาดทุน) — ใช้ pinned anchor = TP ตอนเปิดไม้
 # จริง (ไม่ใช่ pos.tp ปัจจุบันที่อาจถูกขยับไปแล้ว) + ATR(1H) ล่าสุด แบบเดียวกับ SL Trailing
@@ -1738,6 +1748,9 @@ def rules_status() -> list[tuple[str, bool, str]]:
         ("sizing 2 Indicator ร้อน",    RULE_HOT_KEEP < 100,     f"RULE_HOT_KEEP = {RULE_HOT_KEEP:g}"),
         ("sizing 3 เดินทาง >=50% TP",  RULE_HALFWAY_KEEP < 100, f"RULE_HALFWAY_KEEP = {RULE_HALFWAY_KEEP:g}"),
         ("sizing 4 Climax",           RULE_CLIMAX_KEEP < 100,  f"RULE_CLIMAX_KEEP = {RULE_CLIMAX_KEEP:g}"),
+        (f"TP trailing (ใกล้ TP <={TRAIL_TP_TRIGGER_PCT:g}%)",
+         TRAIL_TP_ATR_BUFFER > 0 and TRAIL_TP_TRIGGER_PCT > 0,
+         f"ดึง TP เข้าหา entry {TRAIL_TP_ATR_BUFFER:g}xATR1H · ยังไม่เคยวัดว่าคุ้ม (ดู TRAIL_TP_TRIGGER_PCT)"),
         ("TP progress lock",          bool(TP_PROGRESS_LOCK),  "ล็อก SL ตามระยะทางไป TP"),
         ("ATR trailing (ดึง SL แคบลง)", False,
          "เปิดอยู่แต่ทำไม่ได้โดยโครงสร้าง — ฐานตรึงที่ swing ตอนเข้า ขึ้นไม่ถึง entry"),
