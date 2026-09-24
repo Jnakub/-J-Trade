@@ -5,10 +5,21 @@
 
 ไม่ต้องต่อ MT5 จริง — แทน mt5.positions_get / mt5.symbol_info ด้วยของปลอม
 """
+import logging
+import os
+
 import MetaTrader5 as mt5
 
-import scheduler
-import order
+# 🔴 2026-09-24: ต้องอยู่ **ก่อน** import scheduler — ไม่งั้น tee_print ของ scheduler เขียน warning
+# จากไม้ปลอมลง logs/scheduler.log ของบอทจริง (เจอ 112 บรรทัด "#1 (XAUUSDm) ไม่มี SL" ปนอยู่ใน
+# log ตั้งแต่ 2026-09-12 หน้าตาเหมือนตอน SL หลุดจริงทุกตัวอักษร) — logger_setup.get_logger ข้าม
+# การติด file handler เมื่อ logger มี handler อยู่แล้ว จึงจองด้วย NullHandler ไว้ก่อน
+# (scheduler import exit_monitor ด้วย จึงจองทั้งคู่) ตรวจผลจริงที่เคส "ไม่แตะ log จริง" ด้านล่าง
+for _name in ("scheduler", "exit_monitor"):
+    logging.getLogger(_name).addHandler(logging.NullHandler())
+
+import scheduler  # noqa: E402
+import order      # noqa: E402
 
 BALANCE = 10_000.0          # 1R = 2% = 200 USD
 
@@ -133,4 +144,14 @@ results += [
 ]
 
 scheduler.MAX_PORTFOLIO_RISK_R = _LIVE_CAP
+
+# เคสข้างบนยิง WARNING "ไม่มี SL" จริง 2 บรรทัด — ต้องไม่มี handler ตัวไหนเขียนลงไฟล์ในโฟลเดอร์ logs/
+# (ถ้า get_logger เปลี่ยนวิธีเช็ค handler ซ้ำเมื่อไหร่ เคสนี้จะพังก่อนที่ log จริงจะถูกปนอีก)
+_file_logs = [h.baseFilename for n in ("scheduler", "exit_monitor")
+              for h in logging.getLogger(n).handlers if isinstance(h, logging.FileHandler)]
+_ok = not _file_logs
+print(f"\n  [{'ok  ' if _ok else 'FAIL'}] {'ไม่แตะ log จริงของบอท':52} -> "
+      f"{'ไม่มี file handler' if _ok else ', '.join(os.path.basename(f) for f in _file_logs)}")
+results.append(_ok)
+
 print(f"\n{sum(results)}/{len(results)} ผ่าน")
