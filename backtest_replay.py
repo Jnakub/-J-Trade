@@ -123,6 +123,10 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  N นับจากรอบสแกนแรกที่เห็นไม้ปิด: N = 1 ข้าม 1 รอบ เข้าได้เร็วสุดรอบที่ 2
                  ⚠️ ใช้คู่กับ --same-scan-reentry เสมอ ไม่งั้น N = 1 เกือบเป็น no-op (replay
                  ข้ามรอบแรกหลัง SL/TP อยู่แล้วโดยโครงสร้าง ส่วนระบบจริงไม่ข้าม)
+     --end=YYYY-MM-DDTHH:MM  ตรึงปลายหน้าต่าง (เวลา MT5 = UTC) — ใส่ค่าเดียวกันทุกรอบที่จะ diff กัน
+                 ไม่งั้นโปรเซสที่ได้ข้อมูลค้างจะได้หน้าต่างต่างออกไปเงียบๆ (เกิดจริง 2026-09-25)
+     --trail-tp-buffer=X / --trail-tp-trigger=X  ทับ exit_monitor.TRAIL_TP_ATR_BUFFER (0.5 · 0 = ปิด
+                 TP trailing) / TRAIL_TP_TRIGGER_PCT (1.0) · tag _trailtpbufX / _trailtptrigX
      --same-scan-reentry  ไม้ที่ broker ปิด (SL/BE/TP) คืนช่องในรอบสแกนนั้นเลย = ตรงกับ scheduler
                  ที่อ่าน positions_get ตอนสแกน (tag _samescan · ที่มาดูตรงที่ parse ธง)
 """
@@ -576,8 +580,14 @@ if no_breakeven:
 # 🔴 be-level เคยถูกกวาดเฉพาะฝั่งลบ (0.0/-0.1/-0.2/-0.3/-0.5 ใน backtest_exit_rules --set=belevel)
 #    ซึ่งเป็นเครื่องคัดกรองที่มองไม่เห็นไม้ที่เข้ามาแทน — **ฝั่งบวก (ล็อกกำไรไว้เหนือ entry)
 #    ไม่เคยถูกวัดเลยทั้งสองเครื่องมือ**
+# --trail-tp-buffer=X : ระยะที่ TP trailing ดึง TP เข้า (×ATR1H · ปกติ 0.5) · 0 = ปิดกฎ
+# --trail-tp-trigger=X : เริ่มดึงเมื่อห่าง TP เดิมไม่เกิน X% ของราคา (ปกติ 1.0)
+# 2026-09-25 เพิ่มเพื่อวัด TP trailing ครั้งแรก — กฎนี้แตะ 40% ของไม้แต่ไม่เคยถูกเทียบกับ "ไม่มี"
+# ต้องวัดที่นี่ด้วยเหตุผลเดียวกับ BE: เปลี่ยนเวลาออก = คืนช่องถือไม้ = ชุดไม้เปลี่ยน
 for _flag, _attr in (("--be-trigger=", "BREAKEVEN_TRIGGER_R"),
-                     ("--be-level=",   "BREAKEVEN_LEVEL_R")):
+                     ("--be-level=",   "BREAKEVEN_LEVEL_R"),
+                     ("--trail-tp-buffer=",  "TRAIL_TP_ATR_BUFFER"),
+                     ("--trail-tp-trigger=", "TRAIL_TP_TRIGGER_PCT")):
     _a = next((a for a in sys.argv if a.startswith(_flag)), None)
     if _a:
         setattr(em, _attr, float(_a.split("=", 1)[1]))
@@ -628,6 +638,20 @@ else:
 h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=days * 24 + 500)
 h4 = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=days * 6 + 400)
 end_time   = h1["time"].iloc[-1]
+# --end=YYYY-MM-DDTHH:MM : ตรึงปลายหน้าต่าง (นาฬิกา MT5 = UTC) ให้ทุกรอบที่จะเทียบกันใช้แท่งชุดเดียวกัน
+# 🔴 2026-09-25 เพิ่มเพราะ ETH สองโปรเซสที่เริ่ม**พร้อมกัน**ได้ปลายหน้าต่างต่างกัน 5 ชม.
+# (19:00 vs 00:00) — terminal ยัง sync แท่งไม่เสร็จหลังหลุด/ต่อใหม่ โปรเซสหนึ่งเลยได้ข้อมูลค้าง
+# หน้าต่างไม่ตรงกัน = ไม้ที่ขอบต่างกัน แล้วลามต่อผ่านช่องถือไม้ ปนเข้าไปในผลต่างที่กำลังวัด
+# ตั้ง --end ให้อยู่ในอดีตพอที่ทุก symbol มีแท่งเลยจุดนั้นแล้ว ถ้าข้อมูลที่ได้มาไม่ถึง = ข้อมูลค้าง
+# -> จบด้วย error ให้รันใหม่ แทนที่จะได้หน้าต่างสั้นกว่าแบบเงียบๆ
+_end_arg = next((a for a in sys.argv if a.startswith("--end=")), None)
+if _end_arg:
+    _end = pd.Timestamp(_end_arg.split("=", 1)[1])
+    if end_time < _end:
+        sys.exit(f"--end: ข้อมูล 1H ของ {symbol} มาถึงแค่ {end_time} ไม่ถึง {_end} "
+                 f"(terminal ยัง sync ไม่เสร็จ?) — รันใหม่")
+    h1 = h1[h1["time"] <= _end].reset_index(drop=True)
+    end_time = _end
 start_time = end_time - timedelta(days=days)
 clock = h1[h1["time"] >= start_time].reset_index(drop=True)
 h4_idx = {t: i for i, t in enumerate(h4["time"])}
@@ -681,7 +705,8 @@ print(f"  TP: {f'ดึงเข้าไม่ให้ไกลเกิน {t
 print(f"  Exit: RSI period {em.RSI_PERIOD} (กฎ Indicator ร้อน){'   [ทับค่าระบบจริง]' if em.RSI_PERIOD != _EXIT_RSI_LIVE else ''}")
 print(f"  Exit: ถึง 1R เหลือ {em.RULE_1R_KEEP:g}%   ครึ่งทางไป TP เหลือ {em.RULE_HALFWAY_KEEP:g}%   "
       f"Climax เหลือ {em.RULE_CLIMAX_KEEP:g}%   ร้อนเหลือ {em.RULE_HOT_KEEP:g}%\n        "
-      f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}"
+      f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}   "
+      f"TP trailing: {f'ใกล้ TP <= {em.TRAIL_TP_TRIGGER_PCT:g}% ดึงเข้า {em.TRAIL_TP_ATR_BUFFER:g}xATR1H' if em.TRAIL_TP_ATR_BUFFER > 0 and em.TRAIL_TP_TRIGGER_PCT > 0 else 'ปิด'}"
       f"{'   ปิดกฎ trend invalidation' if no_trend_inval else ''}")
 print()
 
@@ -1274,6 +1299,10 @@ if no_breakeven:
     _tag += "_nobe"
 if any(a.startswith("--be-trigger=") for a in sys.argv):
     _tag += f"_betrig{em.BREAKEVEN_TRIGGER_R:g}"
+if any(a.startswith("--trail-tp-buffer=") for a in sys.argv):
+    _tag += f"_trailtpbuf{em.TRAIL_TP_ATR_BUFFER:g}"
+if any(a.startswith("--trail-tp-trigger=") for a in sys.argv):
+    _tag += f"_trailtptrig{em.TRAIL_TP_TRIGGER_PCT:g}"
 if any(a.startswith("--be-level=") for a in sys.argv):
     _tag += f"_belevel{em.BREAKEVEN_LEVEL_R:g}"
 if div_wick_gold:
