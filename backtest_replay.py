@@ -2,8 +2,7 @@
 backtest_replay.py — จำลอง scheduler.scan_symbol() ย้อนหลังทีละชั่วโมง ให้ "เงื่อนไขการเข้าไม้"
 ตรงกับระบบจริงมากที่สุดเท่าที่ backtest จะทำได้
 
-ต่างจาก backtest_criteria.py (เครื่องมือวินิจฉัยรายเกณฑ์ ที่จงใจตัดตัวกรองบางอย่างออกเพื่อให้มี
-ตัวอย่างพอวัดผลรายเกณฑ์) — ตัวนี้ตั้งใจ **ไม่ตัดอะไรออกเลย** เดินตามลำดับด่านเดียวกับ
+ตัวนี้ตั้งใจ **ไม่ตัดอะไรออกเลย** เดินตามลำดับด่านเดียวกับ
 scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลขที่ได้เอาไปตัดสินใจแทนผลเทรดจริงได้
 
 ลำดับด่าน (ตรงกับ scheduler.scan_symbol ข้อต่อข้อ):
@@ -12,14 +11,14 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
   3b. Cooldown guard — เพิ่งปิดไม้ symbol นี้ไปไม่ถึง COOLDOWN_HOURS_BY_SYMBOL ชม.
   4b. News guard — ⚠️ จำลองไม่ได้ (ดู "สิ่งที่ยังต่างจากของจริง" ด้านล่าง)
   4. Regime check — SKIP ถ้า regime อยู่ใน REGIME_NO_TRADE
-     REGIME_TREND    -> Scoring  (get_trend_bias + compute_score)
-     REGIME_REVERSAL -> Reversal (compute_reversal_score ทิศตามขั้ว divergence)
+     REGIME_TREND    -> Scoring  (get_trend_bias + compute_entry)
+     REGIME_REVERSAL -> Reversal (compute_reversal_entry ทิศตามขั้ว divergence)
   4b-2. ผ่านสกอร์การ์ดแล้วดึง TP เข้าไม่ให้ไกลเกิน config.TP_MAX_ATR เท่าของ ATR ตอนเข้าไม้
   4c. Run-up guard — ข้ามไม้ที่ราคาวิ่งไปทางที่จะเข้ามาแล้วเกิน MAX_RUNUP_24H_R (เฉพาะ Scoring)
   5. ผ่านทุกด่าน -> เปิดไม้ที่ราคา ณ ชั่วโมงนั้น + spread
 
-รอบสแกน = ทุก 1 ชั่วโมง ตรงกับ scheduler.INTERVAL_SECONDS (backtest_criteria.py สแกนทุก 4 ชม.
-ซึ่งทำให้พลาดจังหวะที่ระบบจริงเข้าได้ 3 ใน 4 ของโอกาส)
+รอบสแกน = ทุก 1 ชั่วโมง ตรงกับ scheduler.INTERVAL_SECONDS (เครื่องมือรุ่นก่อนที่สแกนทุก 4 ชม.
+พลาดจังหวะที่ระบบจริงเข้าได้ 3 ใน 4 ของโอกาส)
 
 ⚠️ สิ่งที่ยังต่างจากของจริง — อ่านก่อนเชื่อตัวเลข:
   1. **Exit ใช้ exit_monitor.analyze_position(as_of=...) ตัวจริง** (2026-08-27) — ได้ ATR
@@ -45,10 +44,6 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  หรือมันช่วยให้ไม้รอดจากการย่อจนไปต่อได้ (ทดลองใน backtest เท่านั้น ไม่แตะระบบจริง)
      --legacy-sl ใช้ SL โครงสร้างเป็น SL ที่ส่ง broker แบบเดิม (ก่อน 2026-08-27) — ไว้เทียบผล
                  ของการส่ง SL แรกไปที่จุดเดียวกับ ATR trailing ตามที่ scheduler.py ทำตอนนี้
-     --drop="OBV 4H"  ตัดเกณฑ์นี้ออกจากสกอร์การ์ด Scoring (คั่นหลายตัวด้วย ,) — ไว้ตอบว่าเกณฑ์
-                 นั้นช่วยหรือถ่วงเมื่อวัดทั้งระบบ ต้องคู่กับ --min-score เสมอเพราะการตัดเกณฑ์
-                 ออกโดยไม่ลดเพดานเท่ากับทำให้ด่านเข้มขึ้นไปด้วย = เปลี่ยนสองอย่างพร้อมกัน
-     --min-score=X   ทับ MIN_SCORE (ปกติ 5 จาก 6 เกณฑ์)
      --skip-regime="TREND แรงจัด"  เพิ่ม regime เข้า REGIME_NO_TRADE เฉพาะรอบนี้ (คั่นหลายตัว
                  ด้วย ,) — ไว้ตอบว่า "ถ้าไม่เข้าไม้ตอน regime นี้เลย ผลรวมดีขึ้นไหม"
      --rev-min-sl=X  ทับเกณฑ์ระยะ SL ขั้นต่ำ **เฉพาะทาง Reversal** (--min-sl ทับทั้งสองทาง) —
@@ -105,9 +100,7 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ ค่า 5 ปัจจุบันมาจาก sample 3-6 เคส ยังไม่เคยกวาด — ใส่ 5 ในชุดกวาดเป็น
                  identity check ด้วยเสมอ
      --div-rsi-period=N  ทับ DIV_RSI_PERIOD (ปกติ 20) — period ของ RSI ที่ใช้หา divergence
-                 ⚠️ คุมเกณฑ์ "RSI extreme" (30/70) ของ Reversal ด้วย (reversal.py:207 เรียก
-                 calc_rsi() โดยไม่ส่ง period) รอบที่ใส่ธงนี้จึงขยับสองด่านพร้อมกัน แยกผลไม่ได้
-                 ไม่กระทบ RSI_SCORE_PERIOD (สกอร์การ์ด Scoring) และ exit_monitor.RSI_PERIOD
+                 ไม่กระทบ exit_monitor.RSI_PERIOD (ดู --exit-rsi-period)
      --exit-rsi-period=N  ทับ exit_monitor.RSI_PERIOD (ปกติ 20) — คุมกฎ "Indicator ร้อน"
                  ที่ตัด RULE_HOT_KEEP เมื่อ RSI แตะ 70/30 หรือราคาทะลุ Bollinger
                  (ขา Bollinger ไม่ขยับตาม BB_PERIOD เป็น 20 ของมันเอง คนละตัวกัน)
@@ -143,8 +136,7 @@ from config import (MT5_TIMEFRAMES, MAX_DAILY_LOSS, RISK_PER_TRADE,
                     get_min_sl_distance_pct)
 import config as cfg
 import scoring
-from scoring import compute_score, get_trend_bias, get_ohlcv, get_ohlcv_real, calc_rr
-from binance import merge_real_volume
+from scoring import compute_entry, get_trend_bias, get_ohlcv, get_ohlcv_real, calc_rr
 from bars import BAR_OFFSET_H
 from regime_check import get_regime
 import exit_monitor as em
@@ -186,32 +178,18 @@ no_widen  = "--no-widen" in sys.argv
 legacy_sl = "--legacy-sl" in sys.argv   # ตั้ง scoring.EXEC_SL_ATR_MULT = 0 ให้ด้านล่าง
 
 # --min-sl=X : ทับเกณฑ์ระยะ SL ขั้นต่ำของ symbol นี้ — get_min_sl_distance_pct() อ่าน dict
-# ตอนถูกเรียกทุกครั้ง การแก้ตรงนี้จึงมีผลกับ compute_score/reversal ทันทีโดยไม่ต้องแก้ config.py
+# ตอนถูกเรียกทุกครั้ง การแก้ตรงนี้จึงมีผลกับ compute_entry/reversal ทันทีโดยไม่ต้องแก้ config.py
 _min_sl_arg = next((a for a in sys.argv if a.startswith("--min-sl=")), None)
 if _min_sl_arg:
     config.MIN_SL_DISTANCE_PCT_BY_SYMBOL = dict(config.MIN_SL_DISTANCE_PCT_BY_SYMBOL)
     config.MIN_SL_DISTANCE_PCT_BY_SYMBOL[symbol] = float(_min_sl_arg.split("=")[1])
 
-# --drop / --min-score : ทดลองเปลี่ยนรูปสกอร์การ์ดเฉพาะรอบนี้ — compute_score อ่านสองตัวนี้จาก
-# scoring ตอนถูกเรียกทุกครั้ง การ set ตรงนี้จึงมีผลทันทีโดยไม่ต้องแก้ scoring.py/config.py
-_drop_arg = next((a for a in sys.argv if a.startswith("--drop=")), None)
-if _drop_arg:
-    _dropped = tuple(s.strip() for s in _drop_arg.split("=", 1)[1].split(","))
-    _unknown = [n for n in _dropped if n not in scoring.SCORECARD_CRITERIA_NAMES]
-    if _unknown:
-        sys.exit(f"--drop: ไม่รู้จักเกณฑ์ {_unknown} — มีให้เลือก "
-                 f"{list(scoring.SCORECARD_CRITERIA_NAMES)}")
-    scoring.DISABLED_CRITERIA = _dropped
-_ms_arg = next((a for a in sys.argv if a.startswith("--min-score=")), None)
-if _ms_arg:
-    scoring.MIN_SCORE = float(_ms_arg.split("=")[1])
-
 # --legacy-sl : ไม่ขยับ SL ออกจาก SL โครงสร้างเลย (พฤติกรรมก่อน 2026-08-27) — ตั้งที่เดียว
-# แล้วมีผลทั้ง exec_sl ที่ส่ง "broker" และด่าน R:R ใน compute_score พร้อมกัน
+# แล้วมีผลทั้ง exec_sl ที่ส่ง "broker" และด่าน R:R ใน compute_entry พร้อมกัน
 if legacy_sl:
     scoring.EXEC_SL_ATR_MULT = 0.0
 
-# --rev-min-sl / --rev-tp-from-entry : สวิตช์ทดลองของทาง Reversal อย่างเดียว — compute_reversal_score
+# --rev-min-sl / --rev-tp-from-entry : สวิตช์ทดลองของทาง Reversal อย่างเดียว — compute_reversal_entry
 # อ่านสองตัวนี้จาก reversal ตอนถูกเรียกทุกครั้ง การ set ตรงนี้จึงมีผลทันทีโดยไม่ต้องแก้ reversal.py
 _rms_arg = next((a for a in sys.argv if a.startswith("--rev-min-sl=")), None)
 if _rms_arg:
@@ -285,19 +263,12 @@ _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
 
-# --rev-min-score=N : ทับ reversal.MIN_SCORE_REVERSAL (ปกติ 7/10) — คู่กับ --min-score ของ Scoring
-# หมายเหตุโครงสร้าง: regime REVERSAL-READY บังคับ Key Level + Divergence + ADX peak โค้งลง
-# อยู่แล้ว = 2+3+1 = 6 แต้มฟรีจาก 7 ที่ต้องการ สกอร์การ์ดจึงตัดจริงแค่ 3% ของรอบที่ถึงมือมัน
-# (80/2650 บน 7 symbol) การตั้ง 0 จึงเป็นการปลดด่านที่แทบไม่ได้กรองอะไรอยู่แล้ว
-_rms_score_arg = next((a for a in sys.argv if a.startswith("--rev-min-score=")), None)
-if _rms_score_arg:
-    reversal.MIN_SCORE_REVERSAL = float(_rms_score_arg.split("=")[1])
 rev_tp_entry = "--rev-tp-from-entry" in sys.argv
 if rev_tp_entry:
     reversal.TP_FROM_ENTRY = True
 
 # --div-max-age / --div-no-volume : คลายด่าน Divergence — check_divergence อ่านค่าจาก regime_check
-# ตอนถูกเรียกทุกครั้ง (ทั้งจาก get_regime และจาก compute_reversal_score) การ set ตรงนี้จึงมีผล
+# ตอนถูกเรียกทุกครั้ง (จาก get_regime) การ set ตรงนี้จึงมีผล
 # กับทั้งการจัด regime และสกอร์การ์ดพร้อมกัน เหมือนแก้ค่าคงที่จริงแต่เฉพาะรอบนี้
 import regime_check
 # --struct-reg : เปลี่ยน check_structure จาก "เทียบ swing high/low" เป็น "ความชัน regression + R²"
@@ -351,19 +322,15 @@ _dms_arg = next((a for a in sys.argv if a.startswith("--div-min-spacing=")), Non
 if _dms_arg:
     regime_check.DIV_MIN_SPACING_BARS = int(_dms_arg.split("=")[1])
 # --div-rsi-period=N : ทับ regime_check.DIV_RSI_PERIOD เฉพาะรอบนี้
-# ⚠️ ค่านี้ไม่ได้คุมแค่ divergence — reversal.py:207 เรียก calc_rsi() โดยไม่ส่ง period จึงรับ
-# ค่านี้เป็น default ด้วย = เกณฑ์ "RSI extreme" (30/70) ของ Reversal ขยับตามไปพร้อมกัน
-# (RSI period ยาวขึ้น = แกว่งแคบลง = แตะ 30/70 ยากขึ้น = ด่านนั้นเข้มขึ้นเอง) เวลาอ่านผลรอบนี้
-# จึงแยกไม่ได้ว่าอะไรมาจาก divergence อะไรมาจาก RSI extreme — เป็นสองอย่างที่ขยับพร้อมกัน
-# แก้ที่โมดูลไม่ใช่ที่ config เพราะ reversal.py/regime_check.py อ่านจาก regime_check ตอนถูกเรียก
+# (เดิมขยับเกณฑ์ "RSI extreme" ของสกอร์การ์ด Reversal ไปพร้อมกันด้วย — สกอร์การ์ดถูกลบแล้ว
+#  2026-09-25 ตอนนี้ธงนี้คุม divergence อย่างเดียว)
 _drp_arg = next((a for a in sys.argv if a.startswith("--div-rsi-period=")), None)
 if _drp_arg:
     regime_check.DIV_RSI_PERIOD = int(_drp_arg.split("=")[1])
     # ⚠️ ตั้งตัวแปรโมดูลอย่างเดียว **ไม่พอ** — regime_check.calc_rsi ประกาศว่า
     # `def calc_rsi(series, period=DIV_RSI_PERIOD)` default ถูกผูกค่าไว้ตั้งแต่ตอน def
-    # การแก้ตัวแปรทีหลังจึงไม่มีผลกับคนที่เรียกแบบไม่ส่ง period (check_divergence:459 และ
-    # reversal.py:207 เรียกแบบนั้นทั้งคู่) ต้องแก้ที่ __defaults__ ของตัวฟังก์ชันเอง
-    # reversal.calc_rsi เป็น object เดียวกัน (import มาจาก regime_check) จึงถูกแก้ไปพร้อมกัน
+    # การแก้ตัวแปรทีหลังจึงไม่มีผลกับคนที่เรียกแบบไม่ส่ง period (check_divergence เรียกแบบนั้น)
+    # ต้องแก้ที่ __defaults__ ของตัวฟังก์ชันเอง
     regime_check.calc_rsi.__defaults__ = (regime_check.DIV_RSI_PERIOD,)
 # --sl-guard-legacy : ให้ด่านตรวจ SL (swing.find_sl_from_structure) กลับไปใช้ close ของแท่ง 4H
 # ล่าสุดแทนราคาที่จะเข้าไม้จริง = พฤติกรรมก่อน 2026-09-12 ไว้วัดว่าการแก้บั๊กนั้นคุ้มไหม
@@ -652,9 +619,6 @@ print(f"  Daily loss guard {MAX_DAILY_LOSS*100:.0f}% / risk {RISK_PER_TRADE*100:
 print(f"  Cooldown {COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)} ชม.   "
       f"MIN_SL {get_min_sl_distance_pct(symbol)}%{'  [--no-widen]' if no_widen else ''}"
       f"{'  [ทับด้วย --min-sl]' if _min_sl_arg else ''}")
-_kept = [n for n in scoring.SCORECARD_CRITERIA_NAMES if n not in scoring.DISABLED_CRITERIA]
-print(f"  สกอร์การ์ด {len(_kept)} เกณฑ์ ผ่านที่ {scoring.MIN_SCORE:g}"
-      f"{'   ตัดออก: ' + ', '.join(scoring.DISABLED_CRITERIA) if scoring.DISABLED_CRITERIA else ''}")
 print(f"  ไม่เข้าไม้เมื่อ regime = {', '.join(REGIME_NO_TRADE)}"
       f"{'   [เพิ่มด้วย --skip-regime]' if _sr_arg else ''}")
 if _rms_arg or rev_tp_entry:
@@ -664,7 +628,7 @@ if _rms_arg or rev_tp_entry:
 print(f"  ด่าน SL: ตรวจ 'ราคาทะลุ swing' ด้วย "
       f"{'close แท่ง 4H ล่าสุด [legacy]' if sl_guard_legacy else 'ราคาที่เข้าไม้จริง'}")
 print(f"  Divergence: อายุ swing <= {regime_check.DIV_MAX_AGE_BARS} แท่ง   "
-      f"RSI period {regime_check.DIV_RSI_PERIOD} (คุม RSI extreme ของ Reversal ด้วย)"
+      f"RSI period {regime_check.DIV_RSI_PERIOD}"
       f"{'   ไม่กรอง volume/wick' if div_no_vol else ''}"
       f"{'   [ทับค่าระบบจริง]' if (regime_check.DIV_MAX_AGE_BARS != _DIV_AGE_LIVE or regime_check.DIV_RSI_PERIOD != _DIV_RSI_LIVE) else ''}")
 # พิมพ์สถานะกฎ exit ทุกรอบเสมอ (ไม่ใช่เฉพาะรอบที่ใส่ธง) — ตั้งแต่ 2026-09-03 ที่ structure
@@ -721,11 +685,16 @@ def regime_at(t):
 
 
 def df1d_at(t):
+    # cache ต่อวันปฏิทินปลอดภัย (ตรวจ 2026-09-25): ผู้ใช้เฟรมนี้มีตัวเดียวคือ get_trend_bias ซึ่งตัด
+    # แท่งวันนี้ (ที่ยังไม่ปิด) ทิ้ง และแท่ง D1 ทั้ง 8 symbol เปิดที่ 00:00 UTC ทุกแท่ง = แท่งที่ปิด
+    # แล้วเป็นชุดเดียวกันทุกชั่วโมงของวันนั้น ส่วนแท่งวันนี้ที่ถูกแช่ไว้ตั้งแต่ชั่วโมงแรกที่เรียกไม่มี
+    # ใครอ่าน (ผู้อ่านเดิมคือ OBV 1D ในสกอร์การ์ดที่ลบไปแล้ว) — ถ้าวันไหนมีโค้ดใหม่อ่าน iloc[-1]
+    # ของ df_1d ต้อง key ด้วยชั่วโมงแทน ไม่งั้น replay จะเห็นแท่งวันนี้ค้างได้ถึง ~20 ชม. ต่างจาก
+    # scheduler ที่ดึงใหม่ทุกรอบ · ไม่ merge real volume แล้วเพราะ trend_flip ใช้แค่ราคา
     key = t.date()
     if key not in _df1d_cache:
         _df1d_cache.clear()
-        _df1d_cache[key] = merge_real_volume(
-            get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800, as_of=t), symbol, "1D", as_of=t)
+        _df1d_cache[key] = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800, as_of=t)
     return _df1d_cache[key]
 
 
@@ -823,7 +792,7 @@ for n, row in enumerate(clock.to_dict("records")):
     t, bar = row["time"], row
     # 2026-09-01: "เวลาที่ระบบตัดสินใจ" คือ **ปลาย** แท่ง 1H นี้ ไม่ใช่ต้นแท่ง — MT5 นับ time ของ
     # แท่ง = เวลาเปิด ดังนั้น bar["close"] คือราคา ณ t+1h เดิมโค้ดเอา close ตัวนี้ไปเป็นราคาเข้า
-    # แต่ส่ง as_of=t ให้ทุก scorecard = ตัดสินใจด้วยข้อมูลถึง t แล้วได้ราคาของอีก 1 ชม.ถัดมา
+    # แต่ส่ง as_of=t ให้ทุกด่าน = ตัดสินใจด้วยข้อมูลถึง t แล้วได้ราคาของอีก 1 ชม.ถัดมา
     # (lookahead) ซึ่งไม่ใช่แค่ noise เพราะ entry ตัวนั้นถูกส่งเข้า compute_score ไปคิด R:R ด้วย
     # ไม้ที่ราคาย่อมาเข้าทางในชั่วโมงนั้นจึงผ่านด่าน R:R ง่ายกว่าความจริง = ผลดีเกินจริงอย่างเป็นระบบ
     # แก้โดยเลื่อนเวลาตัดสินใจเป็น now = t + 1h ทั้งหมด (ราคาเข้ายังเป็น bar["close"] เหมือนเดิม
@@ -901,9 +870,8 @@ for n, row in enumerate(clock.to_dict("records")):
                 note(f"bias {direction} สวนโครงสร้าง 4H ({_struct})")
                 fate("bias สวนโครงสร้าง 4H")
                 continue
-            score, criteria, passed, sl_info = compute_score(symbol, direction, entry,
-                                                            as_of=now, df_1d=df_1d)
-            # exec_sl มาจาก compute_score แล้ว (ด่าน R:R ใช้ตัวนี้ตรวจ) ไม่คำนวณซ้ำที่นี่
+            sl_info = compute_entry(symbol, direction, entry, as_of=now, df_1d=df_1d)
+            # exec_sl มาจาก compute_entry แล้ว (ด่าน R:R ใช้ตัวนี้ตรวจ) ไม่คำนวณซ้ำที่นี่
             sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Scoring"
             exec_sl, atr_entry_ = sl_info["exec_sl"], sl_info["atr_entry"]
         elif regime in REGIME_REVERSAL:
@@ -937,10 +905,8 @@ for n, row in enumerate(clock.to_dict("records")):
                     #    ที่แพ้ "ไม่เคยกลับตัว" ทั้งสองฝั่ง ไม่ใช่ลักษณะเฉพาะของฝั่ง Short
                     #    สมมติฐานนี้จึงยังไม่ถูกพิสูจน์ ต้องวัดด้วยธงนี้เท่านั้น
                     #
-                    # เข้าทาง **Scoring** ไม่ใช่ Reversal โดยตั้งใจ: ไม้ที่ได้คือ "ไปตามเทรนด์ 1D"
-                    # = การเทรดต่อเนื่อง ไม่ใช่การกลับตัว และสกอร์การ์ด Reversal จะตัดแต้ม
-                    # Divergence/RSI/VSA ทิ้งทั้งหมดอยู่แล้วเพราะขั้ว divergence เป็น bearish
-                    # สวนกับทิศ Long (reversal.py:219 · 230 · 239) = ให้คะแนนไม้นี้ไม่ได้เลย
+                    # คิด SL/TP ทาง **Scoring** (compute_entry) ไม่ใช่ Reversal โดยตั้งใจ: ไม้ที่ได้
+                    # คือ "ไปตามเทรนด์ 1D" = การเทรดต่อเนื่อง ไม่ใช่การกลับตัว
                     # ติด strategy = "Breakout" ไว้ในไฟล์ผล เพื่อแยกออกจากไม้ Scoring ปกติได้
                     if breakout_mode and bias_1d == "Long":
                         direction = "Long"
@@ -955,7 +921,7 @@ for n, row in enumerate(clock.to_dict("records")):
                         _saved_fib = _swing_mod.TP_FIB_RATIO
                         _swing_mod.TP_FIB_RATIO = BREAKOUT_TP_FIB_RATIO
                         try:
-                            score, criteria, passed, sl_info = compute_score(
+                            sl_info = compute_entry(
                                 symbol, direction, entry, as_of=now, df_1d=_df1d_rev)
                         finally:
                             _swing_mod.TP_FIB_RATIO = _saved_fib
@@ -977,11 +943,10 @@ for n, row in enumerate(clock.to_dict("records")):
                         note(f"ยังไม่เห็น CHoCH (โครงสร้าง {_opp} ยังไม่พัง)")
                         fate("ยังไม่เห็น CHoCH")
                         continue
-                score, criteria, passed, inf = reversal.compute_reversal_score(
-                    symbol, direction, entry, key_level=rinfo["key_level"],
-                    df_4h=rinfo["df_4h"], as_of=now)
+                inf = reversal.compute_reversal_entry(
+                    symbol, direction, entry, df_4h=rinfo["df_4h"], as_of=now)
                 sl, tp, strategy = inf["sl"], inf["tp"], "Reversal"
-                # 2026-09-05: exec_sl มาจาก compute_reversal_score แล้ว (เหมือนทาง Scoring) —
+                # 2026-09-05: exec_sl มาจาก compute_reversal_entry แล้ว (เหมือนทาง Scoring) —
                 # เดิมคำนวณเองตรงนี้ ทำให้ด่าน R:R ข้างในตรวจด้วย SL โครงสร้างที่แคบกว่าของจริง
                 exec_sl, atr_entry_ = inf["exec_sl"], inf["atr_entry"]
         else:
@@ -998,11 +963,7 @@ for n, row in enumerate(clock.to_dict("records")):
         note(f"ERROR {type(exc).__name__}")
         continue
 
-    if not passed:
-        note(f"ไม่ผ่านสกอร์การ์ด ({strategy})"); fate("ไม่ผ่านสกอร์การ์ด Reversal")
-        continue
-
-    # 2026-08-31: SL ที่ส่ง broker มาจาก compute_score แล้ว (sl_info["exec_sl"]) ไม่คำนวณเองซ้ำ —
+    # 2026-08-31: SL ที่ส่ง broker มาจาก compute_entry แล้ว (sl_info["exec_sl"]) ไม่คำนวณเองซ้ำ —
     # เดิมคำนวณที่นี่ *หลัง* ด่าน R:R ทำให้ด่านตรวจคนละระยะเสี่ยงกับที่ใช้จริง (ดู scoring.py)
     # pinned_swing ยังเป็น SL โครงสร้างเท่าเดิม สูตร trailing จึงไม่เปลี่ยน
     sl, atr_entry = exec_sl, atr_entry_
@@ -1086,10 +1047,6 @@ for n, row in enumerate(clock.to_dict("records")):
                 reject_until[direction] = now + timedelta(hours=reject_cd)
             continue
 
-    # เก็บผลรายเกณฑ์ลงไม้ด้วย — ไม่งั้นต้องมาไล่เรียก compute_score ซ้ำทีหลังเพื่อวิเคราะห์
-    # รายเกณฑ์ ซึ่งได้ค่าจาก scoring.py "ณ วันที่วิเคราะห์" ไม่ใช่ตัวที่กรองไม้นี้จริงตอน replay
-    # (ถ้าสกอร์การ์ดถูกแก้ระหว่างนั้น ตัวเลขจะไม่ตรงกับไม้ที่ได้มาโดยที่ไม่มีอะไรฟ้อง)
-    # ชื่อคอลัมน์ = ชื่อเกณฑ์ตรงๆ ฝั่ง Scoring/Reversal คนละชุด อีกฝั่งจึงเป็นค่าว่าง
     _pin = (sl + scoring.EXEC_SL_ATR_MULT * atr_entry if (atr_entry and direction == "Long")
             else (sl - scoring.EXEC_SL_ATR_MULT * atr_entry if atr_entry else sl))
 
@@ -1106,8 +1063,7 @@ for n, row in enumerate(clock.to_dict("records")):
     positions[slot_of(strategy)] = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
            # tp0 = TP ที่ส่งจริงตอนเข้า (ผ่านเพดานแล้ว)  tp_fib = ที่ Fibonacci ให้ก่อนเพดาน
            # สองค่านี้ต่างกันเมื่อไม้นั้นโดนเพดานดึงเข้า — ดู comment ที่จุดคำนวณ tp_fib
-           "tp": tp, "tp0": tp, "tp_fib": tp_fib, "score": score, "strategy": strategy, "regime": regime,
-           **{name: bool(ok) for name, ok, _ in criteria},
+           "tp": tp, "tp0": tp, "tp_fib": tp_fib, "strategy": strategy, "regime": regime,
            "booked": 0.0, "rem": 1.0, "cuts": 0,
            # pinned_swing = SL โครงสร้าง (ถอย exec_sl กลับด้วยตัวคูณเดียวกับที่ขยับออกไป)
            "pinned_swing": _pin,
@@ -1183,20 +1139,14 @@ for lbl, g in (("ครึ่งแรก", t[t["time"] < mid]), ("ครึ่�
     if len(g):
         print(f"  {lbl:<22}{len(g):>6}{g['win'].mean()*100:>7.1f}%{g['R'].mean():>+8.2f}{g['R'].sum():>+9.1f}")
 print(f"{'=' * 78}")
-# รอบที่เปลี่ยนรูปสกอร์การ์ดเขียนคนละไฟล์ — ไม่งั้นทับผลรอบปกติที่เอาไว้เทียบ
+# รอบที่สวนค่าระบบจริงเขียนคนละไฟล์ — ไม่งั้นทับผลรอบปกติที่เอาไว้เทียบ
 _tag = ""
-if scoring.DISABLED_CRITERIA:
-    _tag = "_drop-" + "-".join(n.replace(" ", "") for n in scoring.DISABLED_CRITERIA)
-if _ms_arg:
-    _tag += f"_min{scoring.MIN_SCORE:g}"
 if _sr_arg:
     _tag += "_skip-" + "-".join(r.replace(" ", "") for r in _skip)
 if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
 if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
-if _rms_score_arg:
-    _tag += f"_revminscore{reversal.MIN_SCORE_REVERSAL:g}"
 for _flag, _attr, _short in (("--adx-period=",    "ADX_PERIOD",       "adxp"),
                              ("--adx-choppy=",    "ADX_CHOPPY",       "adxchop"),
                              ("--adx-gray-high=", "ADX_GRAY_HIGH",    "adxgray"),

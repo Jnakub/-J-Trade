@@ -10,35 +10,15 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import (
-    WEIGHT_OBV_1D,
-    WEIGHT_RSI_4H, RSI_SCORE_BUFFER,
-    WEIGHT_TREND_1H, WEIGHT_DI_1H,
-    WEIGHT_MACD, WEIGHT_RR,
-    RSI_SCORE_PERIOD, RSI_SCORE_MID,
-    RSI_REBOUND_LOOKBACK_BARS, RSI_REBOUND_MIN_TOUCHES,
-    TOTAL_WEIGHT, MT5_TIMEFRAMES, MIN_RR, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK,
-    get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT, MIN_SCORE,
+    MT5_TIMEFRAMES, MIN_RR_HARD_BLOCK, MAX_RR_HARD_BLOCK,
+    get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT,
 )
-from mt5_connect import connect, get_tick_or_raise
-from swing import (find_sl_from_structure, find_tp_from_fibonacci, check_confirmation,
-                   find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min,
-                   calc_di)
-from indicators import calc_rsi
+from mt5_connect import connect
+from swing import (find_sl_from_structure, find_tp_from_fibonacci,
+                   find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min)
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
 from bars import BAR_OFFSET_H, get_aligned_4h, get_bars
-
-# ชื่อเกณฑ์ในสกอร์การ์ด Scoring ตามลำดับใน compute_score() — มีไว้ให้ backtest ตรวจว่าชื่อที่สั่ง
-# ตัดสะกดถูก (สะกดผิด = ไม่ได้ตัดอะไรเลยแต่รายงานบอกว่าตัดแล้ว) ถ้าแก้ criteria list ต้องแก้ตรงนี้
-# ตามด้วย — คอลัมน์รายเกณฑ์ใน replay_trades_*.csv เป็นตัวเช็คว่าสองที่ยังตรงกันอยู่
-SCORECARD_CRITERIA_NAMES = ("OBV 1D", "RSI 4H Rebound", "Trend 1H",
-                            "DI 1H", "MACD 4H", "R:R")
-
-# ชื่อเกณฑ์ที่ถูก "ปิด" ชั่วคราว — ระบบจริงต้องเป็น () เสมอ มีไว้ให้ backtest ทดลองตัดเกณฑ์ออก
-# แล้ววัดผลทั้งระบบ โดยไม่ต้องแก้ criteria list จริงแล้วลืมแก้กลับ (backtest_replay.py --drop=)
-# ตัวที่ตั้งค่าจะ set scoring.DISABLED_CRITERIA + scoring.MIN_SCORE เอง แล้วพิมพ์ลง header
-# ของรายงานให้เห็นชัด — ผลที่ได้จากรอบที่ไม่ว่างห้ามเอาไปเทียบกับรอบปกติโดยไม่ดูว่าตัดอะไรไป
-DISABLED_CRITERIA: tuple = ()
 
 # ตัวคูณ ATR ที่ SL ตอนเข้าถูกขยับออกจาก SL โครงสร้าง ก่อนส่ง broker — ต้องตรงกับสูตรใน
 # exit_monitor.calc_atr_trailing_sl (initial_sl = pinned_swing ∓ 2×ATR) ไม่งั้น SL แรกกับรอบ
@@ -105,12 +85,12 @@ TF_NAME = {v: k for k, v in MT5_TIMEFRAMES.items()}   # mt5.TIMEFRAME_* -> "1D"/
 
 def get_ohlcv(symbol: str, timeframe, bars: int = 100, as_of: datetime = None) -> pd.DataFrame:
     """as_of=None (ปกติ) = ดึง bars ล่าสุดจากปัจจุบัน — as_of=datetime = ดึงข้อมูลเท่าที่ "มีจริง
-    ณ วินาทีนั้น" (ใช้ backtest จำลอง compute_score ณ เวลาในอดีตแบบเป๊ะ ไม่ต้อง copy logic
+    ณ วินาทีนั้น" (ใช้ backtest จำลอง compute_entry ณ เวลาในอดีตแบบเป๊ะ ไม่ต้อง copy logic
     มาเขียนซ้ำ)
 
     2026-08-18: timeframe 4H ของ symbol ที่มี bars.BAR_OFFSET_H != 0 จะถูกเลื่อนขอบแท่งให้ตรงกับ
     TradingView แทนแท่ง MT5 ดิบ (ดู bars.py) — จุดเดียวนี้ครอบคลุมทุกที่ที่เรียก get_ohlcv/
-    get_ohlcv_real ด้วย "4H" ทั้งระบบ (compute_score, structure break, key level, divergence,
+    get_ohlcv_real ด้วย "4H" ทั้งระบบ (compute_entry, structure break, key level, divergence,
     ATR trailing anchor ฯลฯ) ไม่ต้องแก้ทีละจุด — timeframe อื่น (1D/1H) ไม่กระทบเลย
 
     2026-08-26: ย้ายตัวดึงแท่งทั้งหมดไปที่ bars.get_bars() — พร้อมกับแก้บั๊ก lookahead ของ
@@ -131,113 +111,6 @@ def ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
 
 
-def calc_obv(df: pd.DataFrame) -> pd.Series:
-    sign = df["close"].diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
-    return (sign * df["tick_volume"]).cumsum()
-
-
-def calc_macd(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """คืน (macd_line, signal_line, histogram)"""
-    macd_line   = ema(df["close"], 12) - ema(df["close"], 26)
-    signal_line = ema(macd_line, 9)
-    histogram   = macd_line - signal_line
-    return macd_line, signal_line, histogram
-
-
-def macd_ok_for_direction(macd_line: pd.Series, signal_line: pd.Series,
-                          histogram: pd.Series, direction: str) -> bool:
-    """PASS เมื่อเส้น MACD และ Signal อยู่ฝั่งเดียวกับไม้ (Long: ทั้งคู่เหนือ 0, Short: ทั้งคู่
-    ใต้ 0) — ไม่ใช้ Histogram ตัดสินเลย (รับ argument ไว้เพื่อความเข้ากันได้ของผู้เรียกเดิม)
-
-    2026-08-26: เปลี่ยนจากนิยามเดิมที่ใช้ตำแหน่งเทียบเส้น 0 แค่ "เลือกสาขา" แล้วตัดสินด้วย
-    Histogram (Long: เหนือ 0 -> ต้อง hist[-2] > hist[-3] / ใต้ 0 -> ต้อง hist[-2] > 0, Short
-    กลับด้าน) — backtest BTCUSDm 730 วัน (backtest_criteria.py, 1250 setup, จำลอง compute_score
-    ทีละแท่ง 4H ด้วย as_of หลังแก้บั๊ก lookahead) พบว่านิยามเดิม **ให้ผลติดลบ** ทั้งสองสาขา:
-      สาขา "MACD อยู่ฝั่ง trend แล้ว" : PASS AvgR -0.23R vs FAIL -0.01R  (n=281/339)
-      สาขา "MACD ยังอยู่ฝั่งตรงข้าม"  : PASS Win 19.1%  vs FAIL 23.0%   (n=299/331)
-    เพราะทั้งสองสาขาถามว่า "โมเมนตัมวิ่งไปทางเดียวกับไม้แล้วหรือยัง" = เข้าไม้หลังการเคลื่อนไหว
-    เริ่มไปแล้ว ขณะที่ระบบวาง TP ไกลถึง Fibonacci 1.618 จึงต้องการ "ระยะที่เหลือ" เป็นหลัก
-
-    ตัวเลขเทียบสองนิยาม (ΔWR = Win Rate ตอน PASS ลบตอน FAIL):
-      เดิม : ชุดเต็ม -2.4  | bootstrap 400 ชุด non-overlap เฉลี่ย -5.9  (เป็นบวก 0% ของชุด)
-      ใหม่ : ชุดเต็ม +8.7  | bootstrap เฉลี่ย +8.7 ช่วง 5-95% = +5.7..+12.3 (เป็นบวก 100%)
-    ผลสุทธิต่อไม้ที่ผ่าน MIN_SCORE: เดิม 443 ไม้ Win 29.8% Total -55.8R -> ใหม่ 457 ไม้
-    Win 33.0% Total -15.1R (ตัวเลข R ยังติดลบเพราะการจำลองปิดที่ SL/TP เป๊ะ ไม่มี trailing/
-    partial ของ exit_monitor.py ใช้เทียบสองนิยามกันเองได้ แต่ไม่ใช่ผลตอบแทนจริงของระบบ)
-
-    ⚠️ ข้อจำกัดของหลักฐาน (ตัดสินใจโดยรู้ตัว): วัดจาก BTCUSDm ช่วงเดียว 2 ปีเท่านั้น ยังไม่ได้
-    ยืนยันกับ ETHUSDm/XAUUSDm และผลเกือบทั้งหมดมาจากฝั่ง Short (Short+MACD ใต้ 0: Win 33.1%
-    AvgR +0.17R n=242 / ฝั่ง Long แทบไม่ต่าง 27.8% vs 25.5%) ซึ่งอาจเป็นลักษณะเฉพาะของช่วงที่
-    BTC ลงแรง — ควรรัน backtest_criteria.py กับ symbol อื่นยืนยัน และเฝ้าดูผลเทรดจริง"""
-    is_short   = direction.capitalize() == "Short"
-    macd_val   = macd_line.iloc[-1]
-    signal_val = signal_line.iloc[-1]
-
-    if is_short:
-        return macd_val < 0 and signal_val < 0
-    return macd_val > 0 and signal_val > 0
-
-
-def check_rsi_double_rebound(rsi: pd.Series, is_long: bool,
-                             lookback: int = RSI_REBOUND_LOOKBACK_BARS,
-                             min_touches: int = RSI_REBOUND_MIN_TOUCHES) -> bool:
-    """RSI Double Rebound — สัญญาณต่อ trend (continuation) ต่างจาก Divergence ที่เป็นสัญญาณ
-    กลับตัว: ใน trend ที่แข็งแรง RSI มักย่อมาแตะโซนกลาง (RSI_SCORE_MID ± RSI_SCORE_BUFFER)
-    ระหว่างพักตัว แล้วเด้งกลับออกไปฝั่ง trend โดยไม่หลุดลึกไป oversold/overbought จริง — ยิ่งเด้ง
-    ซ้ำได้หลายครั้งในช่วงเวลาสั้นๆ ยิ่งแปลว่า trend แข็งแรง (ดูรูปตัวอย่างที่ผู้ใช้ส่งมา 2026-08-20)
-
-    นิยาม "แตะแล้วเด้ง" ในโค้ดนี้ = RSI ไขว้จากในโซน (Long: <=MID+BUFFER, Short: >=MID-BUFFER)
-    ออกไปฝั่ง trend ในแท่งถัดไป — นับเป็น 1 ครั้ง ต้องมีอย่างน้อย min_touches ครั้งใน lookback
-    แท่งล่าสุด และ RSI ปัจจุบันต้องยังอยู่ฝั่ง trend (ยืนยันว่าเด้งครั้งล่าสุดยังไม่หลุดกลับเข้าโซน)
-
-    2026-08-20: เพิ่มเงื่อนไข "จุดต่ำสุด" ของแต่ละครั้งที่แตะต้องขยับตามทิศ trend เทียบกับครั้งแรก
-    (ตามคำสั่งผู้ใช้) — Long: จุดต่ำสุดของการแตะครั้งหลังๆ ต้อง "สูงกว่า" ครั้งแรก (higher low บน
-    RSI, ย่อตื้นขึ้นเรื่อยๆ = แรงขายอ่อนลง) Short: ต้อง "ต่ำกว่า" ครั้งแรก (lower high, แรงซื้อ
-    อ่อนลง) กันเคสที่แตะซ้ำแต่ย่อลึกขึ้นเรื่อยๆ (สัญญาณอ่อนแรงจริง ไม่ใช่ trend แข็งแรง) ทั้งที่
-    เข้าเกณฑ์จำนวนครั้งพอ — ยังไม่มี backtest ยืนยัน ตามคำสั่งผู้ใช้
-
-    แทนที่เกณฑ์ "RSI 4H" เดิม (threshold เดี่ยว ณ แท่งปัจจุบัน) — ยังไม่มี backtest ยืนยัน ตาม
-    คำสั่งผู้ใช้ ควร backtest เทียบกับเกณฑ์เดิมก่อนใช้ตัดสินใจเทรดจริง
-
-    2026-09-01: วัดแล้วด้วย backtest_replay 730 วัน (--drop="RSI 4H Rebound" --min-score=4)
-    ผลคนละทิศกันสอง symbol และรวมแล้วแย่ลง จึง **เก็บเกณฑ์นี้ไว้ตามเดิม**:
-      BTC Scoring 20 ไม้ -1.05R -> 21 ไม้ -0.80R (ดีขึ้น)
-      XAU Scoring 12 ไม้ -0.34R -> 16 ไม้ -1.00R (แย่ลง)   รวม -1.39R -> -1.80R
-    ที่มาของการทดสอบ: ในไม้ Scoring ที่เข้าจริง กลุ่มที่ "ตก" เกณฑ์นี้ (ผ่าน 5/6 ได้อยู่) ทำกำไร
-    +1.40R ขณะที่กลุ่มผ่านครบ 6/6 ขาดทุน -1.67R ดูเผินๆ เหมือนเกณฑ์กลับด้าน แต่พอวัดทั้งระบบ
-    แล้วไม่ใช่ — กลุ่มที่ตกเกณฑ์นี้ถือเฉลี่ย 8.5 วัน ส่วนกลุ่ม 6/6 ถือ 4.3 วัน ต่างกันที่ประเภท
-    ของ setup มากกว่าตัวเกณฑ์"""
-    if len(rsi) < lookback + 1:
-        return False
-
-    window  = rsi.iloc[-(lookback + 1):]
-    zone_hi = RSI_SCORE_MID + RSI_SCORE_BUFFER
-    zone_lo = RSI_SCORE_MID - RSI_SCORE_BUFFER
-    in_zone = (window <= zone_hi) if is_long else (window >= zone_lo)
-    on_trend_side = (window.iloc[-1] > zone_hi) if is_long else (window.iloc[-1] < zone_lo)
-
-    # ไล่หาแต่ละ "ครั้งที่แตะ" (ช่วงต่อเนื่องที่ in_zone=True) แล้วเก็บจุดต่ำสุด(Long)/สูงสุด(Short)
-    # ของแต่ละครั้งไว้เทียบกัน — ครั้งที่ยัง "ค้าง" ท้าย window (ยังไม่ทันเด้งออก) ไม่นับ
-    touch_extremes = []
-    in_run, run_extreme = False, None
-    for val, flag in zip(window, in_zone):
-        if flag:
-            run_extreme = val if run_extreme is None else (min(run_extreme, val) if is_long
-                                                            else max(run_extreme, val))
-            in_run = True
-        elif in_run:
-            touch_extremes.append(run_extreme)
-            in_run, run_extreme = False, None
-
-    touches = len(touch_extremes)
-    if touches < min_touches or not on_trend_side:
-        return False
-
-    progressing = all(v > touch_extremes[0] for v in touch_extremes[1:]) if is_long \
-                 else all(v < touch_extremes[0] for v in touch_extremes[1:])
-    return progressing
-
-
 def calc_rr(entry: float, sl: float, tp: float, direction: str) -> float:
     if direction.lower() == "long":
         risk, reward = entry - sl, tp - entry
@@ -247,15 +120,15 @@ def calc_rr(entry: float, sl: float, tp: float, direction: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Reusable scoring function (MT5 must already be initialized by caller)
+# Trend bias + แผนเข้าไม้ (MT5 must already be initialized by caller)
 # ---------------------------------------------------------------------------
 
 def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str | None, str]:
     """คืน (bias, bias_source) — Long/Short ตาม trend_flip เท่านั้น (ไม่มี EMA50/200
     fallback อีกต่อไป — 2026-08-02 ตัดออก ตามที่ตกลงกันว่า bias ต้องมาจาก trend_flip
     เพียวๆ) ดึงมาเป็นฟังก์ชันแยกเพื่อให้ backtest ภายนอก (เช่น backtest_exit_compare.py)
-    รู้ bias ก่อนเรียก compute_score ได้โดยไม่ต้อง copy logic ชุดนี้มาเขียนซ้ำ
-    (compute_score เองก็เรียกตัวนี้ภายใน — scheduler.py ก็เรียกตัวนี้แทน EMA ของตัวเองแล้ว)
+    รู้ bias ก่อนเรียก compute_entry ได้โดยไม่ต้อง copy logic ชุดนี้มาเขียนซ้ำ
+    (compute_entry เองก็เรียกตัวนี้ภายใน — scheduler.py ก็เรียกตัวนี้แทน EMA ของตัวเองแล้ว)
 
     bias = None เมื่อ symbol ไม่มีค่า k ใน TREND_FLIP_K เลย หรือ trend_flip ยัง bootstrap
     ไม่พร้อม (ไม่ควรเกิดกับ ~800 แท่ง 1D ในทางปฏิบัติ) — ผู้เรียกต้องถือว่า "ยังไม่มี bias
@@ -278,39 +151,36 @@ def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str | None, str]:
     return None, "bootstrap_not_ready"   # trend_flip ยังสรุปทิศทางไม่ได้
 
 
-def compute_score(symbol: str, direction: str, entry: float,
+def compute_entry(symbol: str, direction: str, entry: float,
                   sl: float = None, tp: float = None,
                   force: bool = False, as_of: datetime = None,
-                  df_1d: pd.DataFrame = None) -> tuple[float, list, bool, dict]:
-    """Return (total_score, criteria_list, passed, sl_info).
-    ถ้าไม่ส่ง sl จะหาจาก swing structure อัตโนมัติ
-    ถ้าไม่ส่ง tp จะหาจาก Fibonacci อัตโนมัติ (หาไม่ได้ถึงตกไปใช้ SL × MIN_RR_HARD_BLOCK)
+                  df_1d: pd.DataFrame = None) -> dict:
+    """วางแผนไม้ทาง Scoring (และ Breakout) — คืน dict ของ SL/TP/R:R หรือ raise ValueError
+    ถ้าติดด่านใดด่านหนึ่ง (= ห้ามเข้าไม้นี้) ด่านที่ตัดสินจริงมีเท่านี้:
+      1. ทิศต้องตรง trend_flip bias ของ 1D
+      2. หา SL จาก swing โครงสร้าง 4H ได้ (ไม่ส่ง sl มา) · TP จาก Fibonacci (หาไม่ได้ = fallback)
+      3. ระยะ entry->SL ไม่แคบกว่า get_min_sl_distance_pct
+      4. MIN_RR_HARD_BLOCK <= R:R <= MAX_RR_HARD_BLOCK (วัดด้วย exec_sl = SL ที่ส่ง broker จริง)
+      5. ระยะ TP ไม่เกิน MAX_TP_DISTANCE_PCT
 
-    as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ (ราคาจาก live tick, bars ล่าสุด)
-    as_of=datetime    = จำลองเช็ค ณ เวลานั้นในอดีต (ราคา = close 1H ล่าสุดก่อนเวลานั้น,
-        bars ทั้งหมดตัดที่เวลานั้น) — ให้ backtest_score.py เรียกตัวนี้ตรงๆ แทนการ copy
-        logic มาเขียนซ้ำ กันผลลัพธ์ backtest เพี้ยนจากของจริงตอนแก้ scoring.py แล้วลืมแก้ตาม
+    2026-09-25: เดิมชื่อ compute_score และคืน (score, criteria, passed, sl_info) — สกอร์การ์ด
+    ถูกลบทิ้งทั้งใบ (เลิกใช้กรองตั้งแต่ 2026-09-06 ดูเหตุผลที่ config.py) เหลือคืน dict เดียว
+    คีย์: sl (SL โครงสร้าง = pinned_swing) · exec_sl (ส่ง broker) · atr_entry · tp ·
+    rr (จาก exec_sl) · fib_info + คีย์จาก find_sl_from_structure (swing_price/swing_idx/atr)
+    🔴 เดิมไม่มีคีย์ rr — scheduler ทาง Breakout อ่าน sl_info["rr"] แล้วจะโยน KeyError ทุกครั้ง
+    ที่ไม้ผ่านด่านครบ (log จริงยังไม่เคยมีไม้ Breakout เลยตั้งแต่ 2026-09-21 จึงไม่เคยเห็น)
 
-    df_1d: ส่ง df_1d (real volume, bars=800, as_of เดียวกัน) ที่ดึงมาแล้วมาใช้ซ้ำได้ — เช่นจาก
-    scheduler.py ที่ต้องดึง df_1d ไปเช็ค get_trend_bias() เองอยู่แล้วก่อนเรียกฟังก์ชันนี้ (2026-08-11:
-    เดิมดึง+merge_real_volume ซ้ำสองรอบ ข้อมูลชุดเดียวกันเป๊ะ เสียเวลา/ยิง Bitstamp API ซ้ำโดยไม่
-    จำเป็นสำหรับ BTC/ETH/XRP) ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม (ต้อง bars/as_of ตรงกันเป๊ะ ไม่งั้น
-    EMA50/200 คลาดเคลื่อนจาก warm-up window ที่ต่างกัน)"""
+    as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ · as_of=datetime = จำลอง ณ เวลานั้นในอดีต (bars ทั้งหมด
+    ตัดที่เวลานั้น) ให้ backtest เรียกตัวนี้ตรงๆ แทนการ copy logic มาเขียนซ้ำ
+
+    df_1d: ส่ง df_1d (bars=800, as_of เดียวกัน) ที่ดึงมาแล้วมาใช้ซ้ำได้ — ใช้แค่ตรวจทิศกับ
+    get_trend_bias ซึ่งอ่านเฉพาะแท่งที่ปิดแล้ว (ไม่ต้อง merge real volume: trend_flip ไม่ใช้ volume)"""
     is_long = direction.capitalize() == "Long"
 
     if df_1d is None:
         df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800, as_of=as_of)
-        df_1d = merge_real_volume(df_1d, symbol, "1D", as_of=as_of)
     df_4h = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=200, as_of=as_of)
-    df_4h = merge_real_volume(df_4h, symbol, "4H", as_of=as_of)
-    df_1h = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], as_of=as_of)
-    df_1h = merge_real_volume(df_1h, symbol, "1H", as_of=as_of)   # 2026-07-27: เดิมไม่เคย merge เลย
-                                                     # (ต่างจาก 1D/4H) ทำให้ OBV 1H เป็น tick_volume แม้แต่ BTC
-
-    price = df_1h["close"].iloc[-1] if as_of is not None else get_tick_or_raise(symbol).bid
-
-    ema50_1h  = ema(df_1h["close"], 50).iloc[-1]
-    # ema50_4h ถูกลบ 2026-08-19 — ช่อง 4H เปลี่ยนจาก Trend (EMA50) เป็น RSI แล้ว ไม่มีใครใช้ต่อ
+    df_4h = merge_real_volume(df_4h, symbol, "4H", as_of=as_of)   # swing filter ใช้ volume
 
     trend_bias, bias_source = get_trend_bias(symbol, df_1d)
     if trend_bias is None:
@@ -342,7 +212,7 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     # ── SL ที่จะส่ง broker จริง (exec_sl) ────────────────────────────────────────────────
     # 2026-08-31: เดิมด่าน R:R คำนวณจาก `sl` (SL โครงสร้าง) แต่ scheduler.py ขยับ SL ออกไปอีก
-    # EXEC_SL_ATR_MULT×ATR *หลัง* compute_score จบไปแล้ว (ตั้งแต่ 2026-08-27) ระยะเสี่ยงจริงจึง
+    # EXEC_SL_ATR_MULT×ATR *หลัง* compute_score (ชื่อเดิม) จบไปแล้ว (ตั้งแต่ 2026-08-27) ระยะเสี่ยงจริงจึง
     # กว้างกว่าที่ด่านคิดเฉลี่ย 1.49 เท่า (ช่วง 1.20-2.06) วัดจากไม้ Scoring 38 ไม้ของ replay:
     #   R:R ที่ด่านเห็น เฉลี่ย 4.12 (ต่ำสุด 1.50) แต่ R:R จริง เฉลี่ย 2.65 (ต่ำสุด 1.06)
     #   11/38 ไม้ (29%) ผ่านด่าน MIN_RR_HARD_BLOCK=1.5 มาได้ทั้งที่ R:R จริงต่ำกว่า 1.5
@@ -369,81 +239,29 @@ def compute_score(symbol: str, direction: str, entry: float,
 
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
-    used_fallback_tp = False   # TP มาจากสูตร fallback (ไม่ใช่ Fibonacci) — ดูเกณฑ์ R:R ด้านล่าง
     if tp is None:
         fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
         if fib_info.get("passed"):
             tp = fib_info["tp"]   # อัตราส่วนมาจาก config.TP_FIB_RATIO (ดูที่มา/เหตุผลที่นั่น)
         else:
-            # 2026-08-26: อิง MIN_RR_HARD_BLOCK ไม่ใช่ MIN_RR — เดิมสองค่านี้เท่ากัน (1.5) จึงไม่
-            # ต่างกัน แต่ตอนที่ MIN_RR ถูกขึ้นเป็น 2.0 เพื่อให้เกณฑ์ R:R ในสกอร์การ์ดกรองได้จริง
-            # (ดู config.MIN_RR) สูตรนี้พลอยยืด TP ของไม้ fallback ตามไปด้วยทั้งที่ไม่ได้ตั้งใจ
-            # — แยกให้ขาดกัน: MIN_RR = "เกณฑ์ให้คะแนน", MIN_RR_HARD_BLOCK = "ขั้นต่ำที่ยอมเทรด"
-            # ซึ่งเป็นความหมายที่ตรงกับ TP ขั้นต่ำที่ยอมรับได้มากกว่า (ไม้ fallback ไม่ได้แต้ม R:R
-            # อยู่แล้วเพราะ used_fallback_tp — ค่านี้จึงไม่กระทบคะแนน กระทบแค่ TP จริง)
+            # อิง MIN_RR_HARD_BLOCK = "ขั้นต่ำที่ยอมเทรด" (2026-08-26 แยกออกจาก MIN_RR ของ
+            # สกอร์การ์ดที่ลบไปแล้ว — ตอนนั้น MIN_RR 2.0 เคยยืด TP ของไม้ fallback โดยไม่ตั้งใจ)
             # 2026-08-31: อิง exec_sl (ระยะเสี่ยงจริง) ไม่ใช่ sl โครงสร้าง — ไม่งั้น TP ที่ตั้งให้
             # ได้ R:R = MIN_RR_HARD_BLOCK พอดี จะให้ R:R จริงต่ำกว่าเกณฑ์ทันทีที่ SL ถูกขยับออก
-            used_fallback_tp = True
             fallback_rr = MIN_RR_HARD_BLOCK
             tp = (entry + abs(entry - exec_sl) * fallback_rr) if is_long else \
                  (entry - abs(entry - exec_sl) * fallback_rr)
 
-    # Confirmation — ราคาทะลุ Swing Low/High บน 4H
-    # 2026-07-26: ไม่ให้คะแนนแล้ว (ถูกตัดออกจาก scorecard — ดูเหตุผลใน config.py)
-    # ยังคำนวณไว้แสดงผลอ้างอิงในรายงานเท่านั้น ไม่มีผลต่อการตัดสินใจเข้าไม้
-    conf_result = check_confirmation(price, df_4h, direction, symbol)
-
-    obv_1d                          = calc_obv(df_1d)
-    plus_di_1h, minus_di_1h         = calc_di(df_1h)
-    macd_line, signal_line, macd_hist = calc_macd(df_4h)
-    rsi_4h                          = calc_rsi(df_4h["close"], RSI_SCORE_PERIOD)
     # R:R วัดจาก exec_sl = ระยะเสี่ยงจริงที่จะส่ง broker (ดู comment ที่คำนวณ exec_sl ด้านบน)
-    rr                              = calc_rr(entry, exec_sl, tp, direction)
-
-    def obv_rising(obv: pd.Series, lookback: int = 10) -> bool:
-        # เทียบ OBV ล่าสุดกับ 5 แท่งก่อน — จับ trend ไม่ใช่ noise
-        return (obv.iloc[-1] > obv.iloc[-1 - lookback]) if is_long else (obv.iloc[-1] < obv.iloc[-1 - lookback])
-
-    # DI 1H: Long ผ่านเมื่อ DI+ > DI− (แรงซื้อเหนือกว่า), Short กลับด้าน
-    di_1h_ok = (plus_di_1h.iloc[-1] > minus_di_1h.iloc[-1]) if is_long else \
-               (minus_di_1h.iloc[-1] > plus_di_1h.iloc[-1])
-
-    # 2026-07-27: ช่อง 1H เปลี่ยนจาก OBV เป็น DI (ดูเหตุผล+ตัวเลข redundancy ใน config.py)
-    criteria = [
-        ("OBV 1D",       obv_rising(obv_1d),                                    WEIGHT_OBV_1D),
-        # 2026-08-19: ช่องนี้เดิมคือ Trend 4H (close vs EMA50) เปลี่ยนเป็น RSI 4H ตามคำสั่งผู้ใช้
-        # (ดูตัวเลข redundancy/predictive power ที่วัดไว้ใน config.py เหนือ WEIGHT_RSI_4H)
-        # 2026-08-20: เปลี่ยนจาก threshold เดี่ยว (RSI > 50+buffer) เป็น RSI Double Rebound —
-        # ต้องเคยย่อแตะโซนกลางแล้วเด้งกลับฝั่ง trend อย่างน้อย 2 ครั้ง ไม่ใช่แค่ค่าปัจจุบันผ่าน
-        # เฉยๆ (ดู check_rsi_double_rebound ด้านบน) ตามคำสั่งผู้ใช้ ยังไม่มี backtest ยืนยัน
-        ("RSI 4H Rebound", check_rsi_double_rebound(rsi_4h, is_long),           WEIGHT_RSI_4H),
-        # 2026-08-30: ช่อง "OBV 4H" ถูกตัดออกตามคำสั่งผู้ใช้ (TOTAL_WEIGHT 7 -> 6, MIN_SCORE
-        # คงที่ 5 จึงเข้มขึ้นจากยอมตกได้ 2 ข้อเหลือ 1 ข้อ) — ⚠️ A/B บอกว่าผลของการตัดไม่คงเส้น
-        # คงวาข้ามระดับความเข้ม (-0.01R กับ +1.22R) และอยู่ในกรอบ noise ทั้งคู่ ดูตาราง 2x2
-        # เต็ม + วิธีถอยกลับที่ config.py เหนือ WEIGHT_OBV_1D
-        ("Trend 1H",     (price > ema50_1h) if is_long else (price < ema50_1h), WEIGHT_TREND_1H),
-        ("DI 1H",        di_1h_ok,                                              WEIGHT_DI_1H),
-        ("MACD 4H",      macd_ok_for_direction(macd_line, signal_line, macd_hist, direction), WEIGHT_MACD),
-        # 2026-07-26: ถ้า TP มาจากสูตร fallback (Fibonacci หาไม่ได้) จะไม่ให้แต้มนี้ —
-        # ตอนนั้นสูตร fallback อิง MIN_RR ทำให้ R:R ออกมาเท่ากับ MIN_RR พอดีเสมอ เกณฑ์
-        # rr >= MIN_RR จึงผ่าน 100% โดยอัตโนมัติ = แต้มฟรี (เช็คตัวเองกับตัวเอง)
-        # 2026-08-26: fallback ย้ายไปอิง MIN_RR_HARD_BLOCK (1.5) ซึ่งต่ำกว่า MIN_RR (2.0) แล้ว
-        # ไม้ fallback จึงตกเกณฑ์ rr >= MIN_RR ด้วยตัวเลขเองอยู่แล้ว — คงเงื่อนไขนี้ไว้เป็นเกราะ
-        # กันกรณีที่ใครตั้งสองค่าให้เท่ากันอีกในอนาคต (และเพื่อรักษาเจตนาเดิม: ต้องมี TP เชิง
-        # โครงสร้างจาก Fibonacci ถึงจะนับว่า "R:R ดีจริง")
-        # ผลกระทบ ณ วันที่แก้ = ศูนย์: backtest 403 วัน Fibonacci สำเร็จ 100% ทั้ง BTC (148/148,
-        # real volume) และ XAU (386/386) — fallback ไม่เคยถูกใช้เลย เป็นเกราะกันไว้ล่วงหน้า
-        # TP ที่ผู้ใช้กรอกเองมา (tp is not None) ไม่ถือเป็น fallback — ยังได้แต้มตามปกติ
-        ("R:R",          (not used_fallback_tp) and rr >= MIN_RR - 1e-9,          WEIGHT_RR),
-    ]
+    rr = calc_rr(entry, exec_sl, tp, direction)
 
     sl_info["sl"]           = sl          # SL โครงสร้าง — เป็น pinned_swing ของสูตร trailing
     sl_info["exec_sl"]      = exec_sl     # SL ที่ต้องส่ง broker จริง (ผู้เรียกใช้ตัวนี้ อย่าคำนวณเอง
     sl_info["atr_entry"]    = atr_entry   # ซ้ำ ไม่งั้นสองที่จะได้ ATR คนละค่าแล้ว R:R เพี้ยนอีก)
     sl_info["tp"]           = tp
+    sl_info["rr"]           = rr
     sl_info["fib_info"]     = fib_info
-    sl_info["conf_result"]  = conf_result
 
     # Hard block: ระยะ entry->SL แคบเกินจนอยู่ในระยะ noise ปกติของแท่ง 4H
     # — ดู comment ที่ config.MIN_SL_DISTANCE_PCT / config.get_min_sl_distance_pct()
@@ -457,8 +275,7 @@ def compute_score(symbol: str, direction: str, entry: float,
             f"{min_sl_pct}% — ห้ามเข้า trade"
         )
 
-    # Hard block: กันแค่ไม่ให้เสี่ยงมากกว่าได้ (R:R < 1) — ไม่สนคะแนนรวม
-    # ส่วน "R:R ดีจริง" (>= MIN_RR) ยังต้องผ่านสกอร์การ์ดแยกต่างหากด้านบน (WEIGHT_RR)
+    # Hard block: R:R ต่ำกว่าขั้นต่ำที่ยอมเทรด (ดูประวัติ/ตัวเลขที่ config.MIN_RR_HARD_BLOCK)
     if rr < MIN_RR_HARD_BLOCK - 1e-9 and not force:
         raise ValueError(
             f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_HARD_BLOCK}  — ห้ามเข้า trade"
@@ -479,12 +296,7 @@ def compute_score(symbol: str, direction: str, entry: float,
             f"— ห้ามเข้า trade"
         )
 
-    if DISABLED_CRITERIA:                 # ปกติว่าง — ดู comment ที่หัวไฟล์
-        criteria = [c for c in criteria if c[0] not in DISABLED_CRITERIA]
-
-    total  = sum(w for _, passed, w in criteria if passed)
-    passed = total >= MIN_SCORE
-    return total, criteria, passed, sl_info
+    return sl_info
 
 
 # ---------------------------------------------------------------------------
@@ -509,81 +321,24 @@ def main() -> None:
 
     try:
         connect()
+        plan = compute_entry(symbol, direction, entry, sl, tp)
 
-        # ---- Bias preview -----------------------------------------------
-        df_1d_bias  = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
-        ema50_bias  = ema(df_1d_bias["close"], 50).iloc[-1]
-        ema200_bias = ema(df_1d_bias["close"], 200).iloc[-1]
-        bias        = "Long" if ema50_bias > ema200_bias else "Short"
-        print(f"\n  Bias 1D : {bias}  (EMA50={ema50_bias:.2f}  EMA200={ema200_bias:.2f})")
-
-        # ---- Scoring (อัตโนมัติทั้งหมด) ---------------------------------
-        score, criteria, passed, sl_info = compute_score(
-            symbol, direction, entry, sl, tp
-        )
-
-        sl    = sl_info["sl"]
-        tp    = sl_info["tp"]
-        rr    = calc_rr(entry, sl, tp, direction)
-        price = get_tick_or_raise(symbol).bid
-        failed = [name for name, p, _ in criteria if not p]
-
-        # ---- SL Detail -------------------------------------------------
         print()
         print(f"{'=' * 48}")
-        if sl_info.get("swing_price"):
-            auto = "(auto)" if len(sys.argv) == 4 else "(manual)"
-            print(f"  SL {auto}")
-            print(f"  Swing High   : {sl_info['swing_price']}")
-            print(f"  ATR buffer   : {sl_info['atr']}")
-            # 2026-08-13: ลบ 3 บรรทัด Rejection/Volume OK/Structure OK ทิ้ง — ทั้งสาม key นี้
-            # find_sl_from_structure() ไม่เคยคืนมาเลย (คืนแค่ sl/swing_price/swing_idx/atr/
-            # passed/reason) จึงตกไปที่ default '-' ตลอดกาล เป็นช่องว่างเปล่าที่ดูเหมือนมีข้อมูล
-            # (has_rejection/_rejection_ok ที่เคยเป็นแหล่งข้อมูลก็ถูกลบไปแล้วในคอมมิตเดียวกัน)
-            print(f"  SL           : {sl}")
-
-        conf = sl_info.get("conf_result", {})
-        if conf:
-            print(f"\n  Confirmation (อ้างอิงเท่านั้น — ไม่คิดคะแนน)")
-            print(f"  ราคาปัจจุบัน : {conf['current_price']}")
-            print(f"  Key Level    : {conf['key_level']}")
-            print(f"  Result       : {conf['reason']}")
-
-        fib = sl_info.get("fib_info", {})
-        if fib.get("passed"):
-            print(f"\n  TP (Fibonacci)  จุด 0 = {fib['origin']}  Move = {fib['move']}")
-            print(f"  TP1 (0.382)  : {fib['tp1']}")
-            print(f"  TP2 (0.618)  : {fib['tp2']}")
-            print(f"  TP  (0.786)  : {fib['levels']['0.786']}")
-            print(f"  TP3 (1.000)  : {fib['tp3']}")
-            print(f"  TP4 (1.618)  : {fib['tp4']}  ← ใช้เป็น TP หลัก")
-        else:
-            print(f"  TP (R:R)     : {tp}")
-
-        # ---- Score Display ---------------------------------------------
-        print(f"{'=' * 48}")
         print(f"  {symbol}  |  {direction}  |  Entry {entry}")
-        print(f"  Current Price: {price:.5f}   R:R = {rr:.2f}")
         print(f"{'=' * 48}")
-
-        for name, p, weight in criteria:
-            got    = weight if p else 0.0
-            status = "PASS" if p else "FAIL"
-            tag    = f"  (x{weight:.0f})" if weight > 1 else ""
-            print(f"  {name:<15} {status:<5}  {got:.1f} / {weight:.1f}{tag}")
-
-        print(f"{'-' * 48}")
-        print(f"  Total Score  :  {score:.1f} / {TOTAL_WEIGHT:.0f}")
-        print(f"  MIN_SCORE    :  {MIN_SCORE:.1f}")
-        print(f"{'=' * 48}")
-
-        if passed:
-            print("  >>> ENTER TRADE <<<")
+        if plan.get("swing_price"):
+            print(f"  Swing        : {plan['swing_price']}   ATR buffer {plan['atr']}")
+        print(f"  SL โครงสร้าง : {plan['sl']}")
+        print(f"  SL ส่ง broker : {plan['exec_sl']}")
+        fib = plan.get("fib_info", {})
+        if fib.get("passed"):
+            print(f"  TP (Fibonacci)  จุด 0 = {fib['origin']}  Move = {fib['move']}  -> {plan['tp']}")
         else:
-            print("  >>> NO ENTRY <<<")
-            if failed:
-                print(f"  ข้อที่ไม่ผ่าน: {', '.join(failed)}")
-
+            print(f"  TP (fallback R:R {MIN_RR_HARD_BLOCK}) : {plan['tp']}")
+        print(f"  R:R (จาก SL ส่ง broker) = {plan['rr']:.2f}")
+        print(f"{'=' * 48}")
+        print("  >>> ผ่านทุกด่าน — เข้าไม้ได้ <<<")
         print(f"{'=' * 48}")
 
     except ValueError as exc:

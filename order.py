@@ -136,7 +136,7 @@ def _filling_mode(symbol: str) -> int:
 def place_order(symbol: str, direction: str, entry: float,
                 sl: float, tp: float, lot: float,
                 comment: str = "auto-trader",
-                score: float = 0.0, strategy: str = "Scoring",
+                strategy: str = "Scoring",
                 pinned_swing: float = None, pinned_atr_entry: float = None) -> int:
     # 2026-08-09: บันทึก journal ในนี้เสมอ (ดูท้ายฟังก์ชัน) แทนที่จะปล่อยให้ผู้เรียกแยกไปเรียก
     # journal.log_trade_open() เอง — เดิม scheduler.py/bot.py ต่างก็เรียกแยกหลัง place_order()
@@ -196,7 +196,7 @@ def place_order(symbol: str, direction: str, entry: float,
     print(f"  Comment   : {comment}")
 
     import journal
-    journal.log_trade_open(symbol, direction, result.price, sl, tp, lot, score, result.order,
+    journal.log_trade_open(symbol, direction, result.price, sl, tp, lot, result.order,
                            pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
                            strategy=strategy)
 
@@ -266,7 +266,7 @@ def close_order(ticket: int, exit_rule: str = "") -> None:
                                 exit_by=exit_by, exit_rule=exit_rule)
     except ValueError:
         journal.log_trade_open(symbol, direction, pos.price_open,
-                               pos.sl, pos.tp, lot, 0.0, ticket)
+                               pos.sl, pos.tp, lot, ticket)
         journal.log_trade_close(ticket, result_label, round(pos.profit, 2),
                                 exit_by=exit_by, exit_rule=exit_rule)
 

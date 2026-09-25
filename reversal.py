@@ -1,24 +1,13 @@
 """
-reversal.py — Reversal Scoring: scorecard สำหรับเทรด "สวน" ทิศเทรนด์เดิม (คู่กับ scoring.py ที่เทรด "ตาม" เทรนด์)
+reversal.py — แผนเข้าไม้ทาง Reversal: เทรด "สวน" ทิศเทรนด์เดิม (คู่กับ scoring.py ที่เทรด "ตาม" เทรนด์)
 
 ใช้ได้ต่อเมื่อ regime_check.py บอกว่า REVERSAL-READY เท่านั้น (ADX peak โค้งลงจริง
-+ อยู่ที่ Key Level + มี Divergence) — ห้ามเปิดพร้อมกับ Scoring กับ setup เดียวกัน
-(ห้าม scorecard shopping)
++ อยู่ที่ Key Level + มี Divergence) — ทิศมาจากขั้ว divergence ที่ทำให้ regime ยิง
 
-Reversal Scoring Checklist (weight รวม = 10) — 2026-09-13 **เลิกใช้กรองแล้ว**
-(MIN_SCORE_REVERSAL = 0 ดูเหตุผลที่ตัวแปรนั้น) คะแนนยังถูกคำนวณและบันทึกลงไม้ตามเดิม:
-  1. Price อยู่ที่ Key Level สำคัญ?        weight 2  (ใช้ check_key_level เดียวกับ regime_check.py)
-  2. มี Divergence ใน RSI?                 weight 3  (ใช้ check_divergence เดียวกับ regime_check.py —
-                                                       backtest แม่นสุดในบรรดาเงื่อนไขทั้งหมด 82-93%
-                                                       เลยเพิ่มน้ำหนักจาก 2 เป็น 3)
-  3. RSI extreme (>70 Short, <30 Long)?    weight 1
-  4. มี VSA Climax pattern?                weight 2  (Buying Climax=Short, Selling Climax=Long)
-  5. [ตัดออก] Reversal Candlestick ที่ Key Level — backtest ทุกแบบ (เปล่า/+volume/+key level)
-     ไม่พบว่าแม่นกว่าเดา (45-62%, บาง combo sample เหลือ 1-10 ครั้งแกว่ง 0-100%) จึงตัดทิ้ง
-     น้ำหนักที่หายไป (1) ย้ายไปเพิ่มให้ข้อ 2 (Divergence) แทน ตามผลทดสอบจริง
-  6. ADX peak แล้วเริ่มลงจริง?             weight 1  (relative peak & decline เหมือน regime_check.py
-                                                       ไม่ใช้ threshold ตายตัว 40 — สอดคล้องกันทั้งระบบ)
-  7. R:R >= 2.0?                           weight 1  (Reversal เสี่ยงกว่า ต้อง R:R สูงกว่า trend-follow)
+compute_reversal_entry() หา SL (swing โครงสร้าง 4H) / TP (Fibonacci) แล้วตรวจ hard block
+(ระยะ SL ขั้นต่ำ · R:R ขั้นต่ำ/สูงสุด · ระยะ TP สูงสุด) — ไม่ผ่าน = raise ValueError
+2026-09-25: สกอร์การ์ด Reversal (Key Level/Divergence/RSI extreme/VSA Climax/ADX/R:R รวม 10 แต้ม)
+ถูกลบทิ้งทั้งใบ — เลิกใช้กรองมาตั้งแต่ 2026-09-13 (MIN_SCORE_REVERSAL = 0) ดูเหตุผลที่ config.py
 
 ใช้: python reversal.py <SYMBOL> <Long/Short> <entry>
      python reversal.py <SYMBOL> <Long/Short> <entry> <sl> <tp>
@@ -39,51 +28,17 @@ from config import (MT5_TIMEFRAMES, RISK_PER_TRADE, MAX_RR_HARD_BLOCK,
                     get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT, TP_FIB_RATIO)
 from mt5_connect import connect, get_account_balance
 import scoring
-from scoring import get_ohlcv, get_ohlcv_real, calc_rr
+from scoring import get_ohlcv_real, calc_rr
 from swing import find_sl_from_structure, find_tp_from_fibonacci, swing_vol_multiplier, swing_wick_ratio_min
-from regime_check import (
-    calc_adx, adx_peak_info, check_key_level, check_divergence, calc_rsi,
-    ADX_PERIOD, REGIME_TIMEFRAME, KEY_LEVEL_BARS,
-)
-from exit_monitor import is_climax_bar, calc_atr_trailing_sl, BARS as TRAIL_BARS
+from exit_monitor import calc_atr_trailing_sl, BARS as TRAIL_BARS
 from order import calculate_lot_size, clamp_lot
 
-WEIGHT_KEY_LEVEL   = 2
-WEIGHT_DIVERGENCE  = 3
-WEIGHT_RSI_EXTREME = 1
-WEIGHT_VSA_CLIMAX  = 2
-WEIGHT_ADX_DECLINE = 1
-WEIGHT_RR          = 1
-TOTAL_WEIGHT       = (WEIGHT_KEY_LEVEL + WEIGHT_DIVERGENCE + WEIGHT_RSI_EXTREME +
-                      WEIGHT_VSA_CLIMAX + WEIGHT_ADX_DECLINE + WEIGHT_RR)   # = 10
-
-# 2026-09-13: **เลิกใช้สกอร์การ์ดกรอง (7 -> 0)** ให้ตรงกับฝั่ง Scoring (config.MIN_SCORE=0,
-# commit 4457efc) เพราะคะแนนไม่มีอำนาจแยกแยะ ไม่ใช่เพราะมันทำเงินเพิ่ม
-#
-# ด่านนี้แทบไม่ได้กรองอยู่แล้ว — regime REVERSAL-READY บังคับ Key Level + Divergence + ADX peak
-# โค้งลง = 2+3+1 = **6 แต้มฟรีจาก 7 ที่ต้องการ** ปัดตกจริงแค่ 3% (80/2650 รอบบน 7 symbol)
-# และคะแนนไม่สัมพันธ์กับผล: score 6.0 avgR +0.33 | 7.0 +1.07 | 8.0 +0.79 | 9.0 +0.36
-#
-# ราคาที่จ่าย ΔR -1.29 (196 ไม้ +38.23R -> 202 ไม้ +36.95R) — Scoring ไม่ขยับเลย 177 ไม้ +23.70R
-# ที่ติดลบไม่ได้มาจากไม้ที่ปล่อยเข้ามาแย่ (9 ไม้ใหม่ทำ +3.00R จบ TP 5 ไม้) แต่มาจาก**การกินช่อง**:
-# เข้าเร็วขึ้น 1-26 ชม. ไม้นั้นยึดช่อง Reversal ไว้ ไม้ทีหลังที่ดีกว่าหายไป 3 ไม้ +4.29R (TP ทั้งหมด)
-# 👉 การปลดด่านที่ไม่แตะการตรวจจับเลย ยังทำไม้เดิมหายได้ผ่านลำดับการกินช่อง — เทียบไม้ทีละตัวเสมอ
-#
-# 🔴 เฝ้าดู: Reversal 19 -> 25 ไม้ แต่ avgR +0.765 -> +0.530 และ t 3.49 -> 2.71 (ยังผ่าน 1.96
-#    แต่บางลง) ถ้าผลจริงแย่กว่านี้ ตั้งกลับเป็น 7 เป็นอย่างแรก
-# RSI extreme ไม่เคยผ่านเลย 0/19 ไม้ใน 2 ปี = คะแนนเต็มที่เป็นไปได้จริงคือ 9 ไม่ใช่ 10 (ยังไม่แตะ)
-# ทดสอบซ้ำ: ./run_wine.sh backtest_replay.py GBPUSDm 730 --rev-min-score=7 --log-cuts
-MIN_SCORE_REVERSAL = 0
-MIN_RR_REVERSAL    = 2.0   # เกณฑ์ "R:R ดีจริง" ในสกอร์การ์ด + สูตร fallback TP (ยังใช้ 2.0 เหมือนเดิม)
-# MIN_RR_HARD_BLOCK มาจาก config.py (2026-08-01) — เดิม duplicate ค่า 1.0 แยกไว้เองในไฟล์นี้
-# ทำให้ถ้าแก้ค่าใน config.py แล้วลืมแก้ที่นี่ด้วย จะเพี้ยนกันเงียบๆ ระหว่าง Scoring กับ Reversal
-RSI_OVERBOUGHT     = 70
-RSI_OVERSOLD       = 30
+MIN_RR_REVERSAL    = 2.0   # ตัวคูณของสูตร fallback TP ตอนหา Fibonacci ไม่ได้ (TP = entry ± risk×2.0)
+# R:R ขั้นต่ำที่ยอมเทรดของ Reversal คือ config.MIN_RR_HARD_BLOCK_REVERSAL (คนละตัวกับค่านี้)
 
 # ── สวิตช์ทดลอง (2026-09-01) — ค่า default = พฤติกรรมระบบจริงเป๊ะ ห้ามแก้ค่าตรงนี้ ────────
 # backtest_replay.py ตั้งค่าให้เฉพาะรอบที่รันด้วย --rev-min-sl / --rev-tp-from-entry
-# (แบบเดียวกับ scoring.DISABLED_CRITERIA / scoring.MIN_SCORE) เพื่อตอบว่าด่านสองตัวที่ตัด
-# โอกาส Reversal ทิ้งมากที่สุดควรปรับไหม โดยไม่ต้องแก้ config.py แล้วเผลอมีผลกับระบบจริง
+# เพื่อตอบว่าด่านสองตัวที่ตัดโอกาส Reversal ทิ้งมากที่สุดควรปรับไหม โดยไม่ต้องแก้ config.py แล้วเผลอมีผลกับระบบจริง
 #
 # MIN_SL_OVERRIDE: ทับ get_min_sl_distance_pct() เฉพาะทาง Reversal — วัดจากไม้จริง 2 ปี พบว่า
 #   setup ที่ SL แคบกว่า 0.9% (BTC 23 แท่ง) คือกลุ่มที่ R:R ดีที่สุดในกองทั้งหมด (มัธยฐาน 8.8)
@@ -113,23 +68,27 @@ GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
 
 
 # ---------------------------------------------------------------------------
-# Reusable scoring function (MT5 must already be initialized by caller)
+# แผนเข้าไม้ Reversal (MT5 must already be initialized by caller)
 # ---------------------------------------------------------------------------
 
-def compute_reversal_score(symbol: str, direction: str, entry: float,
+def compute_reversal_entry(symbol: str, direction: str, entry: float,
                            sl: float = None, tp: float = None,
-                           force: bool = False, key_level: dict = None,
-                           df_4h: pd.DataFrame = None, as_of: datetime = None) -> tuple[float, list, bool, dict]:
-    """Return (total_score, criteria_list, passed, info).
+                           force: bool = False,
+                           df_4h: pd.DataFrame = None, as_of: datetime = None) -> dict:
+    """คืน info dict ของไม้ Reversal หรือ raise ValueError ถ้าติดด่าน (= ห้ามเข้าไม้นี้)
     ถ้าไม่ส่ง sl/tp จะหาจาก swing structure/Fibonacci อัตโนมัติ (เกณฑ์เดียวกับ scoring.py)
-    key_level: ส่งผลลัพธ์ check_key_level ที่ regime_check.get_regime() คำนวณไว้แล้วมาใช้ซ้ำได้
-    (ราคาปิดแท่ง 4H เดียวกับที่ปลดล็อก REVERSAL-READY) — ถ้าไม่ส่งมา จะคำนวณใหม่ด้วย `entry` เอง
+    คีย์: sl (SL โครงสร้าง = pinned_swing) · exec_sl (ส่ง broker) · atr_entry · tp · rr (จาก
+    exec_sl) · sl_info · fib_info
+
+    2026-09-25: เดิมชื่อ compute_reversal_score คืน (score, criteria, passed, info) — ลบสกอร์การ์ด
+    ออกแล้ว (ดู docstring หัวไฟล์) พร้อมกับพารามิเตอร์ key_level ที่มีไว้ให้เกณฑ์ Key Level เท่านั้น
+
     df_4h: ส่ง get_regime()["df_4h"] มาใช้ซ้ำได้ (real volume, BARS แท่ง, ยังไม่ตัดแท่งฟอร์มมิ่ง)
     กันดึง+merge real volume จาก Bitstamp ซ้ำสองรอบต่อรอบสแกน — ถ้าไม่ส่งมาจะดึงเองเหมือนเดิม
 
     as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ — as_of=datetime = จำลองเช็ค ณ เวลานั้นในอดีต
-    (2026-08-02, ตามแบบ scoring.compute_score) ให้ backtest เรียกตัวนี้ตรงๆ ได้ ไม่ต้อง copy
-    logic มาเขียนซ้ำ — มีผลเฉพาะตอนไม่ได้ส่ง key_level/df_4h มาเอง (จะ fetch ย้อนหลังแทนสด)"""
+    (2026-08-02, ตามแบบ scoring.compute_entry) ให้ backtest เรียกตัวนี้ตรงๆ ได้ ไม่ต้อง copy
+    logic มาเขียนซ้ำ — มีผลเฉพาะตอนไม่ได้ส่ง df_4h มาเอง (จะ fetch ย้อนหลังแทนสด)"""
     is_long = direction.capitalize() == "Long"
 
     if df_4h is None:
@@ -147,7 +106,7 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
     # 24/205 แท่ง (BTC) และ 39/379 (XAU) = เสียแต้ม Divergence (3 จาก 10) ฟรีๆ ทั้งที่ regime
     # เพิ่งยืนยันว่ามี ทำให้ตัวเลข Reversal ใน backtest ต่ำกว่าที่ระบบจริงทำได้
     # โหมดรันสดไม่เคยโดนบั๊กนี้ (scheduler ส่ง df_4h มาพร้อม as_of=None -> ตัดอยู่แล้ว)
-    # กระทบทุก criteria ที่อ้างอิง df_4h ตัวนี้ (Key Level/Divergence/RSI/VSA Climax/SL/TP)
+    # (ตอนนั้นกระทบเกณฑ์สกอร์การ์ดที่ลบไปแล้ว — ตอนนี้เหลือผลต่อ SL/TP ที่หาจาก df_4h ตัวนี้)
     df_4h = df_4h.iloc[:len(df_4h) - 1].reset_index(drop=True)
     vol_multiplier = swing_vol_multiplier(symbol)
     wick_ratio_min = swing_wick_ratio_min(symbol)
@@ -188,7 +147,6 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
 
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
-    used_fallback_tp = False   # TP มาจากสูตร fallback (ไม่ใช่ Fibonacci) — ดูเกณฑ์ R:R ด้านล่าง
     if tp is None:
         fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
@@ -198,66 +156,13 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
                 _proj = fib_info["move"] * TP_FIB_RATIO
                 tp = (entry + _proj) if is_long else (entry - _proj)
         else:
-            used_fallback_tp = True
             # อิง exec_sl (ระยะเสี่ยงจริง) เหมือน scoring.py — ไม่งั้น TP ที่ตั้งจากสูตร fallback
-            # จะให้ R:R จริงต่ำกว่า MIN_RR_REVERSAL ที่ตั้งใจไว้
+            # จะให้ R:R จริงต่ำกว่าที่ตั้งใจไว้
             tp = (entry + abs(entry - exec_sl) * MIN_RR_REVERSAL) if is_long else \
                  (entry - abs(entry - exec_sl) * MIN_RR_REVERSAL)
 
     # R:R วัดจาก exec_sl = ระยะเสี่ยงจริงที่จะส่ง broker (ดู comment ที่คำนวณ exec_sl ด้านบน)
     rr = calc_rr(entry, exec_sl, tp, direction)
-
-    # ── ข้อ 1: Key Level ──
-    if key_level is None:
-        key_level_df = get_ohlcv_real(symbol, "4H", bars=KEY_LEVEL_BARS, as_of=as_of) if as_of is not None else None
-        key_level = check_key_level(symbol, entry, df=key_level_df, as_of=as_of)
-    at_key = bool(key_level.get("at_key_level"))
-
-    # ── ข้อ 2: Divergence RSI ──
-    divergence = check_divergence(df_4h, symbol=symbol)
-    div_dir    = divergence.get("divergence")
-    div_ok     = (div_dir == "bullish") if is_long else (div_dir == "bearish")
-
-    # ── ข้อ 3: RSI extreme — เช็คที่จุด swing ของ divergence (h2/l2) แทนตอนนี้ (2026-07-23)
-    #    เหตุผล: กว่า ADX จะโค้งลงยืนยันครบ + เงื่อนไขอื่นจะครบพร้อมกัน RSI มักอ่อนตัวจากจุด
-    #    สุดขั้วไปแล้วหลายแท่ง (พบจริงจาก backtest — เคสหนึ่งห่างกันถึง 8 แท่ง) เช็คตอนนี้เลย
-    #    มักพลาดสัญญาณที่จริงๆ สุดขั้วมาก่อนหน้านี้แล้ว ไม่ใช่แค่ "หน้าต่างเวลาแคบไป" (ลอง
-    #    ขยายหน้าต่างเช็คย้อนหลัง 3-5 แท่งแล้วไม่ช่วยเลยใน backtest — ต้องเช็คที่จุดจริง)
-    rsi_series    = calc_rsi(df_4h["close"])
-    div_swing_idx = divergence.get("swing_idx")
-    rsi_ref_idx   = div_swing_idx if div_swing_idx is not None else len(df_4h) - 1
-    rsi_now       = rsi_series.iloc[rsi_ref_idx]
-    rsi_ok        = (rsi_now <= RSI_OVERSOLD) if is_long else (rsi_now >= RSI_OVERBOUGHT)
-
-    # ── ข้อ 4: VSA Climax (Selling Climax=Long, Buying Climax=Short) — เช็คตั้งแต่จุด
-    #    swing ของ divergence จนถึงตอนนี้ (ไม่ใช่แค่แท่งปัจจุบันเป๊ะ) เหตุผลเดียวกับข้อ 3
-    climax_start_idx = div_swing_idx if div_swing_idx is not None else len(df_4h) - 1
-    climax_ok = False
-    climax_pattern = None
-    for k in range(climax_start_idx, len(df_4h)):
-        c, pat = is_climax_bar(df_4h, k)
-        if c and ((is_long and pat == "Selling Climax") or (not is_long and pat == "Buying Climax")):
-            climax_ok, climax_pattern = True, pat
-            break
-    climax = climax_ok
-
-    # ── ข้อ 6: ADX peak แล้วเริ่มลงจริง (relative — ไม่ใช้ threshold 40 ตายตัว) ──
-    df_adx     = get_ohlcv(symbol, REGIME_TIMEFRAME, bars=210, as_of=as_of)
-    adx_series = calc_adx(df_adx, ADX_PERIOD)
-    peak       = adx_peak_info(adx_series, len(df_adx) - 2)
-    adx_ok     = peak["declining"]
-
-    criteria = [
-        ("Key Level",   at_key,    WEIGHT_KEY_LEVEL),
-        ("Divergence",  div_ok,    WEIGHT_DIVERGENCE),
-        ("RSI extreme", rsi_ok,    WEIGHT_RSI_EXTREME),
-        ("VSA Climax",  climax_ok, WEIGHT_VSA_CLIMAX),
-        ("ADX peak+decline", adx_ok, WEIGHT_ADX_DECLINE),
-        # 2026-07-26: ไม่ให้แต้มถ้า TP มาจากสูตร fallback — เหตุผลเดียวกับ scoring.py เป๊ะ
-        # (สูตร fallback อิง MIN_RR_REVERSAL เอง ทำให้ rr == MIN_RR_REVERSAL เสมอ = แต้มฟรี)
-        # TP ที่กรอกเองมายังได้แต้มตามปกติ
-        ("R:R",         (not used_fallback_tp) and rr >= MIN_RR_REVERSAL - 1e-9, WEIGHT_RR),
-    ]
 
     info = {
         "sl": sl, "tp": tp, "rr": rr,
@@ -265,13 +170,8 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
         # คนละค่าแล้ว R:R เพี้ยนอีก (บทเรียนเดียวกับ scoring.py 2026-08-31)
         "exec_sl": exec_sl, "atr_entry": atr_entry,
         "sl_info": sl_info, "fib_info": fib_info,
-        "key_level": key_level, "divergence": divergence,
-        "rsi_now": rsi_now, "climax": climax, "climax_pattern": climax_pattern,
-        "adx_peak": peak,
     }
 
-    # Hard block: กันแค่ไม่ให้เสี่ยงมากกว่าได้ (R:R < 1) — ไม่สนคะแนนรวม
-    # ส่วน "R:R ดีจริง" (>= MIN_RR_REVERSAL) ยังต้องผ่านสกอร์การ์ดแยกต่างหากด้านล่าง
     # Hard block: ระยะ entry->SL แคบเกิน — ดู comment ที่ config.MIN_SL_DISTANCE_PCT /
     # config.get_min_sl_distance_pct() (Forex/Index ใช้เกณฑ์ต่ำกว่า — ดู scoring.py comment)
     min_sl_pct = MIN_SL_OVERRIDE if MIN_SL_OVERRIDE is not None else get_min_sl_distance_pct(symbol)
@@ -295,17 +195,14 @@ def compute_reversal_score(symbol: str, direction: str, entry: float,
         raise ValueError(f"TP ห่างจาก entry {tp_distance_pct:.1f}% เกินขั้นสูงสุด "
                          f"{MAX_TP_DISTANCE_PCT}% — ห้ามเข้า trade")
 
-    total  = sum(w for _, passed, w in criteria if passed)
-    passed = total >= MIN_SCORE_REVERSAL
-    return total, criteria, passed, info
+    return info
 
 
 # ---------------------------------------------------------------------------
 # Display
 # ---------------------------------------------------------------------------
 
-def print_report(symbol: str, direction: str, entry: float, score: float,
-                 criteria: list, passed: bool, info: dict, balance: float) -> None:
+def print_report(symbol: str, direction: str, entry: float, info: dict, balance: float) -> None:
     sl, tp, rr = info["sl"], info["tp"], info["rr"]
     risk_pct   = abs(entry - sl) / entry * 100
     reward_pct = abs(tp - entry) / entry * 100
@@ -313,26 +210,17 @@ def print_report(symbol: str, direction: str, entry: float, score: float,
 
     print()
     print("=" * 66)
-    print(f"{BOLD}  REVERSAL SCORING — {symbol}  ({direction}){RESET}")
-    print(f"  {YELLOW}⚠ Reversal เสี่ยงกว่า Trend Following — Win Rate ต่ำกว่า ต้อง R:R สูงกว่า{RESET}")
+    print(f"{BOLD}  REVERSAL — {symbol}  ({direction}){RESET}")
     print("=" * 66)
     print(f"  Entry Price : {entry:,.3f}")
-    print(f"  Stop Loss   : {sl:,.3f}")
+    print(f"  Stop Loss   : {sl:,.3f}   (ส่ง broker {info['exec_sl']:,.3f})")
     print(f"  Take Profit : {tp:,.3f}")
     print(f"  Risk %      : {risk_pct:.2f}%")
     print(f"  Reward %    : {reward_pct:.2f}%")
-    print(f"  R:R Ratio   : {rr:.2f}x")
+    print(f"  R:R Ratio   : {rr:.2f}x  (จาก SL ส่ง broker)")
     print(f"  Position Size (Lot): {lot:.{decimals}f}")
     print("-" * 66)
-    print(f"{BOLD}  Reversal Scoring Checklist  (เกณฑ์ผ่าน: {MIN_SCORE_REVERSAL}/{TOTAL_WEIGHT}){RESET}")
-    print("-" * 66)
-    for name, ok, weight in criteria:
-        ans_str = f"{GREEN}YES{RESET}" if ok else f"{RED}No {RESET}"
-        print(f"  [{ans_str}]  {name:<16} weight={weight}  score={weight if ok else 0}")
-    print("-" * 66)
-    score_color = GREEN if passed else RED
-    print(f"  {BOLD}TOTAL SCORE{RESET} : {score_color}{score:.0f} / {TOTAL_WEIGHT}{RESET}")
-    print(f"  {BOLD}ผลลัพธ์{RESET}     : {score_color}{'ผ่าน — เปิดไม้ได้' if passed else 'ไม่ผ่าน — ห้ามเข้า'}{RESET}")
+    print(f"  {GREEN}ผ่านทุกด่าน — เปิดไม้ได้{RESET}")
     print("=" * 66)
 
 
@@ -358,8 +246,8 @@ def main() -> None:
     try:
         connect()
         balance = get_account_balance()
-        score, criteria, passed, info = compute_reversal_score(symbol, direction, entry, sl, tp)
-        print_report(symbol, direction, entry, score, criteria, passed, info, balance)
+        info = compute_reversal_entry(symbol, direction, entry, sl, tp)
+        print_report(symbol, direction, entry, info, balance)
     except ValueError as exc:
         print(f"{RED}[ไม่ผ่าน]{RESET} {exc}")
     finally:

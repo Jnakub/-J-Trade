@@ -9,9 +9,11 @@ from mt5_connect import is_demo_account, mt5_now
 
 LOG_FILE = os.path.join(os.path.dirname(__file__), "trades_log.csv")
 
+# 2026-09-25: ถอด "score" ออก (สกอร์การ์ดถูกลบทั้งใบ ดู config.py) — ไฟล์เดิมที่มีคอลัมน์นี้
+# ยังอ่าน/เขียนได้ปกติ: _load อ่านทุกคอลัมน์ในไฟล์ แถวเก่าเก็บคะแนนไว้ แถวใหม่เป็นค่าว่าง
 COLUMNS = [
     "date", "time", "symbol", "direction", "entry", "sl", "tp",
-    "lot", "score", "ticket", "status", "net_pnl", "note",
+    "lot", "ticket", "status", "net_pnl", "note",
     "pinned_swing", "pinned_atr_entry", "close_date", "close_time",
     "strategy", "exit_by", "exit_rule",
 ]
@@ -62,7 +64,7 @@ def _save(df: pd.DataFrame) -> None:
 
 def log_trade_open(symbol: str, direction: str, entry: float,
                    sl: float, tp: float, lot: float,
-                   score: float, ticket: int,
+                   ticket: int,
                    pinned_swing: float = None, pinned_atr_entry: float = None,
                    strategy: str = "Scoring") -> None:
     """pinned_swing/pinned_atr_entry: ฐานตรึงของ ATR Trailing SL ณ ตอนเปิดไม้ (exit_monitor.py
@@ -85,7 +87,6 @@ def log_trade_open(symbol: str, direction: str, entry: float,
         "sl":        sl,
         "tp":        tp,
         "lot":       lot,
-        "score":     score,
         "ticket":    str(ticket),
         "status":    "Open",
         "net_pnl":   "",
@@ -493,12 +494,11 @@ if __name__ == "__main__":
     def _usage():
         print("Usage:")
         print("  python journal.py stats")
-        print("  python journal.py open  <ticket> <symbol> <direction> <entry> <sl> <tp> <lot> [score]")
+        print("  python journal.py open  <ticket> <symbol> <direction> <entry> <sl> <tp> <lot>")
         print("  python journal.py close <ticket> <result> <pnl>")
         print()
         print("  direction : Long | Short")
         print(f"  result    : {' | '.join(repr(r) for r in VALID_CLOSE_RESULTS)}")
-        print("  score     : optional (default 0)")
         print()
         print("Example:")
         print("  python journal.py open  123456 BTCUSDm Short 65000 67500 59000 0.01")
@@ -522,7 +522,7 @@ if __name__ == "__main__":
         print("=" * 38)
 
     elif sys.argv[1] == "open":
-        if len(sys.argv) not in (9, 10):
+        if len(sys.argv) != 9:
             print("Error: ต้องใส่ argument ให้ครบ")
             _usage()
             sys.exit(1)
@@ -534,7 +534,6 @@ if __name__ == "__main__":
             sl        = float(sys.argv[6])
             tp        = float(sys.argv[7])
             lot       = float(sys.argv[8])
-            score     = float(sys.argv[9]) if len(sys.argv) == 10 else 0.0
         except ValueError:
             print("Error: ตัวเลขไม่ถูกต้อง")
             sys.exit(1)
@@ -543,7 +542,7 @@ if __name__ == "__main__":
             print("Error: direction ต้องเป็น Long หรือ Short")
             sys.exit(1)
 
-        log_trade_open(symbol, direction, entry, sl, tp, lot, score, ticket)
+        log_trade_open(symbol, direction, entry, sl, tp, lot, ticket)
 
     elif sys.argv[1] == "close":
         if len(sys.argv) != 5:

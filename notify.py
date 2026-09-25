@@ -53,17 +53,15 @@ def send(message: str) -> bool:
 
 def notify_order_opened(symbol: str, direction: str, entry: float,
                         sl: float, tp: float, lot: float, ticket: int,
-                        score: float = None, is_demo: bool = True) -> None:
+                        is_demo: bool = True) -> None:
     account_tag = "DEMO" if is_demo else "⚠️ REAL"
     rr = abs(tp - entry) / abs(entry - sl) if entry != sl else 0
-    score_line = f"\nScore: {score:.1f}" if score is not None else ""
     send(
         f"🟢 <b>เปิดไม้ใหม่</b> [{account_tag}]\n"
         f"{symbol}  {direction}\n"
         f"Entry: {entry:,.3f}\n"
         f"SL: {sl:,.3f}   TP: {tp:,.3f}\n"
-        f"R:R: {rr:.2f}   Lot: {lot}"
-        f"{score_line}\n"
+        f"R:R: {rr:.2f}   Lot: {lot}\n"
         f"Ticket: #{ticket}"
     )
 

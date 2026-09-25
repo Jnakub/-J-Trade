@@ -9,12 +9,11 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 import journal
 from config import (
     RISK_PER_TRADE, MAX_DAILY_LOSS,
-    MIN_SCORE, TOTAL_WEIGHT,
     COOLDOWN_HOURS_BY_SYMBOL,
 )
 from mt5_connect import connect, get_account_balance
 from order import calculate_lot_size, clamp_lot, place_order
-from scoring import compute_score, calc_rr
+from scoring import compute_entry
 from exit_monitor import check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS_CURRENCY
 
 
@@ -25,22 +24,10 @@ from exit_monitor import check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS
 class ScannerAgent:
     def scan(self, symbol: str, direction: str,
              entry: float, sl: float = None, tp: float = None,
-             force: bool = False) -> tuple[float, dict, bool, float, float]:
-        score, criteria, passed, sl_info = compute_score(
-            symbol, direction, entry, sl, tp, force
-        )
-
-        sl = sl_info["sl"]
-        tp = sl_info["tp"]
-
-        details = {
-            "score":    score,
-            "criteria": criteria,
-            "failed":   [name for name, p, _ in criteria if not p],
-            "rr":       calc_rr(entry, sl, tp, direction),
-            "sl_info":  sl_info,
-        }
-        return score, details, passed, sl, tp
+             force: bool = False) -> dict:
+        # ไม่ผ่านด่าน (bias/SL/R:R/ระยะ TP) = raise ValueError — --force ข้ามด่านตัวเลขได้
+        # (ด่าน bias ข้ามไม่ได้) · สกอร์การ์ดถูกลบแล้ว 2026-09-25 ดูเหตุผลที่ config.py
+        return compute_entry(symbol, direction, entry, sl, tp, force)
 
 
 # ---------------------------------------------------------------------------
@@ -94,10 +81,10 @@ class RiskCheckerAgent:
 class ExecutorAgent:
     def execute(self, symbol: str, direction: str,
                 entry: float, sl: float, tp: float,
-                lot: float, score: float) -> tuple[bool, int]:
+                lot: float) -> tuple[bool, int]:
         try:
             # 2026-08-09: place_order() บันทึก journal ให้เองแล้ว (ดู order.py) ไม่ต้องเรียกแยกอีก
-            ticket = place_order(symbol, direction, entry, sl, tp, lot, score=score)
+            ticket = place_order(symbol, direction, entry, sl, tp, lot)
             return True, ticket
         except RuntimeError as exc:
             print(f"[ExecutorAgent] {exc}")
@@ -126,41 +113,15 @@ def run_bot(symbol: str, direction: str,
             print(f"BLOCKED by Risk Checker: {reason}")
             return
 
-        # Step 2: Scan + Score (หา SL/TP อัตโนมัติถ้าไม่ได้กรอก)
-        scanner = ScannerAgent()
-        score, details, passed, sl, tp = scanner.scan(symbol, direction, entry, sl, tp, force)
-
-        # แสดง SL detail ถ้าหามาจาก swing
-        sl_info = details.get("sl_info", {})
-        if sl_info.get("swing_price"):
-            print(f"\n  SL (auto from structure)")
-            print(f"  Swing High   : {sl_info['swing_price']}")
-            print(f"  Rejection    : {sl_info.get('rejection', '-')}")
-            print(f"  Volume OK    : {sl_info.get('volume_ok', '-')}")
-            print(f"  Structure OK : {sl_info.get('structure_ok', '-')}")
-            print(f"  SL           : {sl}   TP : {tp}")
-
+        # Step 2: หา SL/TP อัตโนมัติถ้าไม่ได้กรอก + ตรวจด่าน (ไม่ผ่าน = ValueError ด้านล่าง)
+        plan = ScannerAgent().scan(symbol, direction, entry, sl, tp, force)
+        sl, tp = plan["sl"], plan["tp"]
+        if plan.get("swing_price"):
+            print(f"\n  SL (auto from structure)  Swing {plan['swing_price']}")
         print()
         print(f"{'=' * 48}")
-        print(f"  {symbol}  |  {direction}  |  R:R {details['rr']:.2f}")
+        print(f"  {symbol}  |  {direction}  |  SL {sl}  TP {tp}  |  R:R {plan['rr']:.2f}")
         print(f"{'=' * 48}")
-        for name, p, weight in details["criteria"]:
-            got    = weight if p else 0.0
-            status = "PASS" if p else "FAIL"
-            tag    = f"  (x{weight:.0f})" if weight > 1 else ""
-            print(f"  {name:<15} {status:<5}  {got:.1f} / {weight:.1f}{tag}")
-        print(f"  {'-'*44}")
-        print(f"  Total Score  :  {score:.1f} / {TOTAL_WEIGHT:.0f}  (min {MIN_SCORE:.0f})")
-        print(f"{'=' * 48}")
-
-        if not passed:
-            if force:
-                print(f"[--force] ข้าม score check — Score {score:.1f}/{TOTAL_WEIGHT:.0f}")
-            else:
-                print(f"NO ENTRY — Score {score:.1f}/{TOTAL_WEIGHT:.0f} (ต่ำกว่า {MIN_SCORE})")
-                if details["failed"]:
-                    print(f"ข้อที่ไม่ผ่าน: {', '.join(details['failed'])}")
-                return
 
         # Step 3: Execute
         lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
@@ -168,7 +129,7 @@ def run_bot(symbol: str, direction: str,
 
         print(f"\n  >>> ส่ง order อัตโนมัติ <<<")
         executor = ExecutorAgent()
-        success, ticket = executor.execute(symbol, direction, entry, sl, tp, lot, score)
+        success, ticket = executor.execute(symbol, direction, entry, sl, tp, lot)
         if success:
             print(f"\nOrder sent!  Ticket: #{ticket}")
 
@@ -191,11 +152,11 @@ if __name__ == "__main__":
         print("         python bot.py <SYMBOL> <Long/Short> <entry> <sl> <tp>")
         print("         python bot.py <SYMBOL> <Long/Short> <entry> <sl> <tp> --force")
         print()
-        print("  --force  ข้ามการเช็ค score และ R:R (สำหรับทดสอบเท่านั้น)")
+        print("  --force  ข้ามด่านระยะ SL / R:R / ระยะ TP (สำหรับทดสอบเท่านั้น)")
         sys.exit(1)
 
     if force:
-        print("[WARNING] --force mode: ข้าม score และ R:R check")
+        print("[WARNING] --force mode: ข้ามด่านระยะ SL / R:R / ระยะ TP")
 
     run_bot(
         args[0],

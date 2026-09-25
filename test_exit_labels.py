@@ -59,7 +59,7 @@ ok("Manual Cut" not in {journal._RESULT_BY_DEAL_REASON[mt5.DEAL_REASON_EXPERT]},
 # ---------------------------------------------------------------------------
 print("\n2) reconcile เขียน exit_by ลง log จริง")
 # ---------------------------------------------------------------------------
-journal.log_trade_open("BTCUSDm", "Long", 60000.0, 58000.0, 64000.0, 0.1, 8.0,
+journal.log_trade_open("BTCUSDm", "Long", 60000.0, 58000.0, 64000.0, 0.1,
                        ticket=555001, strategy="Scoring")
 
 _open_tickets = set()
@@ -77,7 +77,7 @@ ok(row["status"] == "Manual Cut" and row["exit_by"] == "manual",
 ok(str(row["exit_rule"]) == "",
    "exit_rule ว่าง เพราะ exit_monitor ไม่ได้เป็นคนสั่ง")
 
-journal.log_trade_open("ETHUSDm", "Long", 3000.0, 2900.0, 3300.0, 1.0, 7.0,
+journal.log_trade_open("ETHUSDm", "Long", 3000.0, 2900.0, 3300.0, 1.0,
                        ticket=555002, strategy="Scoring")
 mt5.history_deals_get = lambda **kw: (Deal(mt5.DEAL_REASON_EXPERT, entry=0),
                                       Deal(mt5.DEAL_REASON_EXPERT, entry=1, profit=88.0))
@@ -90,7 +90,7 @@ ok(row["status"] == "Bot Exit" and row["exit_by"] == "bot",
 # ---------------------------------------------------------------------------
 print("\n3) log_trade_close เก็บชื่อกฎที่ยิง")
 # ---------------------------------------------------------------------------
-journal.log_trade_open("XAUUSDm", "Long", 4000.0, 3950.0, 4200.0, 0.05, 9.0,
+journal.log_trade_open("XAUUSDm", "Long", 4000.0, 3950.0, 4200.0, 0.05,
                        ticket=555003, strategy="Reversal")
 journal.log_trade_close(555003, "Bot Exit", -33.0, exit_by="bot",
                         exit_rule="ออก 100% ทันที — Trend/Structure พัง")

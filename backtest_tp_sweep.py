@@ -6,12 +6,12 @@ backtest_trend_flip_ksweep.py ทำกับ TREND_FLIP_K) แทนการ�
 เขียนไว้เองว่าตอนเปลี่ยนจาก 0.786 -> 1.618 (backtest 180 วัน) BTC ดีขึ้นชัดเจนแต่ XAU แย่ลง
 เพราะ TP ยืดไกลเกินจริง — ยังไม่เคยมีเครื่องมือ sweep ค่านี้แยก symbol เหมือน TREND_FLIP_K
 
-วิธีทำงาน — เรียก scoring.compute_score(as_of=...) ตรงๆ ไม่ copy logic มาเขียนซ้ำ (ตามหลัก
-เดียวกับ backtest_score.py/backtest_exit_compare.py) แล้ว "monkey-patch" swing.TP_FIB_RATIO
+วิธีทำงาน — เรียก scoring.compute_entry(as_of=...) ตรงๆ ไม่ copy logic มาเขียนซ้ำ (ตามหลัก
+เดียวกับ backtest_exit_compare.py) แล้ว "monkey-patch" swing.TP_FIB_RATIO
 ก่อนเรียกแต่ละ ratio — เพราะ find_tp_from_fibonacci() อ่านชื่อ TP_FIB_RATIO จาก global
 namespace ของ swing.py เอง (import ตอนโหลดโมดูล) การตั้งค่า swing.TP_FIB_RATIO = x จึงมีผล
 ทันทีโดยไม่ต้องแตะ config.py จริง และทำให้ hard block ทั้งหมด (MIN/MAX_RR_HARD_BLOCK,
-MAX_TP_DISTANCE_PCT, WEIGHT_RR ในสกอร์การ์ด) ถูกประเมินใหม่ตาม ratio นั้นๆ เหมือนระบบจริง
+MAX_TP_DISTANCE_PCT) ถูกประเมินใหม่ตาม ratio นั้นๆ เหมือนระบบจริง
 ทุกประการ ไม่ใช่แค่เปลี่ยนตัวเลข TP เฉยๆ
 
 One-position-at-a-time แยกอิสระต่อ ratio (แต่ละ ratio จำลองเป็นระบบของตัวเอง มี cooldown/
@@ -38,8 +38,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from mt5_connect import connect
 from config import MT5_TIMEFRAMES, MAX_TP_DISTANCE_PCT
 import swing   # แก้ swing.TP_FIB_RATIO ตรงๆ ตอน sweep — ดู docstring ด้านบน
-from scoring import compute_score, get_trend_bias, calc_rr, get_ohlcv
-from binance import merge_real_volume
+from scoring import compute_entry, get_trend_bias, calc_rr, get_ohlcv
 
 SCAN_STEP_H   = 4     # สแกนหา entry ทุกกี่ชม. (เหมือน backtest_exit_compare.py — ลด MT5 calls
                       # เทียบกับ scheduler จริงที่รันทุก 1 ชม. อาจพลาด entry ที่เกิดแล้วหายไป
@@ -60,14 +59,13 @@ def get_hist(symbol, tf, dt, bars):
         return None
 
 
-def score_entry(symbol: str, snap_dt: datetime, ratio: float):
-    """เหมือน backtest_exit_compare.score_entry แต่ตั้ง swing.TP_FIB_RATIO=ratio ก่อนเรียก
-    compute_score — ทำให้ TP/R:R/hard block ทั้งหมดถูกคำนวณด้วย ratio นี้เป๊ะเหมือนระบบจริง
-    คืน None ถ้าไม่มี bias หรือไม่ผ่านสกอร์การ์ด/hard block (= ratio นี้ไม่เปิดไม้ที่จุดนี้)"""
+def find_entry(symbol: str, snap_dt: datetime, ratio: float):
+    """เหมือน backtest_exit_compare.find_entry แต่ตั้ง swing.TP_FIB_RATIO=ratio ก่อนเรียก
+    compute_entry — ทำให้ TP/R:R/hard block ทั้งหมดถูกคำนวณด้วย ratio นี้เป๊ะเหมือนระบบจริง
+    คืน None ถ้าไม่มี bias หรือไม่ผ่าน hard block (= ratio นี้ไม่เปิดไม้ที่จุดนี้)"""
     df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)
     if df_1d is None or len(df_1d) < 205:
         return None
-    df_1d = merge_real_volume(df_1d, symbol, "1D", as_of=snap_dt)
     direction, _ = get_trend_bias(symbol, df_1d)
     if direction is None:
         return None
@@ -79,17 +77,15 @@ def score_entry(symbol: str, snap_dt: datetime, ratio: float):
 
     swing.TP_FIB_RATIO = ratio
     try:
-        total, criteria, passed, sl_info = compute_score(symbol, direction, entry, as_of=snap_dt)
+        sl_info = compute_entry(symbol, direction, entry, as_of=snap_dt, df_1d=df_1d)
     except ValueError:
-        return None
-    if not passed:
         return None
 
     sl, tp = sl_info["sl"], sl_info["tp"]
     rr = calc_rr(entry, sl, tp, direction)
     tp_dist_pct = abs(tp - entry) / entry * 100
     return {"direction": direction, "entry": entry, "sl": sl, "tp": tp, "rr": rr,
-            "score": total, "time": snap_dt, "tp_dist_pct": tp_dist_pct}
+            "time": snap_dt, "tp_dist_pct": tp_dist_pct}
 
 
 def simulate_fixed(df: pd.DataFrame, start_idx: int, direction: str,
@@ -121,7 +117,7 @@ def run_ratio(symbol: str, ratio: float, big_4h: pd.DataFrame,
     last_entry_bar_idx = -10_000
     snap_dt = window_start
     while snap_dt <= now - timedelta(hours=1):
-        sig = score_entry(symbol, snap_dt, ratio)
+        sig = find_entry(symbol, snap_dt, ratio)
         if sig:
             idx_arr = big_4h.index[big_4h["time"] <= snap_dt]
             if len(idx_arr) == 0:

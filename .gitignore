@@ -16,7 +16,7 @@ __pycache__/
 # macOS
 .DS_Store
 
-# ผลลัพธ์ backtest (สร้างใหม่ได้จาก backtest_criteria.py)
+# ผลลัพธ์ของ backtest_criteria.py (ลบสคริปต์ไปแล้ว 2026-09-25 — ไฟล์เก่ายังค้างอยู่ได้)
 criteria_samples_*.csv
 replay_trades_*.csv
 replay_cuts_*.csv

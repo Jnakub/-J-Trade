@@ -18,7 +18,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 import journal
 from config import (
     SYMBOLS, RISK_PER_TRADE,
-    MAX_DAILY_LOSS, MIN_SCORE, TOTAL_WEIGHT, MT5_TIMEFRAMES,
+    MAX_DAILY_LOSS, MT5_TIMEFRAMES,
     COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, MIN_TURN_FROM_EXTREME_R,
     REJECT_COOLDOWN_HOURS, LOT_RISK_WARN_PCT, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
@@ -27,11 +27,10 @@ from config import (
     BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO,
 )
 from mt5_connect import connect, get_account_balance
-from scoring import compute_score, calc_rr, get_ohlcv, get_trend_bias
+from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias
 from order import (calculate_lot_size, clamp_lot, place_order, position_risk_amount,
                    risk_pct_of)
 import swing
-from binance import merge_real_volume
 from exit_monitor import (
     check_structure_break,
     analyze_position, print_report, execute_decision,
@@ -309,10 +308,11 @@ def scan_symbol(symbol: str) -> None:
 
         if regime in REGIME_TREND:
             # ── เปิด Scoring (trend-following) ── ใช้ get_trend_bias ตัวเดียวกับที่
-            # compute_score เรียกภายใน (trend_flip เท่านั้น ไม่มี EMA fallback) กัน bias
+            # compute_entry เรียกภายใน (trend_flip เท่านั้น ไม่มี EMA fallback) กัน bias
             # สองจุดขัดกันเอง (เดิม scheduler ใช้ EMA แยกจาก compute_score ที่ใช้ trend_flip)
+            # ไม่ merge real volume แล้ว (2026-09-25) — ผู้ใช้ volume 1D ตัวเดียวคือ OBV 1D
+            # ในสกอร์การ์ดที่ถูกลบ ส่วน trend_flip ใช้แค่ราคา
             df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
-            df_1d = merge_real_volume(df_1d, symbol, "1D")
             direction, bias_source = get_trend_bias(symbol, df_1d)
             if direction is None:
                 print(f"  [{symbol}] SKIP — หา Bias ไม่ได้ ({bias_source})")
@@ -324,12 +324,8 @@ def scan_symbol(symbol: str) -> None:
                 print(f"  [{symbol}] SKIP — Bias={direction} สวนโครงสร้าง 4H ({_struct})")
                 return
             print(f"  [{symbol}] เปิด Scoring — Bias={direction} ({bias_source})  Entry={entry:.5f}")
-            # ส่ง df_1d ที่ดึงไปแล้วข้างบน (สำหรับ get_trend_bias) ให้ compute_score ใช้ซ้ำ —
-            # กันดึง+merge_real_volume 1D ซ้ำสองรอบข้อมูลชุดเดียวกันเป๊ะ (2026-08-11)
-            score, criteria, passed, sl_info = compute_score(symbol, direction, entry, df_1d=df_1d)
-            sl, tp = sl_info["sl"], sl_info["tp"]
-            rr = calc_rr(entry, sl, tp, direction)
-            score_total = TOTAL_WEIGHT
+            # ส่ง df_1d ที่ดึงไปแล้วข้างบน (สำหรับ get_trend_bias) ให้ compute_entry ใช้ซ้ำ
+            sl_info = compute_entry(symbol, direction, entry, df_1d=df_1d)
             strategy = "Scoring"
 
         else:  # REGIME_REVERSAL — "REVERSAL-READY"
@@ -339,10 +335,9 @@ def scan_symbol(symbol: str) -> None:
             breakout_flip = False   # True เมื่อไม้นี้ถูกกลับข้างเป็น Breakout (ข้าม CHoCH ด้านล่าง)
             # ── ด่านฝั่ง Short: ต้องมีเทรนด์ 1D หนุนด้วย (ดูที่มา/ตัวเลขที่ config.py) ──
             # ใช้ get_trend_bias ตัวเดียวกับที่ฝั่ง Scoring ใช้ ไม่เพิ่มนิยามเทรนด์ตัวที่สอง
-            # เข้าระบบ และดึง 1D แบบเดียวกันเป๊ะ (bars=800 + merge_real_volume)
+            # เข้าระบบ และดึง 1D แบบเดียวกันเป๊ะ (bars=800)
             if direction == "Short" and REVERSAL_SHORT_NEEDS_1D_TREND:
-                df_1d_rev = merge_real_volume(
-                    get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800), symbol, "1D")
+                df_1d_rev = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
                 bias_1d, bias_src = get_trend_bias(symbol, df_1d_rev)
                 if bias_1d != "Short":
                     # ── Breakout: กลับข้างเป็น Long แทนการทิ้ง (ดู config.BREAKOUT_ENABLED) ──
@@ -358,13 +353,9 @@ def scan_symbol(symbol: str) -> None:
                         _saved_fib = swing.TP_FIB_RATIO
                         swing.TP_FIB_RATIO = BREAKOUT_TP_FIB_RATIO
                         try:
-                            score, criteria, passed, sl_info = compute_score(
-                                symbol, direction, entry, df_1d=df_1d_rev)
+                            sl_info = compute_entry(symbol, direction, entry, df_1d=df_1d_rev)
                         finally:
                             swing.TP_FIB_RATIO = _saved_fib
-                        sl, tp = sl_info["sl"], sl_info["tp"]
-                        rr = sl_info["rr"]
-                        score_total = TOTAL_WEIGHT
                         strategy = "Breakout"
                         breakout_flip = True
                     else:
@@ -383,7 +374,7 @@ def scan_symbol(symbol: str) -> None:
                     print(f"  [{symbol}] SKIP — ยังไม่เห็น CHoCH (โครงสร้าง {_opp} ยังไม่พัง) "
                           f"ยังไม่เข้า Reversal {direction}")
                     return
-            # ไม้ Breakout คิด score/sl/tp ไปแล้วตอนกลับข้าง (ทาง compute_score) — ข้ามบล็อกนี้
+            # ไม้ Breakout คิด sl/tp ไปแล้วตอนกลับข้าง (ทาง compute_entry) — ข้ามบล็อกนี้
             if not breakout_flip:
                 print(f"  [{symbol}] เปิด Reversal — Divergence={div_polarity} -> เข้าเป็น {direction}  Entry={entry:.5f}")
                 # 2026-09-05: รับเข้า `sl_info` ตัวเดียวกับทาง Scoring — เดิมรับเป็น `info` แล้วโค้ด
@@ -392,30 +383,19 @@ def scan_symbol(symbol: str) -> None:
                 # ด้านล่างกลืนไปเป็น "ERROR — ..." = **ระบบจริงเปิดไม้ Reversal ไม่ได้เลยตั้งแต่
                 # 2026-08-31** (รอบที่ย้าย exec_sl เข้า compute_score แล้วไม่ได้แก้ทาง Reversal ตาม)
                 # backtest ไม่เจอเพราะ backtest_replay.py มีโค้ดคำนวณ exec_sl ของตัวเองแยกต่างหาก
-                score, criteria, passed, sl_info = reversal.compute_reversal_score(
-                    symbol, direction, entry, key_level=regime_info["key_level"],
-                    df_4h=regime_info["df_4h"])
-                sl, tp = sl_info["sl"], sl_info["tp"]
-                rr = sl_info["rr"]
-                score_total = reversal.TOTAL_WEIGHT
+                sl_info = reversal.compute_reversal_entry(
+                    symbol, direction, entry, df_4h=regime_info["df_4h"])
                 strategy = "Reversal"
 
-        # แสดงผลสรุป
-        failed = [name for name, p, _ in criteria if not p]
-        print(f"  [{symbol}] Score={score:.1f}/{score_total:.0f}  R:R={rr:.2f}  SL={sl:.2f}  TP={tp:.2f}")
-        for name, p, weight in criteria:
-            status = "✅" if p else "❌"
-            print(f"    {status} {name:<15} {weight:.0f}pt")
-
-        if not passed:
-            print(f"  [{symbol}] NO ENTRY — ไม่ผ่าน: {', '.join(failed)}")
-            return
+        # แสดงผลสรุป — R:R วัดจาก SL ที่ส่ง broker จริง (exec_sl) ตัวเดียวกับที่ด่าน R:R ใช้
+        sl, tp, rr = sl_info["sl"], sl_info["tp"], sl_info["rr"]
+        print(f"  [{symbol}] ผ่านด่าน {strategy}  R:R={rr:.2f}  SL={sl:.2f}  TP={tp:.2f}")
 
         # 4b-2. เพดานระยะ TP เป็นเท่าของ ATR ตอนเข้าไม้ (ดูที่มา/ตัวเลข/คำเตือนที่ config.TP_MAX_ATR)
-        #     วางไว้ **หลังด่านสกอร์การ์ดผ่านแล้ว** โดยตั้งใจ ตรงกับลำดับใน backtest_replay.py:
+        #     วางไว้ **หลังด่าน R:R ใน compute_entry ผ่านแล้ว** โดยตั้งใจ ตรงกับลำดับใน backtest_replay.py:
         #     ไม้ต้องผ่าน MIN_RR_HARD_BLOCK ด้วย TP โครงสร้างจริงก่อน แล้วค่อยดึงเข้า — ถ้าดึงก่อน
         #     จะกลายเป็นการปล่อยไม้ที่โครงสร้างไม่มีที่ไปให้ผ่านด่านเพราะเป้ามันใกล้ (คนละเรื่องกัน)
-        #     ใช้ atr_entry จาก sl_info = ตัวเดียวกับที่ compute_score ใช้คิด exec_sl (ทั้งทาง
+        #     ใช้ atr_entry จาก sl_info = ตัวเดียวกับที่ compute_entry ใช้คิด exec_sl (ทั้งทาง
         #     Scoring และ Reversal คืนคีย์นี้) ไม่คำนวณ ATR ใหม่ กันสองที่ได้คนละค่าแบบที่เคยเจอ
         _atr_entry = sl_info.get("atr_entry")
         if TP_MAX_ATR and _atr_entry:
@@ -487,7 +467,7 @@ def scan_symbol(symbol: str) -> None:
         # — เดิมสองระบบนี้คำนวณจุดยึดคนละจุดกันเอง ทำให้ระยะเสี่ยงจริง (trailing) ไม่ตรงกับ R:R
         # ที่ใช้กรองตอนเข้า พอ anchor เดียวกัน ทั้ง R:R ตอนเข้า และ Trailing SL ระหว่างถือ จะไปทาง
         # เดียวกันเสมอ — ยังคง roll ตาม ATR1H รายชั่วโมงเหมือนเดิมทุกอย่าง เปลี่ยนแค่จุดเริ่มต้น
-        # 2026-08-31: exec_sl / atr_entry มาจาก compute_score แล้ว (sl_info) ไม่คำนวณซ้ำที่นี่ —
+        # 2026-08-31: exec_sl / atr_entry มาจาก compute_entry แล้ว (sl_info) ไม่คำนวณซ้ำที่นี่ —
         # เดิมคำนวณตรงนี้ *หลัง* ด่าน R:R ผ่านไปแล้ว ทำให้ด่านตรวจคนละระยะเสี่ยงกับที่ส่งจริง
         # และถ้าคำนวณสองที่ก็มีโอกาสได้ ATR คนละค่า (คนละวินาที/คนละจำนวนแท่ง) — ดู scoring.py
         pinned_swing = pinned_atr_entry = None
@@ -538,7 +518,7 @@ def scan_symbol(symbol: str) -> None:
                   f"ขยาย 2xATR ให้ตรงกับ ATR trailing)  R:R จริง = {rr_exec:.2f}")
 
         ticket = place_order(symbol, direction, entry, exec_sl, tp, lot,
-                             score=score, strategy=strategy,
+                             strategy=strategy,
                              pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
 

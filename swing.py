@@ -399,7 +399,7 @@ def find_sl_from_structure(df: pd.DataFrame,
     """
     is_short      = direction.capitalize() == "Short"
     atr           = calc_atr(df)
-    # current_price = ราคาที่จะใช้เข้าไม้จริง ส่งมาจากผู้เรียก (compute_score/compute_reversal_score)
+    # current_price = ราคาที่จะใช้เข้าไม้จริง ส่งมาจากผู้เรียก (compute_entry/compute_reversal_entry)
     # 2026-09-12: เดิมอ่าน df["close"].iloc[-1] เอง ซึ่งเป็น close ของแท่ง **4H** ที่ปิดล่าสุด
     # แต่ราคาที่เอาไปเข้าไม้จริงคือ tick/close ของแท่ง 1H ณ วินาทีที่ตัดสินใจ — ห่างกันได้ถึง
     # 3 ชม. (bars.py กรองแท่ง 4H ที่ยังไม่ครบทิ้งอยู่แล้ว แท่งล่าสุดจึงปิดไปแล้วเสมอ)
@@ -449,61 +449,6 @@ def find_sl_from_structure(df: pd.DataFrame,
         "atr":         round(atr_val, 5),
         "passed":      True,
         "reason":      "OK",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Confirmation Candle — ปิดเหนือ/ใต้ Swing High/Low
-# ---------------------------------------------------------------------------
-
-def check_confirmation(current_price: float, df: pd.DataFrame,
-                       direction: str, symbol: str,
-                       left: int = 4, right: int = 4,
-                       tolerance_atr: float = 0.22) -> dict:
-    """
-    Short: ราคาปัจจุบัน < Swing Low ล่าสุด (4H) = support แตก
-    Long:  ราคาปัจจุบัน > Swing High ล่าสุด (4H) = resistance แตก
-    ใช้เกณฑ์ swing เดียวกับ find_sl_from_structure/find_tp_from_fibonacci
-    (left/right=4, tolerance=0.05, vol_multiplier ตาม symbol) — df ต้องเป็น 4H
-    """
-    is_short       = direction.capitalize() == "Short"
-    vol_multiplier = swing_vol_multiplier(symbol)
-    wick_ratio_min = swing_wick_ratio_min(symbol)
-
-    highs = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,
-                             vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
-    lows  = find_swing_lows(df, left=left, right=right, tolerance_atr=tolerance_atr,
-                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
-    highs, lows = collapse_swing_runs(highs, lows, df)
-
-    if is_short:
-        if not lows:
-            return {"conf_ok": False, "current_price": current_price,
-                    "key_level": None, "reason": "ไม่พบ Swing Low บน 4H"}
-        key_level = df["low"].iloc[lows[-1]]
-        conf_ok   = current_price < key_level
-        reason    = (
-            f"ราคา {current_price:.2f} < Swing Low {key_level:.2f} ✅"
-            if conf_ok else
-            f"ราคา {current_price:.2f} ยังไม่ต่ำกว่า Swing Low {key_level:.2f}"
-        )
-    else:
-        if not highs:
-            return {"conf_ok": False, "current_price": current_price,
-                    "key_level": None, "reason": "ไม่พบ Swing High บน 4H"}
-        key_level = df["high"].iloc[highs[-1]]
-        conf_ok   = current_price > key_level
-        reason    = (
-            f"ราคา {current_price:.2f} > Swing High {key_level:.2f} ✅"
-            if conf_ok else
-            f"ราคา {current_price:.2f} ยังไม่สูงกว่า Swing High {key_level:.2f}"
-        )
-
-    return {
-        "conf_ok":       conf_ok,
-        "current_price": current_price,
-        "key_level":     key_level,
-        "reason":        reason,
     }
 
 

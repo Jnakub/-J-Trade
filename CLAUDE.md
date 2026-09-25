@@ -40,6 +40,14 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 (trend invalidation · TP progress lock · MAX_SL_WIDEN_R · SLOW_TRADE/MAX_HOLD · div spacing)
 และ `run_monitor` พิมพ์ตารางนี้ทุกครั้งที่เริ่ม เพื่อให้ log บันทึกไว้เสมอว่ารอบนั้นเปิดกฎอะไร
 
+🔴 **สกอร์การ์ดถูกลบทั้งใบแล้ว ทั้ง Scoring และ Reversal (2026-09-25 · คำสั่งผู้ใช้)** — เลิกใช้กรองมา
+ตั้งแต่ 09-06/09-13 (MIN_SCORE = 0) คะแนนถูกคำนวณแล้วทิ้ง `compute_score`/`compute_reversal_score`
+กลายเป็น `scoring.compute_entry`/`reversal.compute_reversal_entry` ที่คืน dict (sl/exec_sl/tp/rr/...)
+ด่านที่ตัดสินจริงเหลือแค่ ทิศตรง bias · หา SL/TP ได้ · ระยะ SL ขั้นต่ำ · R:R ขั้นต่ำ/สูงสุด · ระยะ TP
+สคริปต์ที่มีไว้วัดสกอร์การ์ดถูกลบด้วย (backtest_criteria/scorecard/score/reversal/rsi_rebound)
+คอลัมน์ `score` และคอลัมน์รายเกณฑ์หายจาก replay_trades_*.csv · แถวเก่าใน trades_log.csv ยังมีคะแนนอยู่
+👉 **อย่าอธิบายผลกระทบผ่านเกณฑ์ที่ถูกลบ** (ผู้ใช้: "พูดแล้วงง") ถ้าข้อมูลไหลไปจบที่ส่วนที่ไม่ตัดสินอะไร ให้บอกว่าไม่มีผลแล้วเสนอลบ
+
 > **ตัวเลขในไฟล์นี้กำกับวันที่ไว้ทุกตัว — ตัวที่ไม่มีวันที่คือกฎ ไม่ใช่การวัด**
 > ตัวเลขทุกตัวที่นี่เป็นภาพนิ่ง ณ วันนั้น และจะผิดทันทีที่ค่าคงที่ตัวใดเปลี่ยน
 > (ไฟล์นี้เกิดขึ้นเพราะไปเจอว่าเลข "68%" ที่จดไว้ที่อื่นล้าสมัยไป 2 สัปดาห์โดยไม่มีใครรู้ —
@@ -57,6 +65,14 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 ```
 
 `python3 script.py` ตรงๆ ใช้ได้เฉพาะสคริปต์ที่อ่าน CSV อย่างเดียว ไม่ต่อ MT5
+
+🔴 **รันจาก git worktree: โมดูลที่ import มาจาก checkout หลัก ไม่ใช่จาก worktree** (เจอ 2026-09-25)
+Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay\Desktop\-J-Trade` ไว้ใน sys.path
+และโหมด `._pth` **ไม่ใส่โฟลเดอร์ของสคริปต์ให้** => `./run_wine.sh backtest_replay.py` ใน worktree
+รันสคริปต์ตัวบนสุดจาก worktree แต่ `scoring`/`config`/`exit_monitor`/... มาจาก checkout หลัก
+**แก้โมดูลใน worktree แล้วรัน = วัดโค้ดเดิมโดยไม่มี error ใดๆ** (`PYTHONPATH` ใช้ไม่ได้ในโหมดนี้)
+เช็คด้วย `./run_wine.sh -c "import scoring; print(scoring.__file__)"` · ทางแก้ = ตัวเรียกที่ทำ
+`sys.path.insert(0, os.getcwd())` แล้ว `runpy.run_path(สคริปต์, run_name="__main__")`
 
 เทสต์: `./run_wine.sh test_exit_labels.py` (25 เคส) · `./run_wine.sh test_portfolio_risk.py` (14 เคส)
 
@@ -384,13 +400,8 @@ checklist ข้อ 0 ปิดไม้ก่อน `backtest_replay.py:592` �
 | `tp_headroom.py` | "ไม้ที่ชน TP วิ่งต่อได้อีกเท่าไหร่" — เพดานของการคลาย TP (~1 นาที ไม่ต้องรัน replay) | เป็น **ขอบบนของรางวัล**: ไม่หัก spread รอบสอง · ไม่นับว่าถือนานขึ้น = ครองช่องนานขึ้น |
 | `news_paths.py` | ประกอบ "เส้นทางราคารายชั่วโมง" ของทุกไม้ใน base กลับมาจากแท่ง 1H -> `news_paths.csv` | ใช้ close ของแท่ง 1H (ตัวเดียวกับที่ `analyze_position` ใช้ตอน `as_of`) ไม่ใช่ high/low |
 | `news_sensitivity.py` ⭐ | "กฎข่าว 2 ตัวที่ backtest ไม่เคยจำลอง ขยับ R ได้แค่ไหน" — โปรยหน้าต่างข่าวสุ่มที่อัตราจริง 400 รอบ **โดยไม่ต้องมีปฏิทินย้อนหลัง** (~1 นาที) | ชุดไม้คงที่ = **ขอบบนของความเสียหาย** (ดูข้อ 3c) · สมมติว่า partial ที่เกิดจริงยังเกิดเหมือนเดิม (125/166 ไม้มี cuts — วัดตอน base ยังมี 166 ไม้) · ไม่จำลองด่านห้าม**เข้า**ไม้ตอนใกล้ข่าว |
-| `backtest_criteria.py` | เกณฑ์รายข้อในสกอร์การ์ด active บ่อยแค่ไหน / ชนะแค่ไหน | **ไม่กรอง `MIN_SCORE`** = คนละชุดไม้กับระบบจริงโดยตั้งใจ |
-| `backtest_scorecard.py` | จำลอง `compute_score` ทีละแท่ง 4H ถือได้ 1 ไม้ | เก่ากว่า replay — ใช้ replay แทนถ้าเลือกได้ |
-| `backtest_score.py` | เช็ค score ณ **จุดเดียว** ในอดีต (debug) | ไม่ใช่เครื่องมือวัดผล |
-| `backtest_reversal.py` | เดิน Reversal path ทั้งเส้น ณ เวลาในอดีต (debug) | ไม่ใช่เครื่องมือวัดผล |
 | `backtest_tp_sweep.py` | หา `TP_FIB_RATIO` แยกราย symbol | ยึดหน้าต่างเวลาจาก `datetime.now()` — เลื่อนทุกรอบที่รัน |
 | `backtest_trend_flip_ksweep.py` | หา `TREND_FLIP_K` แยกราย symbol | ดึงแท่งล่าสุดเสมอ ไม่มี `as_of` · 🔴 **default เป็น 4H แต่ระบบใช้ 1D** (`get_trend_flip_bias` ใช้ `df_1d`) — ต้องส่ง `1D` ต่อท้ายทุกครั้ง ไม่งั้นได้ k ของ timeframe ที่ไม่มีใครใช้ |
-| `backtest_rsi_rebound.py` | เทียบ RSI double rebound vs threshold เดี่ยว | วัด signal rate / predictive power ไม่ใช่ R |
 | `backtest_exit_compare.py` | Fixed SL/TP vs Chandelier (ของเก่า BTC 1 เดือน) | เก่ามาก · ยึดหน้าต่างจาก `now()` |
 | `inspect_swings.py` | ตาราง swing high/low พร้อม vol/wick ratio | ทุกแถวในตาราง**ผ่าน vol-OR-wick มาแล้ว** (ตัวกรองอยู่ใน `find_swing_highs/lows`) ส่วน `clean ✓` = จุดที่รอด `collapse_swing_runs` อีกชั้น = **สิ่งที่ระบบเห็นจริง** 🔴 2026-09-19 แก้: บรรทัดนี้เคยเขียนว่า "`check_divergence` ใช้ volume ล้วน ต้องดูคอลัมน์ `vol`" — **ไม่จริงตั้งแต่ 2026-09-15** ที่ `DIV_WICK_ALL_SYMBOLS` ถูกตั้งเป็น True (`check_divergence` เรียก `swing_wick_ratio_min()` ตรงๆ เหมือนทุกจุด) คำเตือนที่ค้างทำให้อ่านตารางผิดไปแล้วจริง 1 ครั้ง |
 
@@ -403,7 +414,7 @@ checklist ข้อ 0 ปิดไม้ก่อน `backtest_replay.py:592` �
 | ค่า | บ้านจริง | ใครอ่าน |
 |---|---|---|
 | `SYMBOLS` | `config.py` | ทุกที่ — **อย่า glob `replay_trades_*.csv`** (ไฟล์ของ symbol ที่ถอดออกแล้วยังค้างอยู่) |
-| `REGIME_NO_TRADE` / `_TREND` / `_REVERSAL` | `config.py` | scheduler · backtest_replay · backtest_criteria |
+| `REGIME_NO_TRADE` / `_TREND` / `_REVERSAL` | `config.py` | scheduler · backtest_replay |
 | `SPREAD_PCT_BY_SYMBOL` | `config.py` | backtest_replay · backtest_trade_sim (**ตรึงไว้ ห้ามกลับไปอ่าน spread สด**) |
 | `MAX_HOLD_DAYS` | `exit_monitor.py` | backtest_replay · backtest_trade_sim |
 | `BE_DECISION_PREFIX` | `exit_monitor.py` | backtest_portfolio (จับคู่สตริงจาก `replay_cuts_*.csv`) |
