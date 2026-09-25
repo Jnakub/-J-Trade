@@ -573,10 +573,15 @@ def run_scheduler() -> None:
 
             today = datetime.now().date()
             if datetime.now().hour == 0 and last_summary_date != today:
+                # สรุป **เมื่อวาน** ไม่ใช่วันนี้ — 🔴 2026-09-25: เดิมเรียก get_daily_statistics()
+                # ด้วย default = วันนี้ ซึ่งตอน 00:xx เพิ่งเริ่มได้ไม่กี่นาที สรุปทุกฉบับจึงเป็น
+                # "เทรด 0" ตลอด (log 09-17 ถึง 09-25 เป็น 0 ทุกฉบับ ทั้งที่ 09-21 มี SL −178.32
+                # และ 09-24 มี TP +236.76) · close_date ใน CSV เป็นเวลาเครื่อง = วันเดียวกับ today
+                day = (today - timedelta(days=1)).strftime("%Y-%m-%d")
                 try:
-                    stats = journal.get_daily_statistics()
-                    notify.notify_daily_summary(stats)
-                    print(f"[journal] ส่งสรุปรายวันแล้ว — {stats}")
+                    stats = journal.get_daily_statistics(day)
+                    notify.notify_daily_summary(stats, day)
+                    print(f"[journal] ส่งสรุปรายวัน {day} แล้ว — {stats}")
                 except Exception as exc:
                     print(f"[journal] ส่งสรุปรายวันล้มเหลว — {exc}")
                     log.error("notify_daily_summary ERROR", exc_info=True)

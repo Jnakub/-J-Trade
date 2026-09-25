@@ -98,9 +98,9 @@ def notify_error(context: str, error: str) -> None:
     send(f"🔴 <b>ERROR</b>\n{context}\n{error}")
 
 
-def notify_daily_summary(stats: dict) -> None:
+def notify_daily_summary(stats: dict, day: str = "") -> None:
     send(
-        f"📊 <b>สรุปรายวัน</b>\n"
+        f"📊 <b>สรุปรายวัน{f' {day}' if day else ''}</b>\n"
         f"เทรดทั้งหมด: {stats['total_trades']}\n"
         f"Win Rate: {stats['win_rate']:.1f}%\n"
         f"Total P&L: {stats['total_pnl']:+.2f} USD\n"
