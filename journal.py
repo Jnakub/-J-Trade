@@ -429,6 +429,41 @@ def check_cooldown(symbol: str, cooldown_hours: float) -> tuple[bool, str]:
     return True, "OK"
 
 
+def check_tp_cooldown(symbol: str, hours: float, now: datetime | None = None) -> tuple[bool, str]:
+    """Return False ถ้าไม้ล่าสุดของ symbol นี้ที่ **ชน TP** ปิดไปไม่ถึง `hours` ชม. (ดู
+    config.TP_COOLDOWN_HOURS) — นับเฉพาะ TP ไม่นับ SL/Bot Exit/Manual Cut
+    เรียกหลัง reconcile_closed_positions() เสมอ (ไม้ที่ broker ปิดด้วย TP ถูก mark ที่นั่น)
+
+    นาฬิกา: close_time ใน CSV มาจาก `datetime.fromtimestamp(deal.time)` = เวลาเครื่อง และ
+    datetime.now() ก็เวลาเครื่อง จึงลบกันตรงๆ ได้ (ห้ามเอา mt5_now() มาลบ — นั่นคือ UTC)
+    `now` มีไว้ให้ทดสอบย้อนเวลาได้เท่านั้น"""
+    if not hours or hours <= 0:
+        return True, "OK"
+
+    df = _load()
+    # อ้างสตริงผ่านตาราง ไม่พิมพ์ "Take Profit" ซ้ำ — ถ้าวันหนึ่ง label ถูก rename ด่านนี้จะยัง
+    # ตามทัน แทนที่จะเลิกเจอไม้ TP เงียบๆ (รูปแบบเดียวกับ backtest_portfolio เมื่อ 2026-09-15)
+    tp = df[(df["symbol"] == symbol) & (df["status"] == _RESULT_BY_DEAL_REASON[mt5.DEAL_REASON_TP])]
+    now = now or datetime.now()
+    # ตัดเวลาปิดที่ "อยู่ในอนาคต" ทิ้ง — ถ้าวันไหนนาฬิกาของ close_time เพี้ยน (เช่นมีคนเขียนเป็น UTC)
+    # elapsed จะติดลบแล้วล็อก symbol นานเกินจริงเงียบๆ ให้ fail-open แทน (แบบเดียวกับ reject cooldown)
+    close_times = [dt for dt in tp.apply(_closed_datetime, axis=1)
+                   if dt is not None and dt <= now] if len(tp) else []
+    if not close_times:
+        return True, "OK"
+
+    last_tp = max(close_times)
+    elapsed = now - last_tp
+    cooldown = timedelta(hours=hours)
+    if elapsed < cooldown:
+        hrs = (cooldown - elapsed).total_seconds() / 3600
+        return False, (
+            f"Cooldown หลัง TP {symbol}: ชน TP เมื่อ {last_tp.strftime('%Y-%m-%d %H:%M')} "
+            f"— ต้องรออีก {hrs:.1f} ชม. ({hours:g} ชม.)"
+        )
+    return True, "OK"
+
+
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------

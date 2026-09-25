@@ -19,7 +19,7 @@ import journal
 from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MT5_TIMEFRAMES,
-    COOLDOWN_HOURS_BY_SYMBOL, MAX_RUNUP_24H_R, MIN_TURN_FROM_EXTREME_R,
+    COOLDOWN_HOURS_BY_SYMBOL, TP_COOLDOWN_HOURS, MAX_RUNUP_24H_R, MIN_TURN_FROM_EXTREME_R,
     REJECT_COOLDOWN_HOURS, LOT_RISK_WARN_PCT, TP_MAX_ATR,
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
@@ -253,6 +253,14 @@ def scan_symbol(symbol: str) -> None:
     #     ไม้ที่ชน SL/TP เองจะยังค้างเป็น 'Open' และมองไม่เห็นเวลาปิดจริง
     cooldown_hours = COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)
     ok, cooldown_reason = journal.check_cooldown(symbol, cooldown_hours)
+    if not ok:
+        print(f"  [{symbol}] SKIP — {cooldown_reason}")
+        return
+
+    # 3c. Cooldown หลัง TP (config.TP_COOLDOWN_HOURS) — ทั้ง symbol ทุกกลยุทธ์ · ต้องอยู่หลัง
+    #     reconcile เหมือน 3b (ไม้ที่ broker ปิดด้วย TP ถูก mark เป็น Take Profit ที่นั่น)
+    #     ตำแหน่งต้องตรงกับ backtest_replay (หลัง 3b ก่อน regime/min-turn) ไม่งั้นวัดคนละระบบ
+    ok, cooldown_reason = journal.check_tp_cooldown(symbol, TP_COOLDOWN_HOURS)
     if not ok:
         print(f"  [{symbol}] SKIP — {cooldown_reason}")
         return

@@ -118,6 +118,13 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
      --slow-calendar  ให้ SLOW_TRADE_DAYS นับวันปฏิทิน (รวมเสาร์-อาทิตย์) แบบก่อน 2026-09-22
                  ระบบจริงนับวันทำการแล้ว — ธงนี้คือ "ของเดิม" ไว้วัดส่วนต่าง (tag _slowcal)
                  ชุดไม้ไม่เปลี่ยน (กฎตัดแต่ขนาด ไม่คืนช่อง) จึงเทียบ direct แบบ paired ได้
+     --tp-cooldown=N  ทับ config.TP_COOLDOWN_HOURS (ระบบจริง 3 ตั้งแต่ 2026-09-25) — ห้ามเปิดไม้ใหม่
+                 ใน symbol นี้ N ชม. หลังไม้ใดก็ตามชน TP · 0 = ปิด · tag _tpcdN เมื่อสวนค่าระบบจริง
+                 N นับจากรอบสแกนแรกที่เห็นไม้ปิด: N = 1 ข้าม 1 รอบ เข้าได้เร็วสุดรอบที่ 2
+                 ⚠️ ใช้คู่กับ --same-scan-reentry เสมอ ไม่งั้น N = 1 เกือบเป็น no-op (replay
+                 ข้ามรอบแรกหลัง SL/TP อยู่แล้วโดยโครงสร้าง ส่วนระบบจริงไม่ข้าม)
+     --same-scan-reentry  ไม้ที่ broker ปิด (SL/BE/TP) คืนช่องในรอบสแกนนั้นเลย = ตรงกับ scheduler
+                 ที่อ่าน positions_get ตอนสแกน (tag _samescan · ที่มาดูตรงที่ parse ธง)
 """
 import re
 import sys
@@ -521,6 +528,28 @@ reject_cd = float(_rcd_arg.split("=")[1]) if _rcd_arg else config.REJECT_COOLDOW
 if not reject_cd:
     reject_cd = None
 reject_until = {}     # {direction: เวลาที่ปลดล็อก} — อายุเท่ากับการรัน 1 symbol
+
+# --tp-cooldown=N : พักทั้ง symbol N ชม. หลังไม้ชน TP (2026-09-24 ผู้ใช้ขอวัด)
+# ขอบเขต = ทั้ง symbol ทุกกลยุทธ์ทุกทิศ เหมือน journal.check_cooldown ตัวเดิม — ไม่แยกทิศเพราะ
+# คัดกรองจาก base แล้ว ไม้ที่เปิดตามหลัง TP ภายใน 1 สัปดาห์เป็นทิศเดิม 20/22 = แยกไปก็ได้ชุดเดียวกัน
+# "TP" = ราคาแตะ pos["tp"] ระหว่างแท่ง (รวม TP ที่ถูก TP trailing ดึงเข้ามาแล้ว) ซึ่งคือสิ่งที่ระบบ
+# จริงจะเห็นเป็นดีล reason=TP · 0 = no-op ไว้เป็น identity check
+# 2026-09-25: เข้าระบบจริงแล้วที่ config.TP_COOLDOWN_HOURS (= default ของที่นี่) ธงไว้ทับเท่านั้น
+_tpcd_arg = next((a for a in sys.argv if a.startswith("--tp-cooldown=")), None)
+tp_cd = float(_tpcd_arg.split("=")[1]) if _tpcd_arg else float(config.TP_COOLDOWN_HOURS or 0)
+last_tp_close_time = None
+
+# --same-scan-reentry : ให้ไม้ที่ **broker ปิด** (SL/BE/TP ระหว่างแท่ง) คืนช่องทันทีในรอบสแกนนั้น
+# 🔴 2026-09-24 เจอว่า replay กับระบบจริงไม่ตรงกันตรงนี้: scheduler อ่าน positions_get ตอนสแกน
+# ไม้ที่ชน TP ตอน 10:37 จึงหายไปแล้วตอนสแกน 11:00 = **เปิดไม้ใหม่ได้ที่ 11:00** แต่ replay
+# snapshot ช่องก่อนเดินไม้ (`_occupied`) เลยเห็นช่องยังไม่ว่างที่ 11:00 เข้าได้เร็วสุด 12:00
+# = replay มี "cooldown แฝง 1 รอบ" หลัง SL/BE/TP ทุกไม้ ที่ระบบจริงไม่มี
+# (comment ที่ scheduler.py:195 ว่า "ตรงกับ backtest_replay" จริงเฉพาะไม้ที่ exit_monitor ปิด
+#  ตอนสแกน ซึ่ง live ก็อ่าน occupied ก่อนรัน monitor เหมือนกัน — ธงนี้จึงไม่แตะไม้กลุ่มนั้น)
+# default ยังปิดไว้ เพราะเปิดแล้วเปลี่ยนชุดไม้ของ base ทั้งระบบ — วัดก่อนแล้วค่อยตัดสินใจ
+# วัดแล้ว 2026-09-24 (7 symbol ไม่รวม ETH ที่รันไม่จบเพราะ MT5 หลุด): **ต่างกันแค่ 2 ไม้ +0.30R**
+# (XAU 20:00 แทน 22:00 · US500 17:00 แทน 18:00) = ความคลาดนี้ไม่ได้ทำให้ตัวเลข base เพี้ยน
+same_scan_reentry = "--same-scan-reentry" in sys.argv
 no_struct_break = "--no-structure-break" in sys.argv
 if no_struct_break:
     em.STRUCTURE_BREAK_ENABLED = False
@@ -616,7 +645,9 @@ if not live_spread and abs(live_cost_pct - cost_pct) > 0.2 * max(cost_pct, 1e-9)
           f"— ถ้าไม่ใช่ช่วง rollover/ข่าว ให้วัดใหม่แล้วแก้ config.SPREAD_PCT_BY_SYMBOL")
 print(f"  Daily loss guard {MAX_DAILY_LOSS*100:.0f}% / risk {RISK_PER_TRADE*100:.0f}% ต่อไม้ "
       f"= หยุดหาไม้ใหม่เมื่อวันนั้นขาดทุนรวมถึง {max_daily_loss_r:.1f}R")
-print(f"  Cooldown {COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)} ชม.   "
+print(f"  Cooldown {COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)} ชม."
+      f" + หลัง TP {tp_cd:g} ชม.{'  [ทับด้วย --tp-cooldown]' if _tpcd_arg else ''}"
+      f"{'  ไม้ที่ broker ปิดคืนช่องในรอบนั้นเลย [--same-scan-reentry]' if same_scan_reentry else ''}   "
       f"MIN_SL {get_min_sl_distance_pct(symbol)}%{'  [--no-widen]' if no_widen else ''}"
       f"{'  [ทับด้วย --min-sl]' if _min_sl_arg else ''}")
 print(f"  ไม่เข้าไม้เมื่อ regime = {', '.join(REGIME_NO_TRADE)}"
@@ -718,6 +749,11 @@ def slot_of(strategy):
     return strategy if slot_per_strategy else "ANY"
 
 
+# label ที่ขา broker ของ step_position (ข้อ 1 ข้างล่าง) เท่านั้นที่ตั้ง — ไม้ที่ exit_monitor ปิด
+# ได้ label จาก final_decision ซึ่งเป็นข้อความไทย ไม่มีทางเท่ากับสามตัวนี้เป๊ะ
+_BROKER_HOW = ("SL", "BE", "TP")
+
+
 def step_position(pos, key, t, bar, now):
     """เดินไม้ที่ถืออยู่ไป 1 ชั่วโมง — broker เช็ค SL/TP ระหว่างแท่ง t->now ก่อน แล้ว
     exit_monitor ตัวจริงทำงานที่ปลายชั่วโมง (now) ตรงกับ INTERVAL_SECONDS=3600 ของระบบจริง"""
@@ -778,12 +814,14 @@ def step_position(pos, key, t, bar, now):
 
 
 def close_pos(pos, key, t, r, how):
-    global last_close_time
+    global last_close_time, last_tp_close_time
     if use_cost:
         r -= cost_pct / 100 * pos["entry"] / abs(pos["entry"] - pos["sl0"])   # spread ขาเข้า+ออก ~1 ครั้ง
     rec = {**pos, "exit_time": t, "R": r, "how": how}
     daily_r[t.date()] = daily_r.get(t.date(), 0.0) + r
     last_close_time = t
+    if how == "TP":
+        last_tp_close_time = t
     positions.pop(key, None)
     return rec
 
@@ -820,6 +858,8 @@ for n, row in enumerate(clock.to_dict("records")):
         _rec = step_position(_p, _k, t, bar, now)
         if _rec:
             trades.append(_rec)
+            if same_scan_reentry and _rec["how"] in _BROKER_HOW:
+                _occupied.discard(_k)      # broker ปิดไปก่อนสแกน = live เห็นช่องว่างแล้ว
 
     # กลยุทธ์ที่ regime รอบนี้จะเปิด (ไม่มีทางเกิดพร้อมกัน — regime เป็นตัวเลือกให้ตัวเดียว)
     _want = "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None)
@@ -843,6 +883,10 @@ for n, row in enumerate(clock.to_dict("records")):
     cd = COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)           # ด่าน 3b
     if cd and last_close_time is not None and (now - last_close_time) < timedelta(hours=cd):
         note("cooldown"); fate("cooldown")
+        continue
+    if tp_cd and last_tp_close_time is not None \
+       and (now - last_tp_close_time) < timedelta(hours=tp_cd):   # --tp-cooldown
+        note(f"cooldown หลัง TP ({tp_cd:g} ชม.)"); fate("cooldown หลัง TP")
         continue
 
     try:                                                   # ด่าน 4
@@ -1218,6 +1262,10 @@ if min_turn != config.MIN_TURN_FROM_EXTREME_R:   # ติด tag เฉพาะ
     _tag += f"_minturn{min_turn:g}" if min_turn else "_nominturn"
 if reject_cd != config.REJECT_COOLDOWN_HOURS:
     _tag += f"_rejcd{reject_cd:g}" if reject_cd else "_norejcd"
+if same_scan_reentry:
+    _tag += "_samescan"
+if tp_cd != float(config.TP_COOLDOWN_HOURS or 0):   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += f"_tpcd{tp_cd:g}"
 if _mh_arg:
     _tag += "_nomaxhold" if MAX_HOLD_DAYS >= 1e6 else f"_maxhold{MAX_HOLD_DAYS:g}"
 if live_spread:      # ผลรอบนี้ขึ้นกับเวลาที่รัน — อย่าให้ทับไฟล์ base ที่เทียบข้ามรอบได้
