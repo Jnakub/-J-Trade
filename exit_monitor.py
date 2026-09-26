@@ -428,6 +428,15 @@ BREAKEVEN_TRIGGER_R  = 1.5
 # ราคามักย่อกลับมาแตะ** แกนนี้จึงเก็บการป้องกันไว้แต่ขยับจุดล็อกออกจากจุดนั้น
 BREAKEVEN_LEVEL_R    = 0.0
 
+# BREAKEVEN_LADDER — ขั้นบันไดต่อจาก BE: ((trigger_R, level_R), ...) ถึง trigger เมื่อไหร่ จุดล็อก
+# ขยับขึ้นเป็น level (เอาขั้นสูงสุดที่ถึง · ratchet `past_breakeven` ด้านล่างกัน SL ถอยกลับเอง)
+# นับ "ถึง" ด้วย r_multiple ของรอบนั้น (ราคาปัจจุบัน) แบบเดียวกับ BREAKEVEN_TRIGGER_R ไม่ใช่ extreme
+# 2026-09-25 เพิ่มเพื่อวัดไอเดียผู้ใช้ "1.5R -> ล็อก +0.2R · 3R -> ล็อก +0.4R"
+# ⚠️ ขั้นแรกของไอเดียนั้น (level +0.2 ที่ trigger 1.5) วัดแล้ว 2026-09-22 = −11.80R ชุดไม้เดียวกันเป๊ะ
+#    (ดู BREAKEVEN_LEVEL_R ด้านบน) — ขั้นที่ 3R ไม่เคยวัด
+# () = ไม่มีขั้นเพิ่ม = พฤติกรรมเดิมเป๊ะ · backtest: --be-ladder=3:0.4[,5:1.0]
+BREAKEVEN_LADDER     = ()
+
 # ข้อความนำหน้าของ final_decision ตอนกฎ BE ยิง — **มีคนอ่านสตริงนี้จริง**
 # backtest_portfolio.py ใช้มันดูจากคอลัมน์ final ของ replay_cuts_*.csv ว่าไม้นั้นล็อกความเสี่ยง
 # เป็นศูนย์ไปแล้วหรือยัง ถ้าแก้ข้อความแล้วไม่แก้ที่นั่น มันจะเลิกเจอเงียบๆ แล้วนับความเสี่ยงเกินจริง
@@ -1182,14 +1191,18 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     # จุดที่ SL ไปนั่งตอนกฎยิง = entry + BREAKEVEN_LEVEL_R * ระยะ 1R (ค่าลบ = ต่ำกว่า entry
     # ฝั่งเสี่ยง) 0.0 = ล็อกที่ entry เป๊ะ = พฤติกรรมเดิม — คำนวณตรงนี้เพื่อให้ทั้งข้อความที่แสดง
     # และ desired_sl ท้ายฟังก์ชันอ้างตัวเลขเดียวกัน ไม่ใช่คนละจุดเวลาตั้งค่าไม่เป็นศูนย์
-    be_price         = (entry + BREAKEVEN_LEVEL_R * sl_range * (1 if direction == "Long" else -1)
+    be_level         = BREAKEVEN_LEVEL_R
+    for _trig, _lvl in BREAKEVEN_LADDER:       # ขั้นบันได — ว่าง = ไม่แตะ be_level เลย
+        if r_multiple is not None and r_multiple >= _trig:
+            be_level = max(be_level, _lvl)
+    be_price         = (entry + be_level * sl_range * (1 if direction == "Long" else -1)
                         if sl_range else entry)
     slow_trade       = (SLOW_TRADE_ENABLED and market_days >= SLOW_TRADE_DAYS
                         and r_multiple is not None and r_multiple < SLOW_TRADE_R)
     hold_cap         = time_held_days >= MAX_HOLD_DAYS   # เพดานเงินทุน = วันปฏิทิน (ตรงกับ backtest)
 
     # ต่อท้ายเมื่อจุดล็อกไม่ใช่ entry — ไม่งั้นอ่าน log แล้วนึกว่าเสมอตัวทั้งที่ยอมเสียไว้แล้ว
-    _be_note      = "" if not BREAKEVEN_LEVEL_R else f" ({BREAKEVEN_LEVEL_R:+g}R จาก entry)"
+    _be_note      = "" if not be_level else f" ({be_level:+g}R จาก entry)"
     breakeven_str = f"{be_price:,.3f}{_be_note}"
 
     invalidated = trend_broken_full or structure_broken or post_news_exit or hold_cap
@@ -1746,7 +1759,8 @@ def rules_status() -> list[tuple[str, bool, str]]:
         (f"slow trade {SLOW_TRADE_DAYS:g} วันทำการ", SLOW_TRADE_ENABLED and SLOW_TRADE_KEEP < 100,
          f"checklist ข้อ 4 — เหลือ {SLOW_TRADE_KEEP:g}% · วัดได้ +12.63R ตอนปิด |t| 2.15"),
         (f"breakeven ที่ {BREAKEVEN_TRIGGER_R:g}R", BREAKEVEN_ENABLED,
-         f"checklist ข้อ 5 — ล็อก SL ที่ {BREAKEVEN_LEVEL_R:+g}R จาก entry"),
+         f"checklist ข้อ 5 — ล็อก SL ที่ {BREAKEVEN_LEVEL_R:+g}R จาก entry"
+         + "".join(f" · ถึง {t:g}R ล็อก {l:+g}R" for t, l in BREAKEVEN_LADDER)),
         ("trend invalidation",        TREND_CHECK_ENABLED,
          f"checklist ข้อ 1 — TREND_CHECK_KEEP_BY_CONSEC = {TREND_CHECK_KEEP_BY_CONSEC}"),
         ("structure break",           STRUCTURE_BREAK_ENABLED, "checklist ข้อ 2"),

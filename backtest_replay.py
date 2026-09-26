@@ -55,7 +55,7 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ ผลคือถือได้ 2 ไม้พร้อมกันต่อ symbol = ความเสี่ยงต่อ symbol เป็น 2 เท่า
                  backtest บวก R ตรงๆ ไม่ได้ปรับ sizing ให้ ตัวเลขที่ได้จึงเป็น "ถ้ายอมเสี่ยง
                  2 เท่า" ไม่ใช่ "ได้ฟรี"
-     --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ปัจจุบัน 1.5) — ด่าน R:R ขั้นต่ำ
+     --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ดูค่าที่ config) — ด่าน R:R ขั้นต่ำ
                  ของไม้สวน (ตัวแปรคนละตัวกับ MIN_RR_HARD_BLOCK ที่ Scoring ใช้ ซึ่งเป็น 1.5
                  เท่ากันอยู่ตอนนี้) เคยลองลดเป็น 1.1 แล้วไม่ช่วย ดู config.py ที่ตัวแปรนั้น
      --rev-tp-from-entry  ฉาย Fibonacci TP ของ Reversal จากราคาเข้าแทน swing B — ไว้ตอบว่า
@@ -125,6 +125,11 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ข้ามรอบแรกหลัง SL/TP อยู่แล้วโดยโครงสร้าง ส่วนระบบจริงไม่ข้าม)
      --end=YYYY-MM-DDTHH:MM  ตรึงปลายหน้าต่าง (เวลา MT5 = UTC) — ใส่ค่าเดียวกันทุกรอบที่จะ diff กัน
                  ไม่งั้นโปรเซสที่ได้ข้อมูลค้างจะได้หน้าต่างต่างออกไปเงียบๆ (เกิดจริง 2026-09-25)
+     --limit-rr=X --limit-hours=H  จำลอง limit order ให้ setup Reversal ที่ติดด่าน R:R — ตั้งที่ราคา
+                 ที่ R:R = X ค้าง H ชม. (default 12) · ระบบจริงไม่มี · tag _limitrrXhH
+                 H = 0 = identity check · กติกาเต็มที่จุด parse ธง
+     --be-ladder=T:L[,T:L]  ขั้นบันไดต่อจาก BE — ถึง T R ล็อก SL ที่ +L R (exit_monitor.BREAKEVEN_LADDER)
+                 tag _beladderT-L · 99:0 = identity check
      --trail-tp-buffer=X / --trail-tp-trigger=X  ทับ exit_monitor.TRAIL_TP_ATR_BUFFER (0.5 · 0 = ปิด
                  TP trailing) / TRAIL_TP_TRIGGER_PCT (1.0) · tag _trailtpbufX / _trailtptrigX
      --same-scan-reentry  ไม้ที่ broker ปิด (SL/BE/TP) คืนช่องในรอบสแกนนั้นเลย = ตรงกับ scheduler
@@ -269,6 +274,11 @@ cut_log = []
 # ไว้ตอบคำถามที่ไม่มีเครื่องมือไหนตอบได้: **ค่าเสียโอกาสของการถือช่องไว้นาน** ซึ่งเป็น
 # เหตุผลเดียวที่กฎอย่าง slow trade มีอยู่ — เอาไฟล์ผลไปเดินต่อด้วย backtest_blocked_value.py
 log_blocked = "--log-blocked" in sys.argv
+# --log-rr-blocked : บันทึกทุกรอบสแกนที่ setup Reversal (ไม่ใช่ flip) ถูกด่าน R:R ปฏิเสธ พร้อม SL/TP/ATR
+# -> replay_rrblocked_<sym><tag>.csv · บันทึกอย่างเดียว ไม่แตะการตัดสินใจ (2026-09-26 ใช้ดูว่าไม้ที่ติด
+# R:R หน้าตาเป็นยังไง ก่อนคิดวิธีแก้ — ข้อมูลเดิมจากรอบ --limit-rr เห็นเฉพาะที่ตั้ง order ได้)
+log_rr_blocked = "--log-rr-blocked" in sys.argv
+rr_blocked_log = []
 blocked_log = []
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
@@ -554,6 +564,39 @@ last_tp_close_time = None
 # วัดแล้ว 2026-09-24 (7 symbol ไม่รวม ETH ที่รันไม่จบเพราะ MT5 หลุด): **ต่างกันแค่ 2 ไม้ +0.30R**
 # (XAU 20:00 แทน 22:00 · US500 17:00 แทน 18:00) = ความคลาดนี้ไม่ได้ทำให้ตัวเลข base เพี้ยน
 same_scan_reentry = "--same-scan-reentry" in sys.argv
+
+# --limit-rr=X --limit-hours=H : จำลอง limit order ให้ setup Reversal ที่ติดด่าน R:R (2026-09-25
+# ไอเดียผู้ใช้) — ระบบจริงส่งแต่ market order จึงไม่มีสิ่งนี้ ธงนี้ถามว่า "ถ้ามีจะได้ไม้เพิ่มกี่ไม้ กี่ R"
+# ที่มา: REVERSAL-READY 2,303 ชม. ใน 2 ปี ตายที่ R:R ต่ำกว่า 1.15 ถึง 48% เพราะ divergence ยืนยัน
+# ตอนราคาเด้งออกจากจุดสุดขั้วไปแล้ว entry จึงห่าง SL · limit รอให้ราคาย่อกลับมาที่ R:R = X
+# กติกา (เลียนแบบ pending order ที่โบรก):
+#   ตั้ง   — ที่รอบสแกนที่ compute_reversal_entry ปฏิเสธ และ R:R ที่ราคาตลาด < ขั้นต่ำ (ติด R:R จริง
+#            ไม่ใช่ด่านอื่น) · ราคา L = (TP + X·SL) / (1+X) จาก SL ที่ส่ง broker กับ TP เดิม
+#            (สองตัวนี้ไม่ขึ้นกับราคาเข้า) · ชน TP_MAX_ATR เมื่อไหร่แก้สมการด้วย TP ที่ถูกเพดาน
+#            แล้วรัน compute_reversal_entry ซ้ำที่ L — ด่านไหนไม่ผ่านที่ราคานั้นก็ไม่ตั้ง
+#   เติม   — แท่งไหน low/high แตะ L (โบรกเติมกลางแท่ง ไม่ต้องรอสแกน) · เปิด gap เลย L = เติมที่ open
+#            แท่งเดียวกันแตะ SL ด้วย = นับว่าโดน SL ทันที (มองร้ายไว้ก่อน)
+#   ยกเลิก — ครบ H ชม. · ราคาแตะ TP ก่อนเติม (ยกเลิกตอนสแกน) · ระบบเข้าไม้ market ในช่องเดียวกันได้เอง
+# ไม่แตะพฤติกรรมเดิม: ไม้ market ทุกไม้ยังเกิดเหมือนเดิม limit ตั้งเฉพาะรอบที่ market ถูกปฏิเสธ
+# เฉพาะ Reversal ที่ไม่ใช่ flip (Breakout ใช้ด่าน R:R ของ Scoring คนละชุด) · 1 order ค้างได้ต่อช่อง
+# --limit-hours=0 = ตั้งแล้วหมดอายุก่อนแท่งถัดไป = identity check ของ code path
+# 🔻 วัดแล้ว 2026-09-26 (8 symbol · --end=2026-09-24T00:00 · identity h0 ตรง base เป๊ะ US500/HK50):
+#    R:R 2 · 24 ชม.: ตั้งไม่ได้ 647/864 ครั้ง (ราคา limit ชิด SL จนต่ำกว่า MIN_SL) · เติม 2 ไม้ SL ทั้งคู่ −2.14R
+#    R:R 1.5 · 24 ชม.: ตั้ง 285 · เติม 12 ไม้ +3.47R (TP 6 · SL 5 · t 0.81) แต่ไปแย่งช่องไม้เดิม
+#                     ทั้งระบบ **−1.05R** · อายุ 12 ชม. ≈ 8 ไม้ +1.58R · 4 ชม. ≈ 2 ไม้ +0.40R
+#    🔴 ข้อค้นพบหลัก: 85% ของ order ที่ตั้งได้ ราคาอยู่ที่/เลย TP ไปแล้วตั้งแต่ตอนตั้ง (R:R ตลาด ≤ 0.05)
+#       = setup Reversal ที่ "ติด R:R" ส่วนใหญ่คือการเคลื่อนไหวที่จบไปแล้วตอน divergence ยืนยัน
+#       ไม่ใช่ราคาเด้งเลยจุดเข้าไปนิดเดียว ด่าน R:R บล็อกถูกแล้ว ไม่มีอะไรให้ limit เก็บ
+#    👉 ไม่ทำ limit ในระบบจริง (งานใหญ่ · ได้ไม้เพิ่ม ~6 ไม้/ปี ที่แยกจาก noise ไม่ได้)
+_lrr_arg = next((a for a in sys.argv if a.startswith("--limit-rr=")), None)
+_lh_arg = next((a for a in sys.argv if a.startswith("--limit-hours=")), None)
+limit_rr = float(_lrr_arg.split("=")[1]) if _lrr_arg else None
+limit_hours = float(_lh_arg.split("=")[1]) if _lh_arg else 12.0
+pending = None           # limit order ที่ค้างอยู่ (ช่อง Reversal) — dict หรือ None
+limit_log = []           # ทุก order ที่ตั้ง + จบยังไง -> replay_limits_<sym><tag>.csv (บันทึกอย่างเดียว)
+limit_stats = {"ตั้ง": 0, "เติม": 0, "เติมแล้วโดน SL แท่งเดียวกัน": 0, "หมดอายุ": 0,
+               "ยกเลิก: แตะ TP ก่อน": 0, "ยกเลิก: market เข้าเอง": 0,
+               "ไม่ตั้ง: ด่านไม่ผ่านที่ราคา limit": 0}
 no_struct_break = "--no-structure-break" in sys.argv
 if no_struct_break:
     em.STRUCTURE_BREAK_ENABLED = False
@@ -580,6 +623,12 @@ if no_breakeven:
 # 🔴 be-level เคยถูกกวาดเฉพาะฝั่งลบ (0.0/-0.1/-0.2/-0.3/-0.5 ใน backtest_exit_rules --set=belevel)
 #    ซึ่งเป็นเครื่องคัดกรองที่มองไม่เห็นไม้ที่เข้ามาแทน — **ฝั่งบวก (ล็อกกำไรไว้เหนือ entry)
 #    ไม่เคยถูกวัดเลยทั้งสองเครื่องมือ**
+# --be-ladder=T:L[,T:L] : ขั้นบันไดต่อจาก BE (ดู exit_monitor.BREAKEVEN_LADDER) เช่น 3:0.4 = ถึง 3R
+# ล็อก +0.4R · 99:0 = มีขั้นแต่ไม่มีวันถึง = identity check ของ code path
+_bel_arg = next((a for a in sys.argv if a.startswith("--be-ladder=")), None)
+if _bel_arg:
+    em.BREAKEVEN_LADDER = tuple(tuple(float(x) for x in p.split(":"))
+                                for p in _bel_arg.split("=", 1)[1].split(",") if p)
 # --trail-tp-buffer=X : ระยะที่ TP trailing ดึง TP เข้า (×ATR1H · ปกติ 0.5) · 0 = ปิดกฎ
 # --trail-tp-trigger=X : เริ่มดึงเมื่อห่าง TP เดิมไม่เกิน X% ของราคา (ปกติ 1.0)
 # 2026-09-25 เพิ่มเพื่อวัด TP trailing ครั้งแรก — กฎนี้แตะ 40% ของไม้แต่ไม่เคยถูกเทียบกับ "ไม่มี"
@@ -707,6 +756,9 @@ print(f"  Exit: ถึง 1R เหลือ {em.RULE_1R_KEEP:g}%   ครึ่
       f"Climax เหลือ {em.RULE_CLIMAX_KEEP:g}%   ร้อนเหลือ {em.RULE_HOT_KEEP:g}%\n        "
       f"structure break: {'เปิด' if em.STRUCTURE_BREAK_ENABLED else 'ปิด'}   "
       f"TP trailing: {f'ใกล้ TP <= {em.TRAIL_TP_TRIGGER_PCT:g}% ดึงเข้า {em.TRAIL_TP_ATR_BUFFER:g}xATR1H' if em.TRAIL_TP_ATR_BUFFER > 0 and em.TRAIL_TP_TRIGGER_PCT > 0 else 'ปิด'}"
+      f"\n        BE: ถึง {em.BREAKEVEN_TRIGGER_R:g}R ล็อก {em.BREAKEVEN_LEVEL_R:+g}R"
+      f"{''.join(f' · ถึง {t:g}R ล็อก {l:+g}R' for t, l in em.BREAKEVEN_LADDER)}"
+      f"{'' if em.BREAKEVEN_ENABLED else ' [ปิดกฎ BE]'}"
       f"{'   ปิดกฎ trend invalidation' if no_trend_inval else ''}")
 print()
 
@@ -851,6 +903,52 @@ def close_pos(pos, key, t, r, how):
     return rec
 
 
+def try_place_limit(direction, entry, df_4h, now, regime):
+    """--limit-rr: ตั้ง limit ให้ setup Reversal ที่ market ถูกปฏิเสธ (กติกาเต็มที่จุด parse ธง)"""
+    global pending
+    try:
+        inf0 = reversal.compute_reversal_entry(symbol, direction, entry, force=True,
+                                               df_4h=df_4h, as_of=now)
+    except ValueError:
+        return                                  # หา SL ไม่ได้ — ไม่มี setup ให้ตั้ง
+    _min = (config.MIN_RR_HARD_BLOCK_REVERSAL if reversal._MIN_RR_OVERRIDE is None
+            else reversal._MIN_RR_OVERRIDE)
+    if inf0["rr"] is None or inf0["rr"] >= _min - 1e-9:
+        return                                  # ถูกปฏิเสธด้วยด่านอื่น ไม่ใช่ R:R ต่ำ
+    se, tp_raw, atr = inf0["exec_sl"], inf0["tp"], inf0["atr_entry"]
+    lg, X = direction == "Long", limit_rr
+    L, tp_final = (tp_raw + X * se) / (1 + X), tp_raw
+    if tp_cap_atr is not None and atr and abs(tp_raw - L) > atr * tp_cap_atr:
+        cap = atr * tp_cap_atr                  # TP โดนเพดาน ATR -> แก้สมการด้วย TP ที่ถูกเพดาน
+        L = se + cap / X if lg else se - cap / X
+        tp_final = L + cap if lg else L - cap
+    if (L >= entry) if lg else (L <= entry):
+        return                                  # R:R ที่ตลาด < ขั้นต่ำ < X จึงไม่ควรเกิด — กันไว้
+    try:                                        # ด่านทุกตัวของ Reversal ต้องผ่านที่ราคา L ด้วย
+        inf1 = reversal.compute_reversal_entry(symbol, direction, L, df_4h=df_4h, as_of=now)
+    except ValueError as exc:
+        limit_stats["ไม่ตั้ง: ด่านไม่ผ่านที่ราคา limit"] += 1
+        _why = "  └ " + re.sub(r"[-+]?\d[\d,.]*", "N", str(exc))[:60]     # ใช้รายงานอย่างเดียว
+        limit_stats[_why] = limit_stats.get(_why, 0) + 1
+        return
+    if abs(inf1["exec_sl"] - se) > 1e-9 * abs(se) or abs(inf1["tp"] - tp_raw) > 1e-9 * abs(tp_raw):
+        limit_stats["ไม่ตั้ง: SL/TP ขยับตามราคา"] = limit_stats.get("ไม่ตั้ง: SL/TP ขยับตามราคา", 0) + 1
+        return                                  # สมการ L ใช้ไม่ได้ถ้า SL/TP ขึ้นกับราคาเข้า
+    pin = (se + scoring.EXEC_SL_ATR_MULT * atr if (atr and lg)
+           else (se - scoring.EXEC_SL_ATR_MULT * atr if atr else se))
+    pending = {"direction": direction, "limit": L, "sl": se, "tp": tp_final, "tp_fib": tp_raw,
+               "pin": pin, "atr": atr, "regime": regime, "placed": now,
+               "expires": now + timedelta(hours=limit_hours)}
+    pending["log"] = {"symbol": symbol, "placed": now, "direction": direction, "market": entry,
+                      "limit": L, "sl": se, "tp": tp_final, "tp_fib": tp_raw,
+                      "rr_market": inf0["rr"], "status": None, "resolved": None}
+    limit_log.append(pending["log"])
+    limit_stats["ตั้ง"] += 1
+    if inf0["rr"] <= 0:                         # รายงานอย่างเดียว: ราคาตลาดเลย TP ไปแล้วตอนตั้ง
+        _k = "  └ ตั้งทั้งที่ราคาเลย TP ไปแล้ว (R:R ที่ตลาด ≤ 0)"
+        limit_stats[_k] = limit_stats.get(_k, 0) + 1
+
+
 for n, row in enumerate(clock.to_dict("records")):
     t, bar = row["time"], row
     # 2026-09-01: "เวลาที่ระบบตัดสินใจ" คือ **ปลาย** แท่ง 1H นี้ ไม่ใช่ต้นแท่ง — MT5 นับ time ของ
@@ -885,6 +983,34 @@ for n, row in enumerate(clock.to_dict("records")):
             trades.append(_rec)
             if same_scan_reentry and _rec["how"] in _BROKER_HOW:
                 _occupied.discard(_k)      # broker ปิดไปก่อนสแกน = live เห็นช่องว่างแล้ว
+
+    # --limit-rr : limit ที่ค้างอยู่ — โบรกเติมกลางแท่ง (t, now] ก่อนรอบสแกนนี้จะเห็น
+    # เติมที่ L เสมอ ไม่นับ gap ที่ได้ราคาดีกว่า (lot ถูกคิดไว้ที่ L = R ต้องวัดจาก L)
+    if pending is not None:
+        _lk, _lg = slot_of("Reversal"), pending["direction"] == "Long"
+        if t >= pending["expires"]:
+            limit_stats["หมดอายุ"] += 1; pending["log"].update(status="หมดอายุ", resolved=t); pending = None
+        elif _lk in positions:             # ช่องถูกใช้ไปแล้ว — ปกติ market เข้าเองจะยกเลิกให้ก่อน
+            limit_stats["ยกเลิก: market เข้าเอง"] += 1
+            pending["log"].update(status="ยกเลิก: market", resolved=now); pending = None
+        elif (bar["low"] <= pending["limit"]) if _lg else (bar["high"] >= pending["limit"]):
+            _lp = pending; pending = None
+            _lp["log"].update(status="เติม", resolved=now)
+            _pos = {"time": now, "direction": _lp["direction"], "entry": _lp["limit"],
+                    "sl": _lp["sl"], "sl0": _lp["sl"], "tp": _lp["tp"], "tp0": _lp["tp"],
+                    "tp_fib": _lp["tp_fib"], "strategy": "Reversal", "regime": _lp["regime"],
+                    "booked": 0.0, "rem": 1.0, "cuts": 0, "pinned_swing": _lp["pin"],
+                    "pinned_atr_entry": _lp["atr"], "limit_placed": _lp["placed"]}
+            limit_stats["เติม"] += 1
+            _occupied.add(_lk)             # live: positions_get เห็นไม้นี้แล้วตอนสแกน
+            if (bar["low"] <= _lp["sl"]) if _lg else (bar["high"] >= _lp["sl"]):
+                limit_stats["เติมแล้วโดน SL แท่งเดียวกัน"] += 1      # มองร้าย: เติมแล้วลงต่อถึง SL
+                trades.append(close_pos(_pos, _lk, now, -1.0, "SL"))
+            else:
+                positions[_lk] = _pos
+        elif (bar["high"] >= pending["tp"]) if _lg else (bar["low"] <= pending["tp"]):
+            limit_stats["ยกเลิก: แตะ TP ก่อน"] += 1
+            pending["log"].update(status="ยกเลิก: แตะ TP", resolved=now); pending = None
 
     # กลยุทธ์ที่ regime รอบนี้จะเปิด (ไม่มีทางเกิดพร้อมกัน — regime เป็นตัวเลือกให้ตัวเดียว)
     _want = "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None)
@@ -1027,6 +1153,23 @@ for n, row in enumerate(clock.to_dict("records")):
         # เก็บสาเหตุย่อยไว้ด้วย (ตัดเฉพาะตัวเลขท้ายที่ทำให้บรรทัดแตกกระจาย)
         _m = str(exc).replace("\n", " ")
         note(re.sub(r"[-+]?\d[\d,.]*", "N", _m)[:76]); fate("hard block: " + re.sub(r"[-+]?\d[\d,.]*", "N", _m)[:40])
+        if log_rr_blocked and regime in REGIME_REVERSAL and not flipped and not _shadow:
+            try:
+                _i = reversal.compute_reversal_entry(symbol, direction, entry, force=True,
+                                                     df_4h=rinfo["df_4h"], as_of=now)
+                _min = (config.MIN_RR_HARD_BLOCK_REVERSAL if reversal._MIN_RR_OVERRIDE is None
+                        else reversal._MIN_RR_OVERRIDE)
+                if _i["rr"] is not None and _i["rr"] < _min - 1e-9:     # ติด R:R จริง ไม่ใช่ด่านอื่น
+                    rr_blocked_log.append({"symbol": symbol, "time": now, "direction": direction,
+                                           "price": entry, "sl": _i["sl"], "exec_sl": _i["exec_sl"],
+                                           "tp": _i["tp"], "rr": _i["rr"], "atr": _i["atr_entry"],
+                                           "occupied": slot_of("Reversal") in _occupied})
+            except ValueError:
+                pass
+        # --limit-rr: ต้องเช็ค regime ก่อน flipped เสมอ (flipped ถูกตั้งเฉพาะทาง Reversal ในรอบนี้)
+        if (limit_rr and regime in REGIME_REVERSAL and not flipped and not _shadow
+                and pending is None and slot_of("Reversal") not in _occupied):
+            try_place_limit(direction, entry, rinfo["df_4h"], now, regime)
         continue
     except Exception as exc:
         note(f"ERROR {type(exc).__name__}")
@@ -1129,6 +1272,9 @@ for n, row in enumerate(clock.to_dict("records")):
                             "ไม้ที่ครองช่องอยู่": _blocker_time})
         continue
 
+    if pending is not None and slot_of(strategy) == slot_of("Reversal"):
+        limit_stats["ยกเลิก: market เข้าเอง"] += 1                    # ระบบเดิมมาก่อนเสมอ
+        pending["log"].update(status="ยกเลิก: market", resolved=now); pending = None
     positions[slot_of(strategy)] = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
            # tp0 = TP ที่ส่งจริงตอนเข้า (ผ่านเพดานแล้ว)  tp_fib = ที่ Fibonacci ให้ก่อนเพดาน
            # สองค่านี้ต่างกันเมื่อไม้นั้นโดนเพดานดึงเข้า — ดู comment ที่จุดคำนวณ tp_fib
@@ -1166,6 +1312,13 @@ if reversal_fate:
     for k, v in sorted(reversal_fate.items(), key=lambda x: -x[1]):
         print(f"    {v:>6}  {k}")
     print(f"    {entered:>6}  -> เข้าไม้จริง")
+if limit_rr:
+    print(f"  {'-' * 74}")
+    print(f"  limit order (Reversal ที่ติด R:R -> ตั้งที่ R:R {limit_rr:g} · อายุ {limit_hours:g} ชม.):")
+    for k, v in limit_stats.items():
+        print(f"    {v:>6}  {k}")
+    if pending is not None:
+        print("    (ยังค้าง 1 order ตอนจบหน้าต่าง — ไม่นับ)")
 
 if t.empty:
     print(f"{'=' * 78}")
@@ -1289,6 +1442,10 @@ if reject_cd != config.REJECT_COOLDOWN_HOURS:
     _tag += f"_rejcd{reject_cd:g}" if reject_cd else "_norejcd"
 if same_scan_reentry:
     _tag += "_samescan"
+if limit_rr:
+    _tag += f"_limitrr{limit_rr:g}h{limit_hours:g}"
+if log_rr_blocked:     # บันทึกอย่างเดียว — ติด tag กันทับ base (ไฟล์ไม้ต้องตรง base เป๊ะ = identity check)
+    _tag += "_rrlog"
 if tp_cd != float(config.TP_COOLDOWN_HOURS or 0):   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += f"_tpcd{tp_cd:g}"
 if _mh_arg:
@@ -1299,6 +1456,8 @@ if no_breakeven:
     _tag += "_nobe"
 if any(a.startswith("--be-trigger=") for a in sys.argv):
     _tag += f"_betrig{em.BREAKEVEN_TRIGGER_R:g}"
+if _bel_arg:
+    _tag += "_beladder" + "_".join(f"{t:g}-{l:g}" for t, l in em.BREAKEVEN_LADDER)
 if any(a.startswith("--trail-tp-buffer=") for a in sys.argv):
     _tag += f"_trailtpbuf{em.TRAIL_TP_ATR_BUFFER:g}"
 if any(a.startswith("--trail-tp-trigger=") for a in sys.argv):
@@ -1336,5 +1495,11 @@ if log_blocked:
     pd.DataFrame(blocked_log).to_csv(f"replay_blocked_{symbol}{_tag}.csv", index=False)
     print(f"  เขียนสัญญาณเงา {len(blocked_log)} รอบลง replay_blocked_{symbol}{_tag}.csv "
           f"(รอบที่ผ่านทุกด่านแต่ช่องไม่ว่าง)")
+if log_rr_blocked:
+    pd.DataFrame(rr_blocked_log).to_csv(f"replay_rrblocked_{symbol}{_tag}.csv", index=False)
+    print(f"  เขียนรอบที่ Reversal ติด R:R {len(rr_blocked_log)} รอบลง replay_rrblocked_{symbol}{_tag}.csv")
+if limit_rr:
+    pd.DataFrame(limit_log).to_csv(f"replay_limits_{symbol}{_tag}.csv", index=False)
+    print(f"  เขียน limit order {len(limit_log)} ตัวลง replay_limits_{symbol}{_tag}.csv")
 t.to_csv(f"replay_trades_{symbol}{_tag}.csv", index=False)
 print(f"  เขียนไม้ทั้งหมดลง replay_trades_{symbol}{_tag}.csv")
