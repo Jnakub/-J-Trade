@@ -154,7 +154,7 @@ def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str | None, str]:
 def compute_entry(symbol: str, direction: str, entry: float,
                   sl: float = None, tp: float = None,
                   force: bool = False, as_of: datetime = None,
-                  df_1d: pd.DataFrame = None) -> dict:
+                  df_1d: pd.DataFrame = None, min_rr: float = None) -> dict:
     """วางแผนไม้ทาง Scoring (และ Breakout) — คืน dict ของ SL/TP/R:R หรือ raise ValueError
     ถ้าติดด่านใดด่านหนึ่ง (= ห้ามเข้าไม้นี้) ด่านที่ตัดสินจริงมีเท่านี้:
       1. ทิศต้องตรง trend_flip bias ของ 1D
@@ -174,7 +174,11 @@ def compute_entry(symbol: str, direction: str, entry: float,
     ตัดที่เวลานั้น) ให้ backtest เรียกตัวนี้ตรงๆ แทนการ copy logic มาเขียนซ้ำ
 
     df_1d: ส่ง df_1d (bars=800, as_of เดียวกัน) ที่ดึงมาแล้วมาใช้ซ้ำได้ — ใช้แค่ตรวจทิศกับ
-    get_trend_bias ซึ่งอ่านเฉพาะแท่งที่ปิดแล้ว (ไม่ต้อง merge real volume: trend_flip ไม่ใช้ volume)"""
+    get_trend_bias ซึ่งอ่านเฉพาะแท่งที่ปิดแล้ว (ไม่ต้อง merge real volume: trend_flip ไม่ใช้ volume)
+
+    min_rr: ทับเกณฑ์ด่าน R:R ขั้นต่ำ **เฉพาะด่าน** (None = MIN_RR_HARD_BLOCK) — ตัวคูณของ TP fallback
+    ยังเป็น MIN_RR_HARD_BLOCK เสมอ ไม่งั้นการวัดด่านจะพ่วงการหด TP ของไม้ fallback มาด้วย
+    (2026-09-26 เพิ่มให้ backtest_replay --scoring-min-rr ทับเฉพาะทาง Scoring ไม่แตะ Breakout)"""
     is_long = direction.capitalize() == "Long"
 
     if df_1d is None:
@@ -276,9 +280,10 @@ def compute_entry(symbol: str, direction: str, entry: float,
         )
 
     # Hard block: R:R ต่ำกว่าขั้นต่ำที่ยอมเทรด (ดูประวัติ/ตัวเลขที่ config.MIN_RR_HARD_BLOCK)
-    if rr < MIN_RR_HARD_BLOCK - 1e-9 and not force:
+    _min_rr = MIN_RR_HARD_BLOCK if min_rr is None else min_rr
+    if rr < _min_rr - 1e-9 and not force:
         raise ValueError(
-            f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {MIN_RR_HARD_BLOCK}  — ห้ามเข้า trade"
+            f"R:R = {rr:.2f} ต่ำกว่าขั้นต่ำ {_min_rr}  — ห้ามเข้า trade"
         )
 
     # Hard block: R:R สูงผิดปกติ (> MAX_RR_HARD_BLOCK) มักมาจาก Fibonacci TP ยืดไกลเกินจริง

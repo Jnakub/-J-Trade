@@ -55,6 +55,7 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ ผลคือถือได้ 2 ไม้พร้อมกันต่อ symbol = ความเสี่ยงต่อ symbol เป็น 2 เท่า
                  backtest บวก R ตรงๆ ไม่ได้ปรับ sizing ให้ ตัวเลขที่ได้จึงเป็น "ถ้ายอมเสี่ยง
                  2 เท่า" ไม่ใช่ "ได้ฟรี"
+     --scoring-min-rr=X  ทับด่าน R:R ขั้นต่ำเฉพาะทาง Scoring (Breakout ยังใช้ config) · tag _scoringminrrX
      --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ดูค่าที่ config) — ด่าน R:R ขั้นต่ำ
                  ของไม้สวน (ตัวแปรคนละตัวกับ MIN_RR_HARD_BLOCK ที่ Scoring ใช้ ซึ่งเป็น 1.5
                  เท่ากันอยู่ตอนนี้) เคยลองลดเป็น 1.1 แล้วไม่ช่วย ดู config.py ที่ตัวแปรนั้น
@@ -280,6 +281,10 @@ log_blocked = "--log-blocked" in sys.argv
 log_rr_blocked = "--log-rr-blocked" in sys.argv
 rr_blocked_log = []
 blocked_log = []
+# --scoring-min-rr=X : ทับด่าน R:R ขั้นต่ำ **เฉพาะทาง Scoring** (ระบบจริง config.MIN_RR_HARD_BLOCK = 1.5 ใช้ร่วม
+# กับ Breakout) · ไม่แตะ Breakout และไม่แตะตัวคูณ TP fallback (ดู scoring.compute_entry min_rr) · tag _scoringminrrX
+_smr_arg = next((a for a in sys.argv if a.startswith("--scoring-min-rr=")), None)
+scoring_min_rr = float(_smr_arg.split("=")[1]) if _smr_arg else None
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -1065,7 +1070,8 @@ for n, row in enumerate(clock.to_dict("records")):
                 note(f"bias {direction} สวนโครงสร้าง 4H ({_struct})")
                 fate("bias สวนโครงสร้าง 4H")
                 continue
-            sl_info = compute_entry(symbol, direction, entry, as_of=now, df_1d=df_1d)
+            sl_info = compute_entry(symbol, direction, entry, as_of=now, df_1d=df_1d,
+                                    min_rr=scoring_min_rr)   # --scoring-min-rr (None = ค่าระบบจริง)
             # exec_sl มาจาก compute_entry แล้ว (ด่าน R:R ใช้ตัวนี้ตรวจ) ไม่คำนวณซ้ำที่นี่
             sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Scoring"
             exec_sl, atr_entry_ = sl_info["exec_sl"], sl_info["atr_entry"]
@@ -1369,6 +1375,8 @@ if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
 if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
+if scoring_min_rr is not None:
+    _tag += f"_scoringminrr{scoring_min_rr:g}"
 for _flag, _attr, _short in (("--adx-period=",    "ADX_PERIOD",       "adxp"),
                              ("--adx-choppy=",    "ADX_CHOPPY",       "adxchop"),
                              ("--adx-gray-high=", "ADX_GRAY_HIGH",    "adxgray"),
