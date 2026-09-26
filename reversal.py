@@ -24,7 +24,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import (MT5_TIMEFRAMES, RISK_PER_TRADE, MAX_RR_HARD_BLOCK,
-                    MIN_RR_HARD_BLOCK_REVERSAL,
+                    MIN_RR_HARD_BLOCK_REVERSAL, REVERSAL_TP_FIB_RATIO,
                     get_min_sl_distance_pct, MAX_TP_DISTANCE_PCT, TP_FIB_RATIO)
 from mt5_connect import connect, get_account_balance
 import scoring
@@ -61,6 +61,7 @@ MIN_RR_REVERSAL    = 2.0   # ตัวคูณของสูตร fallback TP
 MIN_SL_OVERRIDE    = None
 TP_FROM_ENTRY      = False
 _MIN_RR_OVERRIDE   = None   # backtest_replay --rev-min-rr ตั้งให้ (None = ใช้ค่าจาก config)
+_TP_RATIO_OVERRIDE = None   # backtest_replay --rev-tp-ratio ตั้งให้ (None = config.REVERSAL_TP_FIB_RATIO)
 
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
@@ -148,12 +149,14 @@ def compute_reversal_entry(symbol: str, direction: str, entry: float,
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
     if tp is None:
+        _ratio = REVERSAL_TP_FIB_RATIO if _TP_RATIO_OVERRIDE is None else _TP_RATIO_OVERRIDE
         fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
-                                           vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
+                                           vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min,
+                                           ratio=_ratio)
         if fib_info.get("passed"):
-            tp = fib_info["tp"]   # อัตราส่วนมาจาก config.TP_FIB_RATIO (ดูที่มา/เหตุผลที่นั่น)
-            if TP_FROM_ENTRY:     # โหมดทดลอง — ระยะเท่าเดิม (move × TP_FIB_RATIO) แต่ตั้งต้นที่ราคาเข้า
-                _proj = fib_info["move"] * TP_FIB_RATIO
+            tp = fib_info["tp"]   # อัตราส่วนมาจาก config.REVERSAL_TP_FIB_RATIO (แยกจาก Scoring 2026-09-26)
+            if TP_FROM_ENTRY:     # โหมดทดลอง — ระยะเท่าเดิม (move × ratio) แต่ตั้งต้นที่ราคาเข้า
+                _proj = fib_info["move"] * _ratio
                 tp = (entry + _proj) if is_long else (entry - _proj)
         else:
             # อิง exec_sl (ระยะเสี่ยงจริง) เหมือน scoring.py — ไม่งั้น TP ที่ตั้งจากสูตร fallback

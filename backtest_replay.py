@@ -55,6 +55,7 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ⚠️ ผลคือถือได้ 2 ไม้พร้อมกันต่อ symbol = ความเสี่ยงต่อ symbol เป็น 2 เท่า
                  backtest บวก R ตรงๆ ไม่ได้ปรับ sizing ให้ ตัวเลขที่ได้จึงเป็น "ถ้ายอมเสี่ยง
                  2 เท่า" ไม่ใช่ "ได้ฟรี"
+     --rev-tp-ratio=X  ทับ config.REVERSAL_TP_FIB_RATIO (TP ไม้ Reversal) · tag _revtpX
      --scoring-min-rr=X  ทับด่าน R:R ขั้นต่ำเฉพาะทาง Scoring (Breakout ยังใช้ config) · tag _scoringminrrX
      --rev-min-rr=X  ทับ config.MIN_RR_HARD_BLOCK_REVERSAL (ดูค่าที่ config) — ด่าน R:R ขั้นต่ำ
                  ของไม้สวน (ตัวแปรคนละตัวกับ MIN_RR_HARD_BLOCK ที่ Scoring ใช้ ซึ่งเป็น 1.5
@@ -285,6 +286,10 @@ blocked_log = []
 # กับ Breakout) · ไม่แตะ Breakout และไม่แตะตัวคูณ TP fallback (ดู scoring.compute_entry min_rr) · tag _scoringminrrX
 _smr_arg = next((a for a in sys.argv if a.startswith("--scoring-min-rr=")), None)
 scoring_min_rr = float(_smr_arg.split("=")[1]) if _smr_arg else None
+# --rev-tp-ratio=X : ทับ config.REVERSAL_TP_FIB_RATIO (อัตราส่วน Fibonacci ของ TP ไม้ Reversal) · tag _revtpX
+_rtr_arg = next((a for a in sys.argv if a.startswith("--rev-tp-ratio=")), None)
+if _rtr_arg:
+    reversal._TP_RATIO_OVERRIDE = float(_rtr_arg.split("=")[1])
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -1377,6 +1382,8 @@ if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
 if scoring_min_rr is not None:
     _tag += f"_scoringminrr{scoring_min_rr:g}"
+if _rtr_arg:
+    _tag += f"_revtp{reversal._TP_RATIO_OVERRIDE:g}"
 for _flag, _attr, _short in (("--adx-period=",    "ADX_PERIOD",       "adxp"),
                              ("--adx-choppy=",    "ADX_CHOPPY",       "adxchop"),
                              ("--adx-gray-high=", "ADX_GRAY_HIGH",    "adxgray"),

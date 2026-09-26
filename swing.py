@@ -502,7 +502,8 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
                            left: int = 4, right: int = 4,
                            tolerance_atr: float = 0.22,
                            vol_multiplier: float = 1.9,
-                           wick_ratio_min: float | None = None) -> dict:
+                           wick_ratio_min: float | None = None,
+                           ratio: float | None = None) -> dict:
     """
     หา TP อัตโนมัติจาก Fibonacci Extension — ใช้ swing 3 จุดสลับกัน (X -> A -> B)
     วัด "ขนาด impulse เดิม" จากช่วง X->A แล้วฉายต่อจาก B ไปในทิศที่เทรด
@@ -591,7 +592,10 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
     # levels = ตารางอ้างอิงไว้ดูประกอบเท่านั้น — TP ที่ระบบใช้จริงคือ key "tp" ด้านล่าง
     # (2026-08-13: เพิ่ม TP_FIB_RATIO เข้าไปในลิสต์ด้วย เผื่อปรับ config เป็นค่าที่ไม่อยู่ในนี้
     # จะได้ยังเห็นในตาราง — ไม่งั้นตารางกับ TP จริงจะไม่ตรงกัน)
-    ratios = sorted({0, 0.236, 0.382, 0.5, 0.618, 0.786, 0.886, 1.0, 1.272, 1.618, TP_FIB_RATIO})
+    # ratio: ทับอัตราส่วน TP เฉพาะการเรียกครั้งนี้ (None = TP_FIB_RATIO ของ module — Breakout สลับค่านี้
+    # ชั่วคราวอยู่ ต้องอ่านตอนเรียกเสมอ ห้าม bind เป็น default argument) · 2026-09-26 เพิ่มให้ Reversal
+    _r = TP_FIB_RATIO if ratio is None else ratio
+    ratios = sorted({0, 0.236, 0.382, 0.5, 0.618, 0.786, 0.886, 1.0, 1.272, 1.618, _r})
     levels = {str(r): round(origin + sign * move * r, 5) for r in ratios}
 
     return {
@@ -600,8 +604,8 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
         "move":         round(move, 5),
         # TP ที่ใช้จริง — คำนวณจาก config.TP_FIB_RATIO จุดเดียว (เดิม caller ไปหยิบ
         # levels["1.618"] ด้วย string key hardcode เองคนละที่ จน backtest หลุด sync)
-        "tp":           round(origin + sign * move * TP_FIB_RATIO, 5),
-        "tp_ratio":     TP_FIB_RATIO,
+        "tp":           round(origin + sign * move * _r, 5),
+        "tp_ratio":     _r,
         "swing_high":   b_price if is_short else a_price,
         "swing_low":    a_price if is_short else b_price,
         "x_price":      x_price,
