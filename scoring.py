@@ -77,6 +77,10 @@ TREND_FLIP_K = {
     #   k 0.20/0.25 FalseFlip 1.4% · k 0.30-0.60 = 0% · เลือก 0.30 = ค่าต่ำสุดที่ FalseFlip 0%
     #   (63 flip · เร็วกว่า EMA50/200 cross เฉลี่ย 13.6 แท่ง · matched 26 คู่)
     "GBPCHFm": 0.30,
+    # 2026-09-28: AUDNZDm — backtest_trend_flip_ksweep AUDNZDm 3000 1D (2,999 แท่ง)
+    #   **ไม่มีค่าไหนได้ FalseFlip 0%** ทุก k พลิกหลอก 2 ครั้ง (0.20 = 2/67 · 0.25-0.60 = 2/65)
+    #   เลือก 0.20 = พลิกบ่อยสุด เร็วกว่า EMA50/200 cross 19.3 แท่ง (matched 33)
+    "AUDNZDm": 0.20,
 }
 
 
