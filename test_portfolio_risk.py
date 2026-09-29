@@ -32,11 +32,15 @@ BALANCE = 10_000.0          # 1R = 2% = 200 USD
 SPEC = {"BTCUSDm": (0.01, 0.01), "ETHUSDm": (0.01, 0.01), "XAUUSDm": (0.001, 0.1),
         "EURUSDm": (1e-5, 1.0), "GBPUSDm": (1e-5, 1.0),
         "USDJPYm": (0.001, 0.001 * 100_000 / 150.0), "US500m": (0.01, 0.01),
-        "UKOILm": (0.001, 1.0), "HK50m": (0.1, 0.01274770381984945)}
+        "UKOILm": (0.001, 1.0), "HK50m": (0.1, 0.01274770381984945),
+        # GBPCHFm กำไรเป็น CHF — tick_value จากโบรก 2026-09-28 (ขยับตาม USDCHF) ตอนเพิ่ม symbol
+        # เทียบ order.position_risk_amount กับ order_calc_profit สดแล้วตรงถึงเซ็นต์ ($198.97 ทั้งคู่)
+        "GBPCHFm": (1e-5, 1.2013022115973717)}
 
 
 DIGITS = {"BTCUSDm": 2, "ETHUSDm": 2, "XAUUSDm": 3, "EURUSDm": 5, "GBPUSDm": 5,
-          "USDJPYm": 3, "US500m": 2, "UKOILm": 3, "HK50m": 1}   # ค่าจริงจากโบรก 2026-09-28
+          "USDJPYm": 3, "US500m": 2, "UKOILm": 3, "HK50m": 1,
+          "GBPCHFm": 5}   # ค่าจริงจากโบรก 2026-09-28
 
 
 class FakeInfo:
@@ -69,7 +73,7 @@ def pos_at(symbol, direction, r, lot=None):
     """สร้าง position ที่มีความเสี่ยงคงเหลือ = r R พอดี (r=0 คือ SL ที่ breakeven)"""
     entry = {"BTCUSDm": 60_000.0, "ETHUSDm": 3_000.0, "XAUUSDm": 4_000.0,
              "EURUSDm": 1.1, "GBPUSDm": 1.3, "USDJPYm": 150.0,
-             "US500m": 6_000.0, "UKOILm": 95.0, "HK50m": 24_000.0}[symbol]
+             "US500m": 6_000.0, "UKOILm": 95.0, "HK50m": 24_000.0, "GBPCHFm": 1.1}[symbol]
     lot = lot if lot is not None else 0.1
     risk_money = BALANCE * 0.02 * r
     tick_size, tick_value = SPEC[symbol]

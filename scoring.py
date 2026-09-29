@@ -73,6 +73,10 @@ TREND_FLIP_K = {
     #   ที่ระบบเรียกจริงใช้ `df_1d` (ดู get_trend_flip_bias) รันด้วย default จะได้ k ของ
     #   timeframe ที่ไม่มีใครใช้ (เจอกับตัวเองรอบนี้: 4H ให้ FalseFlip 2.1% ส่วน 1D ให้ 0%)
     "HK50m": 0.20,
+    # 2026-09-28: GBPCHFm — backtest_trend_flip_ksweep GBPCHFm 3000 1D (2,999 แท่ง 1D)
+    #   k 0.20/0.25 FalseFlip 1.4% · k 0.30-0.60 = 0% · เลือก 0.30 = ค่าต่ำสุดที่ FalseFlip 0%
+    #   (63 flip · เร็วกว่า EMA50/200 cross เฉลี่ย 13.6 แท่ง · matched 26 คู่)
+    "GBPCHFm": 0.30,
 }
 
 
