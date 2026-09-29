@@ -831,8 +831,9 @@ def slot_of(strategy):
     #   2) การทดลอง — ให้ช่องที่สามพร้อมกับการทดลองนี้ = วัดสองอย่างปนกัน (flip คุ้มไหม +
     #      เพิ่มช่องคุ้มไหม) ใช้ช่องร่วมทำให้คำถามเหลือข้อเดียว: "ตรงจุดที่เคยทิ้ง เข้า Long
     #      ดีกว่าไม่ทำอะไรหรือเปล่า" และความเสี่ยงค้างพร้อมกันต่อ symbol ไม่เปลี่ยนจากเดิม
-    if strategy == "Breakout":
-        strategy = "Reversal"
+    # mapping อยู่ที่ config.slot_of ตัวเดียวกับที่ scheduler ใช้ (2026-09-28 — เดิมอยู่ที่นี่ที่เดียว
+    # แล้ว scheduler ไม่ได้ทำตาม ระบบจริงจึงเปิด Breakout ซ้อนได้ ดู docstring ที่ config.slot_of)
+    strategy = cfg.slot_of(strategy)
     return strategy if slot_per_strategy else "ANY"
 
 
@@ -891,6 +892,12 @@ def step_position(pos, key, t, bar, now):
         if no_widen:                           # ห้ามถอย SL ออกไกลกว่าตอนเข้า
             new_sl = max(new_sl, pos["sl0"]) if long_ else min(new_sl, pos["sl0"])
         pos["sl"] = new_sl
+        # เวลาที่ความเสี่ยงของไม้เหลือศูนย์ครั้งแรก (SL ถึง/เลย entry = กฎ BE ยิง) -> คอลัมน์ be_time
+        # ของไฟล์ผล ให้ backtest_portfolio คิดความเสี่ยงที่ยังมีชีวิตได้ (2026-09-28 — เดิมมันเดาจากแถว
+        # ใน replay_cuts ซึ่งหายไปพร้อมกฎปิดบางส่วน) ไม่แตะการตัดสินใจใดๆ · ratchet ใน exit_monitor
+        # กัน SL ถอยกลับหลัง BE อยู่แล้ว ครั้งแรกจึงเป็นจุดเดียวที่ต้องจำ
+        if "be_time" not in pos and ((new_sl >= pos["entry"]) if long_ else (new_sl <= pos["entry"])):
+            pos["be_time"] = now
     if m["desired_tp"] is not None:            # TP trailing
         pos["tp"] = m["desired_tp"]
 
@@ -1503,8 +1510,16 @@ if rev_choch != cfg.REVERSAL_NEEDS_CHOCH:
     _tag += "_revchoch" if rev_choch else "_norevchoch"
 if _swr_arg:
     _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
-if log_cuts and cut_log:
-    pd.DataFrame(cut_log).to_csv(f"replay_cuts_{symbol}{_tag}.csv", index=False)
+# เขียนเสมอเมื่อใส่ --log-cuts แม้ไม่มี cut เลย (ไฟล์มีแต่หัวตาราง) — เดิมเขียนเฉพาะตอนมี cut
+# symbol ที่ไม่มีจึงค้างไฟล์รุ่นเก่าไว้เงียบๆ: 2026-09-27 XAU/ETH/US500 ค้างไฟล์ 09-22 ที่มี cut
+# ของ slow trade (ปิดไปตั้งแต่ 09-23) ซึ่ง backtest_portfolio อ่านไปคิดความเสี่ยงผิดโดยไม่มี error
+# ตอนนี้ cut เหลือแค่ไม้ที่ชนเพดาน 30 วัน symbol ส่วนใหญ่จึงไม่มี cut เลย
+if log_cuts:
+    _cut_cols = ["symbol", "entry_time", "cut_time", "direction", "strategy", "entry", "sl0", "risk",
+                 "price", "R_ตอนตัด", "ตัดไป", "เหลือ", "base_keep", "stage_keep", "กฎที่ยิง",
+                 "ชม.ที่ถือมา", "final"]   # ใช้แค่ตอนไม่มี cut — ตอนมี cut คอลัมน์มาจาก dict ใน step_position
+    (pd.DataFrame(cut_log) if cut_log else pd.DataFrame(columns=_cut_cols)).to_csv(
+        f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
 if log_blocked:
     pd.DataFrame(blocked_log).to_csv(f"replay_blocked_{symbol}{_tag}.csv", index=False)

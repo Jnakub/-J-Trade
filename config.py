@@ -697,6 +697,18 @@ SLOT_PER_STRATEGY = True
 # ถ้าจะเอาของก้อนนี้จริง มันคือการตัดสินใจเรื่อง **sizing/pyramiding** ไม่ใช่การปลดล็อกช่อง —
 # ต้องออกแบบว่าไม้ที่สองใช้ความเสี่ยงเท่าไหร่ และ MAX_PORTFOLIO_RISK_R ต้องขยับตามไหม
 
+
+def slot_of(strategy: str) -> str:
+    """ช่องถือไม้ที่ไม้ของกลยุทธ์นี้ครอง — **แหล่งเดียว** ทั้ง scheduler และ backtest_replay
+
+    ไม้ Breakout ใช้ช่องเดียวกับ Reversal (ไม่ใช่ช่องที่สาม) เหตุผลเต็มที่ backtest_replay.slot_of
+    🔴 2026-09-28: เดิม mapping นี้อยู่ใน backtest_replay ที่เดียว scheduler เก็บชื่อกลยุทธ์ดิบ
+    ("Breakout") แล้วเช็คช่องด้วย "Reversal" => ระหว่างถือไม้ Breakout ระบบจริงเปิดไม้ Breakout
+    ซ้ำได้ชั่วโมงละไม้ตลอดที่สัญญาณค้าง (XAU/US500/HK50/USDJPY/UKOIL ไม่อยู่ใน group มีแค่เพดาน
+    พอร์ต 6R หยุด) ขณะที่ replay ให้ถือได้ไม้เดียว — ยังไม่เคยเกิดจริงเพราะยังไม่มีไม้ Breakout เลย"""
+    return "Reversal" if strategy == "Breakout" else strategy
+
+
 # 2026-09-07: Reversal ฝั่ง Short เข้าได้เฉพาะตอนเทรนด์ 1D (get_trend_bias) เป็น Short ด้วย
 # ที่มา: บน 8 symbol ไม้ Reversal Short 18 ไม้ WR 27.8% -6.08R เทียบกับ Long 19 ไม้ 57.9%
 # +7.16R — และปัญหาอยู่ที่ "จุดเข้า" ไม่ใช่กฎ exit: ทดสอบ first-touch ด้วย SL/TP แผนเดิมโดย

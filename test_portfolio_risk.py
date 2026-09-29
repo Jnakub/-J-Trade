@@ -1,4 +1,7 @@
 """ทดสอบ scheduler.check_portfolio_risk() ด้วย position ปลอม
++ (2026-09-28) ช่องถือไม้ของไม้ Breakout ใน scheduler.scan_symbol และเกณฑ์ส่งคำสั่งขยับ SL/TP
+  ของ exit_monitor.execute_decision — ทั้งคู่เป็นบั๊กที่ backtest มองไม่เห็นเพราะ replay ไม่ได้
+  เดินผ่านโค้ดสองจุดนี้ (ดู config.slot_of และ exit_monitor._price_moved)
 
 รัน: ./run_wine.sh test_portfolio_risk.py
 (ต้องรันผ่าน wine เพราะ config.py import MetaTrader5)
@@ -32,12 +35,20 @@ SPEC = {"BTCUSDm": (0.01, 0.01), "ETHUSDm": (0.01, 0.01), "XAUUSDm": (0.001, 0.1
         "UKOILm": (0.001, 1.0), "HK50m": (0.1, 0.01274770381984945)}
 
 
+DIGITS = {"BTCUSDm": 2, "ETHUSDm": 2, "XAUUSDm": 3, "EURUSDm": 5, "GBPUSDm": 5,
+          "USDJPYm": 3, "US500m": 2, "UKOILm": 3, "HK50m": 1}   # ค่าจริงจากโบรก 2026-09-28
+
+
 class FakeInfo:
     def __init__(self, sym):
         self.name = sym
         self.trade_tick_size, self.trade_tick_value = SPEC[sym]
         self.trade_tick_value_loss = self.trade_tick_value
         self.volume_step = 0.01
+        self.volume_min = 0.01
+        self.digits = DIGITS[sym]
+        self.point = self.trade_tick_size      # tick_size = point ทุก symbol (ตรวจแล้ว 2026-09-28)
+        self.trade_mode = mt5.SYMBOL_TRADE_MODE_FULL
 
 
 class FakePos:
@@ -167,6 +178,166 @@ results += [
 ]
 
 scheduler.MAX_PORTFOLIO_RISK_R = _LIVE_CAP
+
+
+# ── ช่องถือไม้ของไม้ Breakout (2026-09-28) ─────────────────────────────────────────────────────
+# เดิน scheduler.scan_symbol ตัวจริงจนถึงด่านเช็คช่อง ของที่ต้องใช้ MT5/เน็ต/CSV ถูกแทนด้วยของปลอม
+# ทั้งหมด (แล้วคืนค่าเดิมทุกตัว) — ถ้าหลุดด่านช่องมาได้ scan จะไปหยุดที่ "ดึงราคาไม่ได้" เพราะ
+# symbol_info_tick ปลอมคืน None = ไม่มีทางส่ง order ได้จริงระหว่างเทสต์
+import contextlib  # noqa: E402
+import io          # noqa: E402
+import journal       # noqa: E402
+import exit_monitor  # noqa: E402
+
+SLOT_SKIP = "ช่อง Reversal มีไม้เปิดอยู่แล้ว"
+
+
+def scan_output(on_book: list[str], regime: str) -> str:
+    """รัน scan_symbol("XAUUSDm") ตอนที่มีไม้กลยุทธ์ on_book เปิดอยู่ แล้วคืนข้อความที่พิมพ์"""
+    global _positions
+    _positions = []
+    for i in range(len(on_book)):
+        p = FakePos("XAUUSDm", "Long", 4000.0, 3900.0, 0.1)
+        p.ticket = 700 + i
+        _positions.append(p)
+    patches = {
+        (journal, "get_trade_strategy"): lambda t: on_book[t - 700],
+        (journal, "check_daily_loss"): lambda b, m: True,
+        (journal, "check_cooldown"): lambda s, h: (True, "OK"),
+        (journal, "check_tp_cooldown"): lambda s, h: (True, "OK"),
+        (scheduler, "analyze_position"): lambda pos: {},
+        (scheduler, "print_report"): lambda m: None,
+        (scheduler, "execute_decision"): lambda m: None,
+        (scheduler, "get_account_balance"): lambda: BALANCE,
+        (scheduler, "check_portfolio_risk"): lambda s, b: (True, ""),
+        (scheduler, "check_upcoming_news"): lambda hours_ahead=None: (False, "", None),
+        (scheduler, "get_regime"): lambda s: {"regime": regime, "action": "ทดสอบ"},
+        (scheduler.mt5, "symbol_info_tick"): lambda s: None,
+    }
+    saved = {k: getattr(*k) for k in patches}
+    for (obj, name), fn in patches.items():
+        setattr(obj, name, fn)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            scheduler.scan_symbol("XAUUSDm")
+    finally:
+        for (obj, name), fn in saved.items():
+            setattr(obj, name, fn)
+        _positions = []
+    return buf.getvalue()
+
+
+def slot_check(label, on_book, regime, want_skip):
+    out = scan_output(on_book, regime)
+    skipped = SLOT_SKIP in out or "ช่องเต็มทั้งสองกลยุทธ์" in out
+    ok = skipped == want_skip
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {'ข้าม (ช่องไม่ว่าง)' if skipped else 'ไปต่อ'}")
+    return ok
+
+
+print("\nช่องถือไม้ — ไม้ Breakout ครองช่อง Reversal (config.slot_of):")
+results += [
+    slot_check("ถือ Breakout + REVERSAL-READY -> ห้ามเปิดซ้อน", ["Breakout"], "REVERSAL-READY", True),
+    slot_check("ถือ Reversal + REVERSAL-READY -> ห้ามเปิดซ้อน", ["Reversal"], "REVERSAL-READY", True),
+    slot_check("ถือ Scoring + REVERSAL-READY -> ช่อง Reversal ว่าง", ["Scoring"], "REVERSAL-READY", False),
+    slot_check("ถือ Breakout + TREND -> ช่อง Scoring ว่าง", ["Breakout"], "TREND", False),
+    slot_check("ถือ Scoring + Breakout -> ช่องเต็มทั้งสอง", ["Scoring", "Breakout"], "TREND", True),
+]
+
+
+# ── เกณฑ์ส่งคำสั่งขยับ SL/TP (2026-09-28) ──────────────────────────────────────────────────────
+# เรียก execute_decision ตัวจริง แทน modify_sltp ด้วยตัวจดคำสั่ง — ไม่มีการส่งคำสั่งไป broker
+_sent = []
+_saved_em = {"modify_sltp": exit_monitor.modify_sltp, "is_demo_account": exit_monitor.is_demo_account}
+exit_monitor.modify_sltp = lambda ticket, new_sl=None, new_tp=None: _sent.append((new_sl, new_tp))
+exit_monitor.is_demo_account = lambda: True
+
+
+def move_check(label, symbol, sl, tp, desired_sl, desired_tp, want):
+    _sent.clear()
+    m = {"ticket": 1, "symbol": symbol, "lot": 0.2, "entry": sl, "sl": sl, "tp": tp,
+         "recommended_keep_pct": 100, "desired_sl": desired_sl, "desired_tp": desired_tp,
+         "final_decision": ("ถือต่อ — ทดสอบ", "")}
+    with contextlib.redirect_stdout(io.StringIO()):
+        exit_monitor.execute_decision(m)
+    ok = _sent == want
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {_sent or 'ไม่ส่ง'}")
+    return ok
+
+
+print("\nส่งคำสั่งขยับ SL/TP เมื่อราคาเปลี่ยนอย่างน้อย 1 point ของ symbol:")
+results += [
+    move_check("EUR ดึง TP เข้า 4 pip -> ส่ง (เดิมเงียบ เพราะ < 0.001)",
+               "EURUSDm", 1.16200, 1.18500, 1.16200, 1.18460, [(None, 1.18460)]),
+    move_check("EUR ถอย SL ออก 2 pip -> ส่ง", "EURUSDm", 1.16200, 1.18500, 1.16180, 1.18500,
+               [(1.16180, None)]),
+    move_check("EUR ต่างไม่ถึงครึ่ง point -> ไม่ส่ง", "EURUSDm", 1.16200, 1.18500,
+               1.162002, 1.185003, []),
+    move_check("XAU ต่าง 0.0004 (< 1 point) -> ไม่ส่ง", "XAUUSDm", 3900.0, 4200.0,
+               3900.0004, 4200.0, []),
+    move_check("XAU ขยับ SL 0.002 -> ส่ง", "XAUUSDm", 3900.0, 4200.0, 3899.998, 4200.0,
+               [(3899.998, None)]),
+    move_check("ยังไม่มี TP บน broker (0) -> ตั้งได้เสมอ", "EURUSDm", 1.16200, 0.0,
+               1.16200, 1.18460, [(None, 1.18460)]),
+]
+for _k, _v in _saved_em.items():
+    setattr(exit_monitor, _k, _v)
+
+
+# ── จังหวะรอบสแกน + สรุปรายวัน (2026-09-28) ──────────────────────────────────────────────────
+# เดิม sleep 3600 วิหลังสแกนเสร็จ -> รอบเลื่อนจนข้ามชั่วโมง 00 แล้วสรุปรายวันหาย 2 วันติด
+import datetime as _dt  # noqa: E402
+import tempfile          # noqa: E402
+
+
+def _ts(h, m, s):
+    return _dt.datetime(2026, 9, 28, h, m, s, tzinfo=_dt.timezone.utc).timestamp()
+
+
+def wait_check(label, now_ts, want_ts):
+    got = now_ts + scheduler.seconds_until_next_scan(now_ts)
+    ok = abs(got - want_ts) < 1e-6
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> "
+          f"{_dt.datetime.fromtimestamp(got, _dt.timezone.utc):%H:%M:%S} UTC")
+    return ok
+
+
+print(f"\nรอบสแกนตรงต้นชั่วโมง (+{scheduler.SCAN_DELAY_SECONDS} วิ) ไม่เลื่อนตามเวลาที่สแกน:")
+results += [
+    wait_check("สแกนเสร็จ 04:01:40 -> รอบถัดไป 05:01:00", _ts(4, 1, 40), _ts(5, 1, 0)),
+    wait_check("สแกนนาน เสร็จ 04:13:00 -> ยัง 05:01:00", _ts(4, 13, 0), _ts(5, 1, 0)),
+    wait_check("สแกนเสร็จ 23:59:50 -> 00:01:00 ไม่ข้ามชั่วโมง 00", _ts(23, 59, 50),
+               _ts(23, 59, 50) + 70),
+]
+
+_sum_sent = []
+_saved_sum = (scheduler._SUMMARY_STATE_FILE, journal.get_daily_statistics,
+              scheduler.notify.notify_daily_summary)
+scheduler._SUMMARY_STATE_FILE = os.path.join(tempfile.mkdtemp(), "daily_summary_state.json")
+journal.get_daily_statistics = lambda day: {"total_trades": 0}
+scheduler.notify.notify_daily_summary = lambda stats, day: _sum_sent.append(day)
+
+
+def summary_check(label, today, want):
+    _sum_sent.clear()
+    with contextlib.redirect_stdout(io.StringIO()):
+        scheduler.send_daily_summary_if_due(today)
+    ok = _sum_sent == want
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {_sum_sent or 'ไม่ส่ง'}")
+    return ok
+
+
+print("\nสรุปรายวัน — ส่งของเมื่อวานครั้งเดียวในรอบแรกที่สำเร็จของวันใหม่:")
+results += [
+    summary_check("รอบแรกของ 09-28 (ตอนไหนก็ได้) -> ส่งสรุป 09-27",
+                  _dt.date(2026, 9, 28), ["2026-09-27"]),
+    summary_check("รอบถัดไป/รีสตาร์ทวันเดียวกัน -> ไม่ส่งซ้ำ", _dt.date(2026, 9, 28), []),
+    summary_check("วันถัดไป ไม่มีรอบชั่วโมง 00 เลย -> ยังส่งสรุป 09-28",
+                  _dt.date(2026, 9, 29), ["2026-09-28"]),
+]
+(scheduler._SUMMARY_STATE_FILE, journal.get_daily_statistics,
+ scheduler.notify.notify_daily_summary) = _saved_sum
 
 # เคสข้างบนยิง WARNING "ไม่มี SL" จริง 2 บรรทัด — ต้องไม่มี handler ตัวไหนเขียนลงไฟล์ในโฟลเดอร์ logs/
 # (ถ้า get_logger เปลี่ยนวิธีเช็ค handler ซ้ำเมื่อไหร่ เคสนี้จะพังก่อนที่ log จริงจะถูกปนอีก)

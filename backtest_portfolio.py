@@ -17,7 +17,8 @@ backtest_replay.py เดินทีละ symbol ตามด่านจร�
 ห้ามใช้ตอบ "เพดานไหนให้ R สูงสุด" — ดู memory เรื่องผลต่าง 2-4R คือ noise
 
 ต้องรัน backtest_replay.py --log-cuts ให้ครบทุก symbol ก่อน เพราะความเสี่ยงที่ยังมีชีวิต
-ของแต่ละไม้สร้างจาก replay_cuts_*.csv (ไม้ที่ขยับ SL ไป breakeven แล้ว = เสี่ยง 0)
+ของแต่ละไม้สร้างจาก replay_cuts_*.csv (ปิดบางส่วน) + คอลัมน์ be_time ของ replay_trades_*.csv
+(ไม้ที่ขยับ SL ไป breakeven แล้ว = เสี่ยง 0 · คอลัมน์นี้มีตั้งแต่ 2026-09-28 ไฟล์ที่เก่ากว่าจะถูกเตือน)
 """
 import csv
 import sys
@@ -38,6 +39,7 @@ BE_PREFIXES = (em.BE_DECISION_PREFIX, "ขยับ SL ไปจุด Entry")
 def load():
     """คืน list ของไม้ พร้อม sched = [(เวลา, ความเสี่ยงที่เหลือเป็น R), ...]"""
     trades = []
+    _no_be_col = set()     # symbol ที่ไฟล์ replay ยังไม่มีคอลัมน์ be_time (รุ่นก่อน 2026-09-28)
     for sym in SYMBOLS:
         try:
             fh = open(f"replay_trades_{sym}.csv")
@@ -50,9 +52,12 @@ def load():
                 r = float(row["R"])
             except ValueError:
                 continue
+            if "be_time" not in row:
+                _no_be_col.add(sym)
             trades.append(dict(sym=sym, t_in=P(row["time"]), t_out=P(row["exit_time"]),
                                R=r, strategy=row["strategy"], key=row["time"],
-                               grp=CORRELATION_GROUPS.get(sym, sym)))
+                               grp=CORRELATION_GROUPS.get(sym, sym),
+                               be=P(row["be_time"]) if row.get("be_time") else None))
 
     cuts = defaultdict(list)
     for sym in SYMBOLS:
@@ -65,16 +70,31 @@ def load():
         for row in csv.DictReader(fh):
             cuts[(sym, row["entry_time"])].append(row)
 
+    if _no_be_col:
+        print(f"  ! replay_trades ของ {', '.join(sorted(_no_be_col))} ไม่มีคอลัมน์ be_time (ไฟล์ก่อน "
+              f"2026-09-28) — ไม้ที่ล็อก SL ที่ทุนแล้วจะถูกนับว่ายังเสี่ยงเต็มจนปิด · รัน replay ใหม่ก่อน")
+
     for t in trades:
+        # เหตุการณ์ของไม้เรียงตามเวลา: ปิดบางส่วน (rem ลด) กับ SL ถึงทุน (ความเสี่ยงเหลือ 0 จนปิด)
+        # 🔴 2026-09-28: เดิมรู้ว่าไม้ล็อกทุนจาก final ของแถว cut เท่านั้น ซึ่งเกิดพร้อมการปิดบางส่วน
+        # พอเลิกปิดบางส่วน แถวพวกนั้นก็หาย — base 176 ไม้มีไม้ที่ SL เคยถึงทุน 62 ไม้ แต่มีแถว cut ที่
+        # บอก BE แค่ 4 แถว (ตอนชนเพดาน 30 วัน) = ไม้ที่ล็อกทุนแล้วถูกนับว่ายังเสี่ยงเต็มจนปิด
+        # ตอนนี้ใช้ be_time ที่ replay บันทึกตรงจากจังหวะที่ SL ถึง entry (backtest_replay.step_position)
+        events = [(P(c["cut_time"]), "cut", c) for c in cuts[(t["sym"], t["key"])]]
+        if t["be"] is not None:
+            events.append((t["be"], "be", None))
         sched, rem, be = [(t["t_in"], 1.0)], 1.0, False
-        for c in sorted(cuts[(t["sym"], t["key"])], key=lambda c: c["cut_time"]):
-            try:
-                rem = float(c["เหลือ"])     # สัดส่วนที่เหลือหลังปิดบางส่วน
-            except (ValueError, KeyError):
-                pass
-            if c["final"].startswith(BE_PREFIXES):
+        for when, kind, c in sorted(events, key=lambda e: e[0]):
+            if kind == "be":
                 be = True
-            sched.append((P(c["cut_time"]), 0.0 if be else rem))
+            else:
+                try:
+                    rem = float(c["เหลือ"])     # สัดส่วนที่เหลือหลังปิดบางส่วน
+                except (ValueError, KeyError):
+                    pass
+                if c["final"].startswith(BE_PREFIXES):   # ไฟล์รุ่นเก่าที่ยังไม่มี be_time
+                    be = True
+            sched.append((when, 0.0 if be else rem))
         sched.append((t["t_out"], 0.0))
         t["sched"] = sched
     return trades

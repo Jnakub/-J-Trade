@@ -24,7 +24,7 @@ from config import (
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
-    BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO,
+    BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias
@@ -128,6 +128,56 @@ print = tee_print(log)   # เขียนทุกอย่างที่ prin
 from config import REGIME_NO_TRADE, REGIME_TREND, REGIME_REVERSAL   # noqa: E402  (ดู config)
 
 INTERVAL_SECONDS = 3600   # เช็คทุก 1 ชั่วโมง
+# สแกนหลังต้นชั่วโมงกี่วินาที — รอให้แท่ง 1H ของชั่วโมงใหม่มี tick แรกก่อน (แท่งท้ายสุดที่ MT5 คืนต้อง
+# เป็นแท่งฟอร์มมิ่งของชั่วโมงใหม่ ไม่ใช่แท่งที่เพิ่งปิด) = ใกล้กับที่ replay สแกนตรงขอบแท่งที่สุด
+SCAN_DELAY_SECONDS = 60
+
+
+def seconds_until_next_scan(now_ts: float) -> float:
+    """วินาทีจนถึงรอบถัดไป = ต้นชั่วโมงถัดไป + SCAN_DELAY_SECONDS
+
+    🔴 2026-09-28: เดิม sleep(INTERVAL_SECONDS) *หลัง* สแกนเสร็จ รอบจึงเลื่อนช้าลงเท่ากับเวลาที่ใช้
+    สแกนทุกรอบ (log จริงห่างกัน 61-73 นาที) แล้วข้ามไปทั้งชั่วโมงเป็นระยะ (09-27 23:51 -> 09-28
+    01:00) = ชั่วโมงนั้นไม่มีทั้งการหาไม้และ exit monitor ขณะที่ replay สแกนครบทุกแท่ง 1H
+    ขอบชั่วโมงคิดจาก Unix time = ขอบแท่ง 1H ของ MT5 (UTC) = ต้นชั่วโมงเวลาเครื่อง (UTC+7) ด้วย"""
+    return INTERVAL_SECONDS - (now_ts % INTERVAL_SECONDS) + SCAN_DELAY_SECONDS
+
+
+def sleep_until(target_ts: float) -> None:
+    """หลับจนถึงเวลา target ตามนาฬิกาจริง ทีละไม่เกิน 60 วิ — ถ้าเครื่อง sleep ไปกลางทาง
+    time.sleep ก้อนเดียวยาวๆ จะนับที่เหลือต่อหลังเครื่องตื่น (เลยเวลาไปอีกเป็นชั่วโมง) การเช็ค
+    นาฬิกาทุกนาทีทำให้รอบถัดไปเริ่มภายใน ~1 นาทีหลังเครื่องตื่น"""
+    while (left := target_ts - time.time()) > 0:
+        time.sleep(min(left, 60))
+
+
+# สรุปรายวันส่งไปแล้วถึงวันไหน — เก็บลงไฟล์ (ไม่ใช่ตัวแปร) ด้วยเหตุผลเดียวกับ reject_cooldown.json:
+# รีสตาร์ทแล้วต้องไม่ส่งซ้ำ และต้องไม่ลืมวันที่ยังไม่ได้ส่ง
+_SUMMARY_STATE_FILE = os.path.join(os.path.dirname(__file__), "daily_summary_state.json")
+
+
+def send_daily_summary_if_due(today) -> None:
+    """ส่งสรุปของ "เมื่อวาน" ครั้งเดียว ในรอบแรกที่ต่อ MT5 + reconcile สำเร็จของวันใหม่
+
+    🔴 2026-09-28: เดิมส่งเฉพาะรอบที่ตรงชั่วโมง 00 — สรุป 09-26 หายเพราะรอบ 00:14 ของ 09-27 ต่อ MT5
+    ไม่ได้ (Authorization failed ทั้งรอบ) ส่วนสรุป 09-27 หายเพราะรอบเลื่อนข้ามชั่วโมง 00 ไปเลย
+    ต้องเรียกหลัง reconcile_closed_positions() เสมอ ไม่งั้นไม้ที่ broker ปิดเมื่อวานยังค้าง 'Open'"""
+    day = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        with open(_SUMMARY_STATE_FILE, encoding="utf-8") as f:
+            last = json.load(f).get("last_day")
+    except Exception:
+        last = None                        # ไฟล์ยังไม่มี/พัง = ถือว่ายังไม่เคยส่ง
+    if last is not None and last >= day:   # วันที่แบบ ISO เทียบเป็นสตริงได้ตรงๆ
+        return
+    stats = journal.get_daily_statistics(day)
+    notify.notify_daily_summary(stats, day)
+    print(f"[journal] ส่งสรุปรายวัน {day} แล้ว — {stats}")
+    try:
+        with open(_SUMMARY_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"last_day": day}, f)
+    except Exception as exc:
+        print(f"  ⚠️ เขียน {_SUMMARY_STATE_FILE} ไม่ได้ ({exc}) — สรุปวันนี้อาจถูกส่งซ้ำรอบหน้า")
 
 
 # ---------------------------------------------------------------------------
@@ -202,10 +252,13 @@ def scan_symbol(symbol: str) -> None:
     positions = mt5.positions_get(symbol=symbol)
     occupied = set()
     if positions:
-        for pos in positions:
-            occupied.add(journal.get_trade_strategy(pos.ticket))
+        strategies = [journal.get_trade_strategy(pos.ticket) for pos in positions]
+        # เก็บเป็น "ช่อง" ไม่ใช่ชื่อกลยุทธ์ — ไม้ Breakout ครองช่อง Reversal (config.slot_of ตัวเดียว
+        # กับ backtest_replay) 🔴 2026-09-28: เดิมเก็บชื่อดิบ ไม้ Breakout จึงไม่บล็อกช่อง Reversal
+        # แล้วระบบเปิด Breakout ซ้ำได้ทุกชั่วโมงที่สัญญาณยังค้าง (ดู docstring ที่ config.slot_of)
+        occupied = {slot_of(s) for s in strategies}
         print(f"  [{symbol}] มี position เปิดอยู่ {len(positions)} ไม้ "
-              f"({', '.join(sorted(occupied))}) -> รัน Exit Monitor")
+              f"({', '.join(sorted(set(strategies)))}) -> รัน Exit Monitor")
         for pos in positions:
             try:
                 m = analyze_position(pos)
@@ -552,14 +605,8 @@ def run_scheduler() -> None:
     print("=" * 52)
     print("  AUTO TRADER SCHEDULER  (กด Ctrl+C เพื่อหยุด)")
     print(f"  Symbols  : {', '.join(SYMBOLS)}")
-    print(f"  Interval : {INTERVAL_SECONDS // 60} นาที")
+    print(f"  Interval : {INTERVAL_SECONDS // 60} นาที  (สแกนที่ต้นชั่วโมง +{SCAN_DELAY_SECONDS} วิ)")
     print("=" * 52)
-
-    # 2026-08-02: ส่งสรุปรายวันตอนเที่ยงคืน — loop นี้สแกนทุก INTERVAL_SECONDS (1 ชม.) นับจาก
-    # เวลาที่โปรเซสเริ่ม ไม่ได้ sync กับนาฬิกาจริง แต่เพราะ 3600s x 24 = 1 วันพอดี รอบที่ตรง
-    # ชั่วโมง 0 (เที่ยงคืน) จะมาแค่ 1 ครั้งต่อวันเสมอ (นาทีอาจไม่ตรง 00:00 เป๊ะ แต่ชั่วโมงตรง) —
-    # เก็บวันที่ส่งล่าสุดไว้กันส่งซ้ำถ้า loop ดันมาชนชั่วโมง 0 มากกว่า 1 รอบ (เช่น restart)
-    last_summary_date = None
 
     while True:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -577,21 +624,14 @@ def run_scheduler() -> None:
                 print(f"[journal] reconcile ล้มเหลว — {exc}")
                 log.error("reconcile_closed_positions ERROR", exc_info=True)
 
-            today = datetime.now().date()
-            if datetime.now().hour == 0 and last_summary_date != today:
-                # สรุป **เมื่อวาน** ไม่ใช่วันนี้ — 🔴 2026-09-25: เดิมเรียก get_daily_statistics()
-                # ด้วย default = วันนี้ ซึ่งตอน 00:xx เพิ่งเริ่มได้ไม่กี่นาที สรุปทุกฉบับจึงเป็น
-                # "เทรด 0" ตลอด (log 09-17 ถึง 09-25 เป็น 0 ทุกฉบับ ทั้งที่ 09-21 มี SL −178.32
-                # และ 09-24 มี TP +236.76) · close_date ใน CSV เป็นเวลาเครื่อง = วันเดียวกับ today
-                day = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-                try:
-                    stats = journal.get_daily_statistics(day)
-                    notify.notify_daily_summary(stats, day)
-                    print(f"[journal] ส่งสรุปรายวัน {day} แล้ว — {stats}")
-                except Exception as exc:
-                    print(f"[journal] ส่งสรุปรายวันล้มเหลว — {exc}")
-                    log.error("notify_daily_summary ERROR", exc_info=True)
-                last_summary_date = today
+            # สรุป **เมื่อวาน** ในรอบแรกที่สำเร็จของวันใหม่ (ดู send_daily_summary_if_due)
+            # 🔴 2026-09-25: เดิมสรุป "วันนี้" ตอน 00:xx ได้ "เทรด 0" ทุกฉบับ (log 09-17 ถึง 09-25
+            # ทั้งที่ 09-21 มี SL −178.32 และ 09-24 มี TP +236.76) · close_date ใน CSV เป็นเวลาเครื่อง
+            try:
+                send_daily_summary_if_due(datetime.now().date())
+            except Exception as exc:
+                print(f"[journal] ส่งสรุปรายวันล้มเหลว — {exc}")
+                log.error("notify_daily_summary ERROR", exc_info=True)
 
             for symbol in SYMBOLS:
                 scan_symbol(symbol)
@@ -602,12 +642,11 @@ def run_scheduler() -> None:
         finally:
             mt5.shutdown()
 
-        next_run = datetime.fromtimestamp(
-            time.time() + INTERVAL_SECONDS
-        ).strftime("%H:%M:%S")
-        print(f"\n  รอบถัดไป : {next_run}  (อีก {INTERVAL_SECONDS // 60} นาที)")
+        target = time.time() + seconds_until_next_scan(time.time())
+        print(f"\n  รอบถัดไป : {datetime.fromtimestamp(target):%H:%M:%S}  "
+              f"(อีก {(target - time.time()) / 60:.0f} นาที)")
         print("-" * 52)
-        time.sleep(INTERVAL_SECONDS)
+        sleep_until(target)
 
 
 if __name__ == "__main__":
