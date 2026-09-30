@@ -459,6 +459,15 @@ if _amp_arg:
     _v = float(_amp_arg.split("=")[1])
     regime_check.ADX_MIN_PEAK_REVERSAL = _v if _v > 0 else None
 
+# --rev-no-adx-floor / --rev-adx-floor : Reversal ไม่ต้อง/ต้องผ่านพื้น ADX ≥ 22 เหลือแค่ peak ≥ ADX_MIN_PEAK_REVERSAL + โค้งลง
+# (ดู regime_check.REVERSAL_USES_ADX_FLOOR)
+# 2026-09-30: ระบบจริงเอาพื้นออกแล้ว (default = False) · --rev-adx-floor = ใส่พื้นกลับเพื่อเทียบ
+_rev_floor_default = regime_check.REVERSAL_USES_ADX_FLOOR
+if "--rev-no-adx-floor" in sys.argv:
+    regime_check.REVERSAL_USES_ADX_FLOOR = False
+if "--rev-adx-floor" in sys.argv:
+    regime_check.REVERSAL_USES_ADX_FLOOR = True
+
 # --rev-choch / --no-rev-choch : ทับ config.REVERSAL_NEEDS_CHOCH — Reversal ต้องเห็นโครงสร้าง
 # เดิมพัง (CHoCH) ก่อนเข้าไหม · ใช้ exit_monitor.check_structure_break ตัวเดียวกับกฎออก
 rev_choch = cfg.REVERSAL_NEEDS_CHOCH
@@ -1500,6 +1509,8 @@ if min_turn != config.MIN_TURN_FROM_EXTREME_R:   # ติด tag เฉพาะ
     _tag += f"_minturn{min_turn:g}" if min_turn else "_nominturn"
 if reject_cd != config.REJECT_COOLDOWN_HOURS:
     _tag += f"_rejcd{reject_cd:g}" if reject_cd else "_norejcd"
+if regime_check.REVERSAL_USES_ADX_FLOOR != _rev_floor_default:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_revnoadxfloor" if not regime_check.REVERSAL_USES_ADX_FLOOR else "_revadxfloor"
 if same_scan_reentry:
     _tag += "_samescan"
 if reverse_on_opposite:

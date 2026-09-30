@@ -240,6 +240,21 @@ ADX_DECLINE_BARS  = 3     # โค้งลงติดกันกี่แท�
 # ใช้ --adx-min-peak=N (หรือ --adx-min-peak=0 เพื่อปิด) ใน backtest_replay
 ADX_MIN_PEAK_REVERSAL = 28.5
 
+# REVERSAL_USES_ADX_FLOOR — Reversal ต้องผ่านพื้น ADX ตอนนี้ ≥ ADX_GRAY_HIGH (22) ด้วยไหม
+# (2026-09-30 ผู้ใช้ถามว่า "peak ≥ 28.5 กับ ADX ≥ 22 เป็นกฎเดียวกันไหม ยุบเป็นกฎเดียวได้ไหม")
+# ไม่ใช่กฎเดียวกัน: peak = ค่าสูงสุด 10 แท่งที่ผ่านมา · 22 = ค่าตอนนี้ แต่ซ้อนกันเกือบหมด —
+# แท่ง 4H ~2 ปี 10 symbol: ADX ผ่านเงื่อนไข Reversal (peak+โค้งลง) 5,843 แท่ง โดนพื้น 22 ตัดแค่ 277 (4.7%)
+# True = พฤติกรรมเดิม (CHOPPY/เขตเทาตัดก่อนถึง branch Reversal) · False = Reversal ใช้ peak อย่างเดียว
+# ใช้ --rev-no-adx-floor ใน backtest_replay
+# 🔻 วัดแล้ว 2026-09-30 (10 symbol · --end=2026-09-24T00:00): ไม้เปลี่ยน **1 ไม้ใน 2 ปี** —
+#    ไม้ใหม่ ETH Reversal Short 2025-02-15 โดน SL −1.04R · อีก 9 symbol ไม่ขยับเลยสักไม้
+#    (4.7% ของแท่งที่พื้นตัด ส่วนใหญ่ไม่มี Key Level + Divergence ครบอยู่แล้ว) = สองกฎนี้แทบเป็นกฎเดียวกันจริง
+# 🔻 สถานะปัจจุบัน: **False ตั้งแต่ 2026-09-30 (คำสั่งผู้ใช้ "เอาพื้นออก")** — ADX ของ Reversal เหลือกฎเดียว:
+#    peak ≥ ADX_MIN_PEAK_REVERSAL แล้วโค้งลง ADX_DECLINE_BARS แท่ง · พื้น 20/22 ยังใช้กับ Scoring เหมือนเดิม
+#    ผลข้างเคียงใน log: แท่งที่ ADX < 22 แต่ peak โค้งลง จะขึ้นเป็น REVERSAL-WATCH แทน CHOPPY/เขตเทา
+#    (ทั้งคู่อยู่ใน REGIME_NO_TRADE ไม่เปลี่ยนการตัดสินใจ) · ย้อนกลับด้วย --rev-adx-floor ใน backtest_replay
+REVERSAL_USES_ADX_FLOOR = False
+
 # Swing High/Low ของ ADX เอง (คนละตัวกับ find_swing_highs/lows ที่ใช้กับราคา — ไม่มี volume filter)
 # ทดสอบแล้ว left/right=7 แคบไป มองไม่เห็นยอดเขาที่อยู่ไกล ทำให้ V-shape ลึกจริงหลุดไป
 # left/right=14 จับจุดได้แม่นขึ้น แลกกับยืนยันช้าลง (~2.3 วันบน 4H)
@@ -1025,21 +1040,8 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
 # สรุป Regime
 # ---------------------------------------------------------------------------
 
-def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
-                    key_level: dict = None, divergence: dict = None) -> tuple[str, str, str]:
-    """คืน (regime, action, color)"""
-    # CHOPPY — ห้ามเทรด
-    if adx_now < ADX_CHOPPY:
-        return ("CHOPPY", f"พัก — การไม่เทรดคือ position ที่ถูกต้อง (ADX < {ADX_CHOPPY:.0f})", RED)
-
-    # เขตเทา — 2026-08-11: ข้อความเดิม hardcode "20-25" ค้างมาจากก่อนแก้ ADX_GRAY_HIGH จาก 25
-    # เป็น 22 (ดู comment ที่นิยามค่าคงที่ด้านบน) ทำให้ log แสดงช่วงผิดจากเกณฑ์จริงมาตลอด — ใช้
-    # ค่าคงที่จริงแทน hardcode กันเพี้ยนซ้ำถ้ามีคนปรับ threshold อีกในอนาคตแล้วลืมแก้ข้อความ
-    if adx_now < ADX_GRAY_HIGH:
-        return ("เขตเทา",
-                f"รอ ADX เลือกทางก่อน ห้ามฝืนเปิด scorecard (ADX {ADX_CHOPPY:.0f}-{ADX_GRAY_HIGH:.0f})",
-                YELLOW)
-
+def _reversal_regime(peak: dict, key_level: dict, divergence: dict):
+    """branch Reversal ของ classify_regime — คืน (regime, action, color) หรือ None ถ้า ADX ไม่เข้าเกณฑ์"""
     # Reversal candidate — relative peak & decline: ทำจุดสูงสุดใหม่ในรอบที่มองย้อน (ไม่ว่าตัวเลขจะเป็นเท่าไหร่
     # เช่น 28, 32, 45) แล้วโค้งลงติดกันครบแท่ง — ไม่ใช้ threshold ตายตัวอย่าง 40 อีกต่อไป เพราะ "แรงสุดของรอบนั้น"
     # ไม่จำเป็นต้องแตะระดับคงที่เสมอไป จุดเปลี่ยนโมเมนตัม (peak แล้วอ่อนแรง) สำคัญกว่าตัวเลขสัมบูรณ์
@@ -1064,6 +1066,34 @@ def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
         return ("REVERSAL-WATCH",
                 f"ADX peak {peak['peak']:.1f} แล้วโค้งลง {peak['bars_since_peak']} แท่ง "
                 f"-> เฝ้าดู Reversal แต่ยังขาด: {' + '.join(missing)}", CYAN)
+
+    return None
+
+
+def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
+                    key_level: dict = None, divergence: dict = None) -> tuple[str, str, str]:
+    """คืน (regime, action, color)"""
+    # REVERSAL_USES_ADX_FLOOR = False -> Reversal ตัดสินด้วย peak + โค้งลงอย่างเดียว ไม่สน ADX ตอนนี้
+    if not REVERSAL_USES_ADX_FLOOR:
+        rev = _reversal_regime(peak, key_level, divergence)
+        if rev:
+            return rev
+
+    # CHOPPY — ห้ามเทรด
+    if adx_now < ADX_CHOPPY:
+        return ("CHOPPY", f"พัก — การไม่เทรดคือ position ที่ถูกต้อง (ADX < {ADX_CHOPPY:.0f})", RED)
+
+    # เขตเทา — 2026-08-11: ข้อความเดิม hardcode "20-25" ค้างมาจากก่อนแก้ ADX_GRAY_HIGH จาก 25
+    # เป็น 22 (ดู comment ที่นิยามค่าคงที่ด้านบน) ทำให้ log แสดงช่วงผิดจากเกณฑ์จริงมาตลอด — ใช้
+    # ค่าคงที่จริงแทน hardcode กันเพี้ยนซ้ำถ้ามีคนปรับ threshold อีกในอนาคตแล้วลืมแก้ข้อความ
+    if adx_now < ADX_GRAY_HIGH:
+        return ("เขตเทา",
+                f"รอ ADX เลือกทางก่อน ห้ามฝืนเปิด scorecard (ADX {ADX_CHOPPY:.0f}-{ADX_GRAY_HIGH:.0f})",
+                YELLOW)
+
+    rev = _reversal_regime(peak, key_level, divergence)
+    if rev:
+        return rev
 
     # ADX 40+ ยังพุ่งไม่หยุด (ยังไม่โค้งลง) — 2026-08-31: regime นี้ถูกย้ายไป REGIME_NO_TRADE
     # แล้ว (ทั้ง scheduler.py และ backtest_replay.py) = ไม่เปิด scorecard ใดๆ ทั้งสิ้น
