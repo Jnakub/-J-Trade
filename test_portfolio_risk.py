@@ -345,6 +345,42 @@ results += [
 (scheduler._SUMMARY_STATE_FILE, journal.get_daily_statistics,
  scheduler.notify.notify_daily_summary) = _saved_sum
 
+# 2026-09-30: ไม้ใหม่เปิดสวนทิศ -> ย้าย TP ไม้เก่าที่ขาดทุนอยู่ไป entry (config.TP_TO_ENTRY_ON_OPPOSITE)
+# ตัวเลขจากคู่ HK50 จริง: Reversal Long 24,755.7 ราคา 24,503.4 · ไม้ใหม่ Short #2
+from types import SimpleNamespace as _NS  # noqa: E402
+_modified = []
+
+
+def tpe_check(label, old, new_dir, want):
+    _saved = (scheduler.mt5.positions_get, scheduler.modify_sltp)
+    scheduler.mt5.positions_get = lambda symbol=None: [old, _NS(ticket=2)]
+    scheduler.modify_sltp = lambda t, new_sl=None, new_tp=None: _modified.append((t, new_tp))
+    _modified.clear()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            scheduler._tp_to_entry_on_opposite("HK50m", new_dir, 2)
+    finally:
+        scheduler.mt5.positions_get, scheduler.modify_sltp = _saved
+    ok = _modified == want
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {_modified or 'ไม่แตะ'}")
+    return ok
+
+
+def _hk(type_, cur, tp=25618.2):
+    return _NS(ticket=1, type=type_, price_open=24755.7, price_current=cur, tp=tp)
+
+
+_B, _S = mt5.POSITION_TYPE_BUY, mt5.POSITION_TYPE_SELL
+print("\nไม้ใหม่เปิดสวนทิศ -> ย้าย TP ไม้เก่าที่ขาดทุนไป entry:")
+results += [
+    tpe_check("Long ขาดทุน + ไม้ใหม่ Short -> TP = entry", _hk(_B, 24503.4), "Short", [(1, 24755.7)]),
+    tpe_check("Long กำไร + ไม้ใหม่ Short -> ไม่แตะ", _hk(_B, 24900.0), "Short", []),
+    tpe_check("Long ขาดทุน + ไม้ใหม่ Long (ทิศเดียวกัน) -> ไม่แตะ", _hk(_B, 24503.4), "Long", []),
+    tpe_check("Short ขาดทุน + ไม้ใหม่ Long -> TP = entry", _hk(_S, 24900.0, 23000.0), "Long",
+              [(1, 24755.7)]),
+    tpe_check("TP อยู่ที่ entry แล้ว -> ไม่ส่งซ้ำ", _hk(_B, 24503.4, 24755.7), "Short", []),
+]
+
 # เคสข้างบนยิง WARNING "ไม่มี SL" จริง 2 บรรทัด — ต้องไม่มี handler ตัวไหนเขียนลงไฟล์ในโฟลเดอร์ logs/
 # (ถ้า get_logger เปลี่ยนวิธีเช็ค handler ซ้ำเมื่อไหร่ เคสนี้จะพังก่อนที่ log จริงจะถูกปนอีก)
 _file_logs = [h.baseFilename for n in ("scheduler", "exit_monitor")

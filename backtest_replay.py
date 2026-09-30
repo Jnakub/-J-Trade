@@ -575,6 +575,31 @@ last_tp_close_time = None
 # (XAU 20:00 แทน 22:00 · US500 17:00 แทน 18:00) = ความคลาดนี้ไม่ได้ทำให้ตัวเลข base เพี้ยน
 same_scan_reentry = "--same-scan-reentry" in sys.argv
 
+# --reverse-on-opposite : ไม้ใหม่เปิดสวนทิศไม้ที่ถืออยู่ในอีกช่อง (Scoring vs Reversal/Breakout)
+# -> ปิดไม้เก่า 100% ที่ราคาเข้าของไม้ใหม่ในรอบสแกนเดียวกัน แล้วเปิดไม้ใหม่ตามปกติ (= กลับทิศ)
+# ระบบจริงไม่มีสิ่งนี้: SLOT_PER_STRATEGY เช็คแค่ช่องว่าง ไม่ดูทิศ จึงถือสองไม้สวนกันค้างไว้ (hedge)
+# 2026-09-30 base 10 symbol: เกิด 14 ครั้ง · ไม้ใหม่ +10.02R · ไม้เก่า +4.20R
+# ไม้ที่ถูกปิดได้ label "REVERSE" · ปิดกฎนี้ = no-op (ไม่ใส่ธง = base เป๊ะ)
+# 🔻 วัดแล้ว 2026-09-30 (7 symbol ที่มีคู่สวน + HK50 identity = 0.00 เป๊ะ · --end=2026-09-24T00:00):
+#    **−8.54R · แย่ลง 5/7** · direct 16 ไม้ −4.80R |t| 0.98 · churn ไม้ใหม่ 4 ไม้ −3.77R (แพ้ 4/4)
+#    ไม้เก่าที่ถูกตัดส่วนใหญ่ยังจะไปถึง TP (BTC 2.41->0.02 · EUR 2.71->0.59) — สัญญาณสวนไม่ได้แปลว่า
+#    ไม้เก่าผิดทาง · GBPCHF กลับไปกลับมาเป็นลูกโซ่ (Reversal/Scoring สลับกันทุกไม่กี่ชั่วโมง)
+#    👉 ไม่เอา — คง hedge ไว้ตามระบบจริง
+reverse_on_opposite = "--reverse-on-opposite" in sys.argv
+
+# --tp-entry-on-opposite : ไม้ใหม่เปิดสวนทิศไม้ที่ถืออยู่ในอีกช่อง และไม้เก่า **ขาดทุนอยู่** ณ ราคาเข้า
+# ของไม้ใหม่ -> ย้าย TP ของไม้เก่ามาไว้ที่ entry ของมันเอง (ออกเสมอตัวถ้าราคากลับมา ไม่งั้นรอ SL เดิม)
+# ไอเดียผู้ใช้ 2026-09-30 จากคู่ HK50 จริง: TP ของ Reversal Long (25,618) อยู่เหนือ SL ของ Scoring
+# Short (24,899) = ไม้เก่าจะชนะได้ก็ต่อเมื่อไม้ใหม่แพ้ · ไม้เก่าที่กำไรอยู่ไม่แตะ (TP ที่ entry
+# จะอยู่ผิดฝั่งราคา broker ปฏิเสธ) · TP trailing ของ exit_monitor ratchet เข้าอย่างเดียว จึงไม่ดึงกลับ
+# 🔻 วัดแล้ว 2026-09-30 (7 symbol ที่มีคู่สวน · --end=2026-09-24T00:00): **−0.47R · direct 6 ไม้ |t| 0.27
+#    churn 0** = ไม่มีผล · เปลี่ยนวิธีจบจริงแค่ 3 ไม้ และหักล้างกันเอง: GBPCHF ไม้ที่จะโดน SL −1.06
+#    ออกที่ 0 · อีกไม้ที่จะได้ TP +1.18 ก็ออกที่ 0 · EUR +0.38 -> 0 · ไม้เก่าที่ขาดทุนตอนไม้สวนเปิด
+#    ส่วนใหญ่ไม่กลับมาแตะ entry เลย (จบ SL เหมือนเดิม) 👉 ไม่เอา
+# 2026-09-30: เข้าระบบจริงแล้วที่ config.TP_TO_ENTRY_ON_OPPOSITE (= default ของที่นี่) · ปิดด้วย --no-tp-entry-on-opposite
+tp_entry_on_opposite = (config.TP_TO_ENTRY_ON_OPPOSITE or "--tp-entry-on-opposite" in sys.argv) \
+    and "--no-tp-entry-on-opposite" not in sys.argv
+
 # --limit-rr=X --limit-hours=H : จำลอง limit order ให้ setup Reversal ที่ติดด่าน R:R (2026-09-25
 # ไอเดียผู้ใช้) — ระบบจริงส่งแต่ market order จึงไม่มีสิ่งนี้ ธงนี้ถามว่า "ถ้ามีจะได้ไม้เพิ่มกี่ไม้ กี่ R"
 # ที่มา: REVERSAL-READY 2,303 ชม. ใน 2 ปี ตายที่ R:R ต่ำกว่า 1.15 ถึง 48% เพราะ divergence ยืนยัน
@@ -1293,6 +1318,19 @@ for n, row in enumerate(clock.to_dict("records")):
     if pending is not None and slot_of(strategy) == slot_of("Reversal"):
         limit_stats["ยกเลิก: market เข้าเอง"] += 1                    # ระบบเดิมมาก่อนเสมอ
         pending["log"].update(status="ยกเลิก: market", resolved=now); pending = None
+    if reverse_on_opposite:
+        for _k, _p in list(positions.items()):
+            if _k != slot_of(strategy) and _p["direction"] != direction:
+                _pl = _p["direction"] == "Long"
+                _r = ((entry - _p["entry"]) if _pl else (_p["entry"] - entry)) / abs(_p["entry"] - _p["sl0"])
+                trades.append(close_pos(_p, _k, now, _p["booked"] + _p["rem"] * _r, "REVERSE"))
+    if tp_entry_on_opposite:
+        for _k, _p in list(positions.items()):
+            if _k != slot_of(strategy) and _p["direction"] != direction:
+                _pl = _p["direction"] == "Long"
+                if (entry < _p["entry"]) if _pl else (entry > _p["entry"]):
+                    _p["tp"] = _p["entry"]
+                    _p["tp_entry_at"] = now
     positions[slot_of(strategy)] = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
            # tp0 = TP ที่ส่งจริงตอนเข้า (ผ่านเพดานแล้ว)  tp_fib = ที่ Fibonacci ให้ก่อนเพดาน
            # สองค่านี้ต่างกันเมื่อไม้นั้นโดนเพดานดึงเข้า — ดู comment ที่จุดคำนวณ tp_fib
@@ -1464,6 +1502,10 @@ if reject_cd != config.REJECT_COOLDOWN_HOURS:
     _tag += f"_rejcd{reject_cd:g}" if reject_cd else "_norejcd"
 if same_scan_reentry:
     _tag += "_samescan"
+if reverse_on_opposite:
+    _tag += "_reverseopp"
+if tp_entry_on_opposite != config.TP_TO_ENTRY_ON_OPPOSITE:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_tpentryopp" if tp_entry_on_opposite else "_notpentryopp"
 if limit_rr:
     _tag += f"_limitrr{limit_rr:g}h{limit_hours:g}"
 if log_rr_blocked:     # บันทึกอย่างเดียว — ติด tag กันทับ base (ไฟล์ไม้ต้องตรง base เป๊ะ = identity check)

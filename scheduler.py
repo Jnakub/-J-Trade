@@ -24,12 +24,12 @@ from config import (
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
-    BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of,
+    BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias
 from order import (calculate_lot_size, clamp_lot, place_order, position_risk_amount,
-                   risk_pct_of)
+                   risk_pct_of, modify_sltp)
 import swing
 from exit_monitor import (
     check_structure_break,
@@ -239,6 +239,30 @@ def check_portfolio_risk(symbol: str, balance: float) -> tuple[bool, str]:
                        f"+ ไม้ใหม่ 1R > {MAX_GROUP_RISK_R}R")
 
     return True, ""
+
+
+def _tp_to_entry_on_opposite(symbol: str, direction: str, new_ticket) -> None:
+    """ไม้ใหม่เพิ่งเปิดสวนทิศไม้เก่าใน symbol เดียวกัน -> ย้าย TP ไม้เก่าที่ขาดทุนอยู่มาไว้ที่ entry ของมัน
+    ที่มา/ตัวเลขที่ config.TP_TO_ENTRY_ON_OPPOSITE · ตัวเดียวกับ backtest_replay --tp-entry-on-opposite"""
+    for pos in mt5.positions_get(symbol=symbol) or []:
+        if pos.ticket == new_ticket:
+            continue
+        old_long = pos.type == mt5.POSITION_TYPE_BUY
+        if (direction == "Long") == old_long:
+            continue                               # ทิศเดียวกัน — ไม่ใช่คู่สวน
+        in_loss = pos.price_current < pos.price_open if old_long else pos.price_current > pos.price_open
+        if not in_loss:
+            continue                               # กำไรอยู่ — TP ที่ entry จะอยู่ผิดฝั่งราคา
+        if pos.tp and abs(pos.tp - pos.price_open) < 1e-9 * abs(pos.price_open):
+            continue                               # ย้ายไว้แล้ว
+        try:
+            modify_sltp(pos.ticket, new_tp=pos.price_open)
+            print(f"  [{symbol}] ย้าย TP ไม้เก่า #{pos.ticket} ({'Long' if old_long else 'Short'}) "
+                  f"-> entry {pos.price_open} เพราะไม้ใหม่ #{new_ticket} เปิดสวนทิศ")
+            log.info(f"[{symbol}] TP #{pos.ticket} -> entry {pos.price_open} (opposite #{new_ticket})")
+        except Exception as exc:
+            print(f"  [{symbol}] ย้าย TP ไม้เก่า #{pos.ticket} ไป entry ไม่สำเร็จ — {exc}")
+            log.error(f"[{symbol}] TP-to-entry #{pos.ticket} ERROR", exc_info=True)
 
 
 def scan_symbol(symbol: str) -> None:
@@ -588,6 +612,8 @@ def scan_symbol(symbol: str) -> None:
                              strategy=strategy,
                              pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
+        if TP_TO_ENTRY_ON_OPPOSITE and ticket:
+            _tp_to_entry_on_opposite(symbol, direction, ticket)
 
     except ValueError as exc:
         print(f"  [{symbol}] BLOCKED — {exc}")
