@@ -25,6 +25,7 @@ from config import (
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
     BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE,
+    BREAKOUT_IGNORES_MIN_PEAK,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias
@@ -37,6 +38,7 @@ from exit_monitor import (
     check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS_CURRENCY,
 )
 from regime_check import get_regime
+import regime_check
 import reversal
 import notify
 from logger_setup import get_logger, tee_print
@@ -377,6 +379,19 @@ def scan_symbol(symbol: str) -> None:
         regime_info = get_regime(symbol)
         regime      = regime_info["regime"]
         print(f"  [{symbol}] Regime={regime}  ({regime_info['action']})")
+
+        # 4a. Breakout ไม่ต้องผ่านด่าน peak ADX (ดู config.BREAKOUT_IGNORES_MIN_PEAK) — รอบที่จะเป็น
+        #     REVERSAL-READY ถ้าไม่มีเกณฑ์ peak + divergence bearish + เทรนด์ 1D Long = ทาง flip เป็น Breakout
+        #     -> ถือเป็น REVERSAL-READY แล้วไหลเข้าทาง flip ด้านล่าง (ตรงกับ backtest_replay.regime_eff)
+        if (BREAKOUT_IGNORES_MIN_PEAK and BREAKOUT_ENABLED and REVERSAL_SHORT_NEEDS_1D_TREND
+                and regime != "REVERSAL-READY"
+                and (regime_info.get("reversal_nopeak") or ("",))[0] == "REVERSAL-READY"
+                and regime_info["divergence"].get("divergence") == "bearish"):
+            _bias, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
+            if _bias == "Long":
+                print(f"  [{symbol}] Breakout ข้ามด่าน peak ADX ({regime_info['peak']['peak']:.1f} < "
+                      f"{regime_check.ADX_MIN_PEAK_REVERSAL:g}) — ถือเป็น REVERSAL-READY เพื่อเข้าทาง Breakout")
+                regime = "REVERSAL-READY"
 
         if regime in REGIME_NO_TRADE:
             print(f"  [{symbol}] SKIP — regime ยังไม่พร้อมเปิด scorecard ใดๆ")

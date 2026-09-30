@@ -238,6 +238,18 @@ ADX_DECLINE_BARS  = 3     # โค้งลงติดกันกี่แท�
 # ⚠️ ผลข้างเคียง: แท่งที่ declining แต่ peak ต่ำกว่าเกณฑ์จะ **ไหลต่อไปถึง branch TREND**
 #    = อาจกลายเป็นโอกาส Scoring แทน ไม่ได้หายไปเฉยๆ — ต้องดู Scoring ในผล replay ด้วย
 # ใช้ --adx-min-peak=N (หรือ --adx-min-peak=0 เพื่อปิด) ใน backtest_replay
+#
+# 🔻 กวาดด้วย replay เต็มแล้ว 2026-09-30 (10 symbol · --end=2026-09-24T00:00 · ไม่มีพื้น ADX 22 แล้ว):
+#    peak  ไม้   ΣR       ΔR      Reversal       |t|   ตัด 5 ไม้ใหญ่  ดีขึ้น
+#    ปิด   316  +123.86  +13.52   104 +15.25R    0.73   +3.73        5/10  (Breakout +18R ตัวขับ · Scoring −5R)
+#    25    226  +103.23   −7.11    39 +13.66R    0.83   +1.67        3/8
+#    27    219  +107.77   −2.57    33 +14.09R    0.46   −0.03        2/5
+#    28.5  216  +110.34    base    30 +14.87R
+#    30    209  +106.07   −4.27    26 +14.00R    0.71   +0.38        5/8
+#    32    196   +89.37  −20.97    17  +5.50R    2.46   −5.20        0/8   <- หน้าผา: ตัดไม้ดี 23 ไม้ +21.4R
+#    👉 27-30 = ที่ราบ (ต่างจาก 28.5 ไม่เกิน |t| 0.71) · 28.5 เป็นยอดนิดหน่อยแต่ไม่ใช่ยอดแหลม · **คงไว้**
+#    ⚠️ ห่างหน้าผาที่ 32 แค่ ~12% — อย่าขยับขึ้น · "ปิดด่าน" ได้ไม้เพิ่ม 100 ไม้ (Reversal 30 -> 104 ไม้
+#    ที่รวมกันแค่ +0.4R) ระบบเปลี่ยนหน้าตาทั้งใบ และ backtest_replay ไม่เห็นเพดานพอร์ต 6R ที่จะบล็อกมากขึ้น
 ADX_MIN_PEAK_REVERSAL = 28.5
 
 # REVERSAL_USES_ADX_FLOOR — Reversal ต้องผ่านพื้น ADX ตอนนี้ ≥ ADX_GRAY_HIGH (22) ด้วยไหม
@@ -1040,15 +1052,16 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
 # สรุป Regime
 # ---------------------------------------------------------------------------
 
-def _reversal_regime(peak: dict, key_level: dict, divergence: dict):
+def _reversal_regime(peak: dict, key_level: dict, divergence: dict, min_peak="config"):
     """branch Reversal ของ classify_regime — คืน (regime, action, color) หรือ None ถ้า ADX ไม่เข้าเกณฑ์"""
     # Reversal candidate — relative peak & decline: ทำจุดสูงสุดใหม่ในรอบที่มองย้อน (ไม่ว่าตัวเลขจะเป็นเท่าไหร่
     # เช่น 28, 32, 45) แล้วโค้งลงติดกันครบแท่ง — ไม่ใช้ threshold ตายตัวอย่าง 40 อีกต่อไป เพราะ "แรงสุดของรอบนั้น"
     # ไม่จำเป็นต้องแตะระดับคงที่เสมอไป จุดเปลี่ยนโมเมนตัม (peak แล้วอ่อนแรง) สำคัญกว่าตัวเลขสัมบูรณ์
     # peak ต้องสูงพอด้วย (ดู ADX_MIN_PEAK_REVERSAL) — ถ้าไม่ถึง ปล่อยให้ไหลไป branch ถัดไป
     # (อาจกลายเป็น TREND = เปิด Scoring แทน) ไม่ใช่ตีเป็น NO_TRADE
-    if peak["declining"] and (not ADX_MIN_PEAK_REVERSAL
-                              or peak["peak"] >= ADX_MIN_PEAK_REVERSAL):
+    # min_peak="config" = ใช้ ADX_MIN_PEAK_REVERSAL · None = ไม่มีเกณฑ์ peak (ใช้กับ reversal_nopeak ด้านล่าง)
+    _mp = ADX_MIN_PEAK_REVERSAL if min_peak == "config" else min_peak
+    if peak["declining"] and (not _mp or peak["peak"] >= _mp):
         at_key  = bool(key_level and key_level.get("at_key_level"))
         has_div = bool(divergence and divergence.get("divergence"))
 
@@ -1161,6 +1174,9 @@ def get_regime(symbol: str, as_of=None) -> dict:
 
     return {
         "symbol": symbol, "regime": regime, "action": action, "color": color,
+        # regime ที่ branch Reversal จะให้ถ้าไม่มีเกณฑ์ peak — ข้อมูลอย่างเดียว ไม่แตะ "regime"
+        # (ใช้โดย backtest_replay --breakout-no-min-peak · 2026-09-30)
+        "reversal_nopeak": _reversal_regime(peak, key_level, divergence, min_peak=None),
         "adx_now": adx_now, "adx_direction": direction, "peak": peak, "adx_swings": adx_swings,
         "structure": structure, "key_level": key_level, "divergence": divergence,
         "closed_idx": closed_idx,

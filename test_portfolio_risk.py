@@ -198,7 +198,7 @@ import exit_monitor  # noqa: E402
 SLOT_SKIP = "ช่อง Reversal มีไม้เปิดอยู่แล้ว"
 
 
-def scan_output(on_book: list[str], regime: str) -> str:
+def scan_output(on_book: list[str], regime: str, regime_extra: dict = None, bias_1d: str = None) -> str:
     """รัน scan_symbol("XAUUSDm") ตอนที่มีไม้กลยุทธ์ on_book เปิดอยู่ แล้วคืนข้อความที่พิมพ์"""
     global _positions
     _positions = []
@@ -217,7 +217,9 @@ def scan_output(on_book: list[str], regime: str) -> str:
         (scheduler, "get_account_balance"): lambda: BALANCE,
         (scheduler, "check_portfolio_risk"): lambda s, b: (True, ""),
         (scheduler, "check_upcoming_news"): lambda hours_ahead=None: (False, "", None),
-        (scheduler, "get_regime"): lambda s: {"regime": regime, "action": "ทดสอบ"},
+        (scheduler, "get_regime"): lambda s: {"regime": regime, "action": "ทดสอบ", **(regime_extra or {})},
+        (scheduler, "get_trend_bias"): lambda s, df: (bias_1d, "ทดสอบ"),
+        (scheduler, "get_ohlcv"): lambda *a, **k: None,
         (scheduler.mt5, "symbol_info_tick"): lambda s: None,
     }
     saved = {k: getattr(*k) for k in patches}
@@ -249,6 +251,33 @@ results += [
     slot_check("ถือ Scoring + REVERSAL-READY -> ช่อง Reversal ว่าง", ["Scoring"], "REVERSAL-READY", False),
     slot_check("ถือ Breakout + TREND -> ช่อง Scoring ว่าง", ["Breakout"], "TREND", False),
     slot_check("ถือ Scoring + Breakout -> ช่องเต็มทั้งสอง", ["Scoring", "Breakout"], "TREND", True),
+]
+
+
+# ── Breakout ข้ามด่าน peak ADX (2026-09-30 · config.BREAKOUT_IGNORES_MIN_PEAK) ─────────────────────
+# ถือไม้ Reversal ไว้ -> ถ้ารอบนี้ถูกยกเป็น REVERSAL-READY จะติดด่าน "ช่อง Reversal" (มองเห็นได้จาก output)
+# ถ้าไม่ถูกยก regime ยังเป็น TREND -> ไปช่อง Scoring ที่ว่าง
+_NOPEAK = {"reversal_nopeak": ("REVERSAL-READY", "", ""), "peak": {"peak": 25.0}}
+
+
+def bnp_check(label, extra, bias, want_promoted):
+    out = scan_output(["Reversal"], "TREND", regime_extra=extra, bias_1d=bias)
+    promoted = SLOT_SKIP in out
+    ok = promoted == want_promoted
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {'ยกเป็น REVERSAL-READY' if promoted else 'regime เดิม'}")
+    return ok
+
+
+print("\nBreakout ข้ามด่าน peak ADX:")
+results += [
+    bnp_check("nopeak READY + bearish + 1D Long -> ยก", {**_NOPEAK, "divergence": {"divergence": "bearish"}},
+              "Long", True),
+    bnp_check("nopeak READY + bearish + 1D Short -> ไม่ยก (เป็น Reversal Short)",
+              {**_NOPEAK, "divergence": {"divergence": "bearish"}}, "Short", False),
+    bnp_check("nopeak READY + bullish -> ไม่ยก (เป็น Reversal Long)",
+              {**_NOPEAK, "divergence": {"divergence": "bullish"}}, "Long", False),
+    bnp_check("ไม่มี nopeak READY -> ไม่ยก", {"reversal_nopeak": None, "divergence": {"divergence": "bearish"}},
+              "Long", False),
 ]
 
 

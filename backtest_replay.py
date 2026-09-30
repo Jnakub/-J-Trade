@@ -459,6 +459,21 @@ if _amp_arg:
     _v = float(_amp_arg.split("=")[1])
     regime_check.ADX_MIN_PEAK_REVERSAL = _v if _v > 0 else None
 
+# --breakout-no-min-peak : ด่าน peak ≥ ADX_MIN_PEAK_REVERSAL ใช้กับ Reversal เท่าเดิม แต่ **Breakout ไม่ต้องผ่าน**
+# (ไอเดียผู้ใช้ 2026-09-30 หลังกวาด peak: ปิดด่านทั้งใบได้ +13.52R ซึ่ง Breakout ให้ +18.12R ขณะที่ Reversal
+#  ใหม่ 74 ไม้ได้แค่ +0.39R) — ทำโดย: รอบที่ regime ไม่ใช่ REVERSAL-READY แต่จะเป็นถ้าไม่มีเกณฑ์ peak
+# (reversal_nopeak) + divergence bearish + เทรนด์ 1D Long = ทางที่จะถูก flip เป็น Breakout แน่ๆ
+# -> ถือว่าเป็น REVERSAL-READY รอบนั้น ไหลเข้าทาง flip ตามปกติ · รอบอื่นใช้ regime เดิม (Scoring ไม่ถูกแย่ง
+# ยกเว้นรอบที่ Breakout เกิดจริง — ตรงกับรอบปิดด่านที่ branch Reversal มาก่อน TREND)
+# 🔻 วัดแล้ว 2026-09-30 (10 symbol · --end=2026-09-24T00:00): 216 -> 247 ไม้ · **+16.73R** · Reversal ไม่ขยับ
+#    Scoring direct 0 · Breakout 29 -> 60 ไม้ (+19.64 -> +36.98R) · ไม้ใหม่ 32 (1 ไม้คือ XAU Scoring เดิม
+#    +3.06 ที่เปลี่ยนป้ายเป็น Breakout) · churn SE 9.59 -> **|t| 1.74** · ตัด 5 ไม้ใหญ่ (HK50 4.29 · UKOIL 3.74 ·
+#    UKOIL 3.10 · XAU 2.50 · XAU Scoring 2.45) เหลือ **+0.65R** · ดีขึ้น 7/10 (BTC −4.15 แพ้ 4/4)
+#    = ผ่านเกณฑ์ข้อ 3 แค่ข้อ symbol · Long ล้วนในช่วงทอง/ดัชนี/น้ำมันขาขึ้น
+# 2026-09-30: เข้าระบบจริงแล้วที่ config.BREAKOUT_IGNORES_MIN_PEAK (= default ของที่นี่) · ปิดด้วย --no-breakout-no-min-peak
+breakout_no_min_peak = (config.BREAKOUT_IGNORES_MIN_PEAK or "--breakout-no-min-peak" in sys.argv) \
+    and "--no-breakout-no-min-peak" not in sys.argv
+
 # --rev-no-adx-floor / --rev-adx-floor : Reversal ไม่ต้อง/ต้องผ่านพื้น ADX ≥ 22 เหลือแค่ peak ≥ ADX_MIN_PEAK_REVERSAL + โค้งลง
 # (ดู regime_check.REVERSAL_USES_ADX_FLOOR)
 # 2026-09-30: ระบบจริงเอาพื้นออกแล้ว (default = False) · --rev-adx-floor = ใส่พื้นกลับเพื่อเทียบ
@@ -823,6 +838,18 @@ _regime_cache, _df1d_cache = {}, {}
 _BAR_OFFSET = timedelta(hours=BAR_OFFSET_H.get(symbol, 0))
 
 
+def regime_eff(t):
+    """regime_at + --breakout-no-min-peak (ดูที่จุด parse ธง) — คำนวณทุกครั้ง ไม่ cache เพราะ bias 1D เปลี่ยนรายวัน"""
+    r = regime_at(t)
+    if (breakout_no_min_peak and breakout_mode and rev_short_1d
+            and r["regime"] != "REVERSAL-READY"
+            and (r.get("reversal_nopeak") or ("",))[0] == "REVERSAL-READY"
+            and r["divergence"].get("divergence") == "bearish"
+            and get_trend_bias(symbol, df1d_at(t))[0] == "Long"):
+        return {**r, "regime": "REVERSAL-READY", "breakout_nopeak": True}
+    return r
+
+
 def regime_at(t):
     # 2026-09-01: key ต้องเป็น "ขอบแท่ง 4H จริงของ symbol นี้" ไม่ใช่ t.floor("4h") เฉยๆ —
     # symbol ที่ BAR_OFFSET_H != 0 (เช่น XAUUSDm=2) แท่งปิดที่ 02/06/10/14 แต่ floor("4h")
@@ -1015,7 +1042,7 @@ for n, row in enumerate(clock.to_dict("records")):
     # เดินมาถึงด่านนั้นๆ รอบที่ถือไม้อยู่จึงหายไปทั้งหมด ทำให้ตอบไม่ได้ว่า "REVERSAL-READY
     # เกิดกี่ครั้งจริง แล้วตายที่ไหน" (regime_at cache ต่อแท่ง 4H อยู่แล้ว ต้นทุนจึงต่ำ)
     try:
-        _rg = regime_at(now)["regime"]
+        _rg = regime_eff(now)["regime"]
     except Exception as exc:
         _rg = f"regime error: {type(exc).__name__}"
     regime_seen[_rg] = regime_seen.get(_rg, 0) + 1
@@ -1092,7 +1119,7 @@ for n, row in enumerate(clock.to_dict("records")):
         continue
 
     try:                                                   # ด่าน 4
-        rinfo = regime_at(now)
+        rinfo = regime_eff(now)
     except Exception as exc:
         # ใส่ชนิด+ข้อความไว้ด้วย — รอบที่ MT5 หลุดกลางทางเคยขึ้น "regime error" เฉยๆ หลายพัน
         # รอบแล้วผลออกมาดูเหมือนผลปกติ แยกไม่ออกว่าเป็นผลจริงหรือ run เสีย
@@ -1509,6 +1536,8 @@ if min_turn != config.MIN_TURN_FROM_EXTREME_R:   # ติด tag เฉพาะ
     _tag += f"_minturn{min_turn:g}" if min_turn else "_nominturn"
 if reject_cd != config.REJECT_COOLDOWN_HOURS:
     _tag += f"_rejcd{reject_cd:g}" if reject_cd else "_norejcd"
+if breakout_no_min_peak != config.BREAKOUT_IGNORES_MIN_PEAK:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_bonopeak" if breakout_no_min_peak else "_nobonopeak"
 if regime_check.REVERSAL_USES_ADX_FLOOR != _rev_floor_default:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_revnoadxfloor" if not regime_check.REVERSAL_USES_ADX_FLOOR else "_revadxfloor"
 if same_scan_reentry:

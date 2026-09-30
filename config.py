@@ -1183,6 +1183,17 @@ MT5_TIMEFRAMES = {
 #   20+ ไม้ (~15 ไม้/ปี = ราว 2027-09) โดยดูว่ายังกระจุกที่ XAU/US500 ไหม และ EUR ยังแย่ไหม
 #   ถอยกลับ: ตั้ง BREAKOUT_ENABLED = False ที่เดียว
 BREAKOUT_ENABLED      = True
+# ── Breakout ไม่ต้องผ่านด่าน peak ADX (regime_check.ADX_MIN_PEAK_REVERSAL) — 2026-09-30 คำสั่งผู้ใช้ ──
+# Reversal ยังต้องมี peak ≥ 28.5 เหมือนเดิม แต่รอบที่ "จะเป็น REVERSAL-READY ถ้าไม่มีเกณฑ์ peak" + divergence
+# bearish + เทรนด์ 1D Long (= ทางที่จะถูก flip เป็น Breakout แน่ๆ) ให้ถือเป็น REVERSAL-READY แล้วเข้า Breakout
+# ที่มา: กวาด peak ด้วย replay เต็ม ปิดด่านทั้งใบได้ +13.52R แต่ Reversal ใหม่ 74 ไม้ได้แค่ +0.39R ส่วน
+#   Breakout ใหม่ 28 ไม้ +18.12R · แยกเฉพาะ Breakout (--breakout-no-min-peak · 10 symbol · --end=2026-09-24T00:00):
+#   216 -> 247 ไม้ **+16.73R** · Breakout 29 -> 60 ไม้ +19.64 -> +36.98R · Reversal/Scoring ไม่ขยับ (direct 0)
+#   🔴 **ตกเกณฑ์ 2/3**: churn |t| **1.74** · ตัด 5 ไม้ใหญ่ (HK50 4.29 · UKOIL 3.74 · UKOIL 3.10 · XAU 2.50 ·
+#   XAU 2.45) เหลือ **+0.65R** · ดีขึ้น 7/10 (BTC −4.15 แพ้ 4/4) · Long ล้วนในช่วงทอง/น้ำมัน/ดัชนีขาขึ้น
+#   ไม้เพิ่ม 31 ไม้ = เพดานพอร์ต 6R บล็อกมากขึ้น (replay มองไม่เห็น ยังไม่ได้วัดด้วย backtest_portfolio)
+#   ผู้ใช้เลือกหลังเห็นผลครบ · ตามดูพร้อม BREAKOUT_ENABLED · ถอยกลับ: ตั้ง False ที่เดียว
+BREAKOUT_IGNORES_MIN_PEAK = True
 # ── TP ของไม้ Breakout — **วัดแล้วว่าแกนนี้ไม่สำคัญ อย่าเสียเวลาจูนอีก** (2026-09-22) ──
 # รัน replay เต็ม 8 symbol เทียบสองค่าบนระบบเดียวกัน เปลี่ยนตัวแปรเดียว:
 #   fib 2.618  188 ไม้ +69.80R WR 54.8%  |  Breakout 32 ไม้ +11.40R avgR +0.356 |t| 1.22
