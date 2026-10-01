@@ -599,6 +599,57 @@ last_tp_close_time = None
 # (XAU 20:00 แทน 22:00 · US500 17:00 แทน 18:00) = ความคลาดนี้ไม่ได้ทำให้ตัวเลข base เพี้ยน
 same_scan_reentry = "--same-scan-reentry" in sys.argv
 
+# --entry-limit=X : แทน market order ด้วย limit order ห่างจากราคาตลาด X·R (R = ระยะถึง SL ที่ส่ง broker)
+# อายุ 1 ชม. = แท่ง 1H ถัดไปแท่งเดียว (ผู้ใช้ 2026-09-30 ต่อจาก --perfect-entry ที่ได้เพดาน +29.98R)
+# เติม = แท่งนั้นแตะ L (เติมที่ L เสมอ ไม่นับ gap ที่ได้ราคาดีกว่า) · SL/TP คงราคาเดิม -> ระยะ 1R แคบลง
+# ไม่เติม = ทิ้งสัญญาณรอบนั้น ช่องยังว่าง รอบสแกนถัดไปเช็คสัญญาณใหม่ตามปกติ (= บอทตั้ง limit ใหม่ได้ถ้ายังค้าง)
+# แท่งที่เติมแตะ SL ด้วย = นับโดน SL ทันที (มองร้าย เหมือน --limit-rr) · ด่านทุกตัวคิดที่ราคาตลาดเหมือนเดิม
+_el_arg = next((a for a in sys.argv if a.startswith("--entry-limit=")), None)
+entry_limit = float(_el_arg.split("=")[1]) if _el_arg else 0.0
+# --entry-limit-atr=X : เหมือน --entry-limit แต่ระยะเป็น X·ATR 1H (pinned_atr_entry) แทน X·R — 2026-10-01 เพราะ
+# limit แบบ R ไม่เติมเป็นระบบเมื่อ SL กว้างเทียบ ATR (SL/ATR บนสุด 1/3 วิ่งหนี 57% vs 27-30%) ใช้คู่ --entry-limit-fallback ได้
+# --entry-oco-atr=X : ตั้งสองคำสั่งพร้อมกัน (ผู้ใช้ 2026-10-01 "แบบ ก") — limit ด้านหน้า (Long ต่ำกว่าราคา X·ATR)
+# + stop ด้านหลัง (Long สูงกว่าราคา X·ATR) อายุ 1 ชม. ฝั่งไหนโดนก่อนเข้าฝั่งนั้น ยกเลิกอีกฝั่ง
+# แท่ง 1H บอกลำดับในแท่งไม่ได้ -> โดนทั้งสองฝั่ง = นับเติมฝั่ง stop (ราคาแย่ = มองร้าย)
+# ไม่โดนเลย (อยู่ในกรอบทั้งชั่วโมง) = เข้า market ปลายชั่วโมง → ไม่มีสัญญาณไหนพลาด
+_eoa_arg = next((a for a in sys.argv if a.startswith("--entry-oco-atr=")), None)
+entry_oco_atr = float(_eoa_arg.split("=")[1]) if _eoa_arg else 0.0
+# --entry-oco-both=limit : โดนทั้งสองฝั่งในแท่งเดียว -> นับเติมฝั่ง limit แทน (default = stop/มองร้าย)
+# มีไว้คร่อมคำตอบสองข้าง เพราะ M1/M5 ของโบรกย้อนได้แค่ไม่กี่เดือน (ตรวจ 2026-10-01: XAU M5 ไม่มีก่อน ~2025)
+# 🔻 วัดแล้ว 2026-10-01 (10 symbol · --end=2026-09-24T00:00 · base 247 ไม้ +127.07R):
+#    limit 0.3 ATR ไม่ไล่ (--entry-limit-atr=0.3 · หลังแก้ bool)  236 ไม้ +124.57R  ΔR  −2.50  |t| 0.11  เติม 239/416 (57%)
+#    OCO 0.3 ATR มองร้าย (โดนสองฝั่ง = stop)                  247 ไม้ +114.30R  ΔR −12.77  |t| 2.18  ดีขึ้น 1/10
+#    OCO 0.3 ATR มองดี   (โดนสองฝั่ง = limit · --entry-oco-both=limit) 247 ไม้ +128.21R  ΔR  +1.14  |t| 0.15
+#    👉 คำตอบจริงของ OCO อยู่ระหว่าง −12.77 ถึง +1.14R = กรณีดีที่สุดก็แค่เสมอ market · ไม่เอา ใช้ market ต่อ
+entry_oco_both = next((a.split("=")[1] for a in sys.argv if a.startswith("--entry-oco-both=")), "stop")
+_ela_arg = next((a for a in sys.argv if a.startswith("--entry-limit-atr=")), None)
+entry_limit_atr = float(_ela_arg.split("=")[1]) if _ela_arg else 0.0
+# 🔻 วัดแล้ว 2026-10-01 (10 symbol · --end=2026-09-24T00:00 · base 247 ไม้ +127.07R · เพดาน --perfect-entry +29.98R):
+#    แบบ                      ไม้  ΣR       ΔR      |t|   ตัด 5 ไม้ใหญ่  ดีขึ้น  เติม/สัญญาณ
+#    limit 0.05R ไม่ไล่        237  +118.04   −9.03  0.40   −5.06        4/10   239/457 (52%)
+#    limit 0.1R  ไม่ไล่        205   +99.80  −27.27  0.96  −23.94        2/10   208/932 (22%)
+#    limit 0.05R + ไล่ market  248  +120.58   −6.50  0.78   +1.71        3/10   เติม 155 · ไล่ 95
+#    limit 0.1R  + ไล่ market  249  +109.35  −17.72  1.94   −9.50        2/10   เติม 80 · ไล่ 171
+#    👉 **แพ้ market ทุกแบบ** · ไม่ไล่ = ไม้ที่วิ่งหนีทันที (ไม้ดี) หายไป · ไล่ = ไม้พวกนั้นได้ราคาแย่ลงเกินกว่าที่
+#    ไม้ที่เติมได้ราคาดีขึ้น (direct −9.09 / −19.22R) · +30R ของ --perfect-entry เก็บจริงไม่ได้ด้วย limit แบบนี้
+entry_limit_fallback = "--entry-limit-fallback" in sys.argv   # ไม่เติมใน 1 ชม. -> เข้า market ปลายชั่วโมง (ผู้ใช้ 2026-09-30)
+entry_limit_stats = {"เติม": 0, "ไม่เติม": 0, "เติมแล้วโดน SL แท่งเดียวกัน": 0,
+                     "ไม่เติม -> market ปลายชั่วโมง": 0, "ไม่เติม · แตะ TP แล้วไม่ไล่": 0}
+entry_limit_missed = []
+
+# --perfect-entry : **การทดลองทางความคิด ใช้ข้อมูลอนาคต (lookahead) โดยตั้งใจ — ห้ามใช้เป็น base**
+# ไม้ที่ผ่านทุกด่านที่ราคาตลาด (SL/TP/ด่าน R:R คิดที่ราคาตลาดเหมือนเดิม) แต่ "เติม" ที่ราคาดีที่สุดของแท่ง 1H
+# ถัดไป (Long = low · Short = high) — ถามว่า "ถ้าเข้าแม่นที่สุดในชั่วโมงนั้นจะได้เพิ่มเท่าไหร่" (ผู้ใช้ 2026-09-30)
+# R คิดจากราคาเติม = ระยะ 1R แคบลง ขาดทุนเต็มยังเป็น 1R เท่าเดิม (lot ใหญ่ขึ้น) และกฎ exit ทุกตัวทำงานจริง
+# (BE 1.5R ยิงเร็วขึ้นตามระยะที่แคบลง) · ชั่วโมงที่ราคาทะลุ SL = ไม่นับ เติมที่ราคาตลาดเดิม
+# 🔻 วัดแล้ว 2026-09-30 (10 symbol · --end=2026-09-24T00:00): 247 -> 250 ไม้ · **+127.07 -> +157.05R (+29.98R · +24%)**
+#    direct +25.26R (ไม้ตรงกัน 244) · churn +4.72R (ใหม่ 6 · หาย 3 = จังหวะคืนช่อง = noise)
+#    BE ยิงเร็วขึ้นตามที่คาด: วิธีจบเปลี่ยน 17 ไม้ (SL -> BE 7 · TP -> BE 5) หักล้างกันเหลือ −0.54R
+#    ค่าประมาณแบบคงราคาออก (ไม่มีกฎ exit) ได้ +34.21R = คลาดจากของจริงแค่ ~4R · WR 57.9 -> 61.2%
+#    👉 = **เพดาน** ของทุกวิธีเข้าไม้ที่ละเอียดกว่า 1H (limit / TF เล็ก) ทำได้ไม่เกินนี้
+perfect_entry = "--perfect-entry" in sys.argv
+perfect_log = []
+
 # --reverse-on-opposite : ไม้ใหม่เปิดสวนทิศไม้ที่ถืออยู่ในอีกช่อง (Scoring vs Reversal/Breakout)
 # -> ปิดไม้เก่า 100% ที่ราคาเข้าของไม้ใหม่ในรอบสแกนเดียวกัน แล้วเปิดไม้ใหม่ตามปกติ (= กลับทิศ)
 # ระบบจริงไม่มีสิ่งนี้: SLOT_PER_STRATEGY เช็คแค่ช่องว่าง ไม่ดูทิศ จึงถือสองไม้สวนกันค้างไว้ (hedge)
@@ -1351,6 +1402,65 @@ for n, row in enumerate(clock.to_dict("records")):
                             "ไม้ที่ครองช่องอยู่": _blocker_time})
         continue
 
+    _limit_hit_sl = False
+    # --entry-oco-atr=X : limit ด้านหน้า + stop ด้านหลัง ห่าง X·ATR ทั้งคู่ (ดูที่จุด parse ธง)
+    if entry_oco_atr and atr_entry:
+        if n + 1 >= len(clock):
+            continue
+        _nb = clock.iloc[n + 1]
+        _lg = direction == "Long"
+        _d = entry_oco_atr * atr_entry
+        _L, _S = (entry - _d, entry + _d) if _lg else (entry + _d, entry - _d)
+        _hitL = (_nb["low"] <= _L) if _lg else (_nb["high"] >= _L)
+        _hitS = (_nb["high"] >= _S) if _lg else (_nb["low"] <= _S)
+        if _hitS and _hitL and entry_oco_both == "limit":   # --entry-oco-both=limit : มองดี (ขอบอีกด้านของคำตอบ)
+            _hitS = False
+        if _hitS:                                   # มองร้าย: โดนทั้งสองฝั่งในแท่งเดียว = นับว่าเติมฝั่ง stop (ราคาแย่)
+            entry_limit_stats["oco: stop (ด้านหลัง)" + (" · โดนทั้งคู่" if _hitL else "")] = \
+                entry_limit_stats.get("oco: stop (ด้านหลัง)" + (" · โดนทั้งคู่" if _hitL else ""), 0) + 1
+            entry = _S
+        elif _hitL:
+            entry_limit_stats["oco: limit (ด้านหน้า)"] = entry_limit_stats.get("oco: limit (ด้านหน้า)", 0) + 1
+            entry = _L
+        else:                                       # อยู่ในกรอบ ±X·ATR ทั้งชั่วโมง -> เข้า market ปลายชั่วโมง
+            entry_limit_stats["oco: ไม่โดนทั้งคู่ -> market ปลายชั่วโมง"] = \
+                entry_limit_stats.get("oco: ไม่โดนทั้งคู่ -> market ปลายชั่วโมง", 0) + 1
+            entry = _nb["close"]
+        # SL อยู่ด้านหลังของ limit เสมอ — แท่งที่แตะ SL ด้วย = มองร้ายว่าโดน SL ทันที (ทุกฝั่งที่เติม)
+        _limit_hit_sl = (_nb["low"] <= sl) if _lg else (_nb["high"] >= sl)
+    if (entry_limit or entry_limit_atr) and not (entry_limit_atr and not atr_entry):
+        if n + 1 >= len(clock):
+            continue
+        _nb = clock.iloc[n + 1]
+        _lg = direction == "Long"
+        # ระยะ limit: --entry-limit = X·R (ระยะถึง SL) · --entry-limit-atr = X·ATR 1H ตอนเข้า (atr_entry)
+        _dist = entry_limit_atr * atr_entry if entry_limit_atr else entry_limit * abs(entry - sl)
+        _L = entry - _dist if _lg else entry + _dist
+        _touched = bool((_nb["low"] <= _L) if _lg else (_nb["high"] >= _L))   # bool() สำคัญ: numpy.bool_ ไม่ `is False`
+        # 🔴 2026-10-01 รอบแรกของ --entry-limit-atr=0.3 ไม่มี bool() -> np.False_ หลุดทั้ง "ไม่เติม" และ "เติม"
+        #    ไม้ที่ไม่แตะเลยเข้าที่ราคาตลาดเดิม = รู้อนาคตว่าจะไม่แตะแล้วค่อยเลือก market (ได้ +14.98R ปลอม)
+        #    รอบ --entry-limit=0.05/0.1 ไม่โดน (รันก่อนเพิ่มบรรทัดนี้ ใช้ `if not` ตรงๆ) · รอบ fallback ไม่โดน
+        if not _touched and entry_limit_fallback:
+            # --entry-limit-fallback : ไม่แตะใน 1 ชม. -> เข้า market ตอนปลายชั่วโมง (close ของแท่งนั้น)
+            # SL/TP เดิม · ถ้าชั่วโมงนั้นแตะ TP ไปแล้ว = ไม่ไล่เข้า (ราคาไปถึงเป้าแล้ว) · แตะ SL ไม่มีทาง
+            # เพราะ SL อยู่ฝั่งเดียวกับ L และเลยไปกว่า L (ไม่แตะ L = ไม่แตะ SL)
+            if (_nb["high"] >= tp) if _lg else (_nb["low"] <= tp):
+                entry_limit_stats["ไม่เติม · แตะ TP แล้วไม่ไล่"] += 1
+                note("limit ไม่เติม และราคาถึง TP ไปแล้ว")
+                continue
+            entry_limit_stats["ไม่เติม -> market ปลายชั่วโมง"] += 1
+            entry = _nb["close"]
+            _touched = None                      # เข้าแล้ว — ข้ามบล็อก "ไม่เติม" และ "เติม" ด้านล่าง
+        if _touched is False:
+            entry_limit_stats["ไม่เติม"] += 1
+            entry_limit_missed.append({"symbol": symbol, "time": now, "direction": direction,
+                                       "strategy": strategy, "entry": entry, "sl0": sl, "tp0": tp})
+            note("limit ไม่เติมใน 1 ชม.")
+            continue
+        if _touched:
+            entry_limit_stats["เติม"] += 1
+            entry = _L
+            _limit_hit_sl = (_nb["low"] <= sl) if _lg else (_nb["high"] >= sl)   # มองร้าย: เติมแล้วลงต่อถึง SL
     if pending is not None and slot_of(strategy) == slot_of("Reversal"):
         limit_stats["ยกเลิก: market เข้าเอง"] += 1                    # ระบบเดิมมาก่อนเสมอ
         pending["log"].update(status="ยกเลิก: market", resolved=now); pending = None
@@ -1367,6 +1477,13 @@ for n, row in enumerate(clock.to_dict("records")):
                 if (entry < _p["entry"]) if _pl else (entry > _p["entry"]):
                     _p["tp"] = _p["entry"]
                     _p["tp_entry_at"] = now
+    if perfect_entry and n + 1 < len(clock):   # --perfect-entry : เติมที่ราคาดีสุดของชั่วโมงถัดไป (ดูที่จุด parse ธง)
+        _nb = clock.iloc[n + 1]
+        _best = min(_nb["low"], entry) if direction == "Long" else max(_nb["high"], entry)
+        if (_best > sl) if direction == "Long" else (_best < sl):   # ถ้าชั่วโมงนั้นทะลุ SL ไม่นับ
+            perfect_log.append({"symbol": symbol, "time": now, "market": entry, "fill": _best,
+                                "gain_R_old": abs(entry - _best) / abs(entry - sl)})
+            entry = _best
     positions[slot_of(strategy)] = {"time": now, "direction": direction, "entry": entry, "sl": sl, "sl0": sl,
            # tp0 = TP ที่ส่งจริงตอนเข้า (ผ่านเพดานแล้ว)  tp_fib = ที่ Fibonacci ให้ก่อนเพดาน
            # สองค่านี้ต่างกันเมื่อไม้นั้นโดนเพดานดึงเข้า — ดู comment ที่จุดคำนวณ tp_fib
@@ -1375,6 +1492,9 @@ for n, row in enumerate(clock.to_dict("records")):
            # pinned_swing = SL โครงสร้าง (ถอย exec_sl กลับด้วยตัวคูณเดียวกับที่ขยับออกไป)
            "pinned_swing": _pin,
            "pinned_atr_entry": atr_entry}
+    if _limit_hit_sl:
+        entry_limit_stats["เติมแล้วโดน SL แท่งเดียวกัน"] += 1
+        trades.append(close_pos(positions[slot_of(strategy)], slot_of(strategy), now, -1.0, "SL"))
 
     if n % 2000 == 0:
         print(f"  ... {t}  ({n}/{len(clock)})  ปิดไปแล้ว {len(trades)} ไม้", flush=True)
@@ -1536,6 +1656,16 @@ if min_turn != config.MIN_TURN_FROM_EXTREME_R:   # ติด tag เฉพาะ
     _tag += f"_minturn{min_turn:g}" if min_turn else "_nominturn"
 if reject_cd != config.REJECT_COOLDOWN_HOURS:
     _tag += f"_rejcd{reject_cd:g}" if reject_cd else "_norejcd"
+if entry_oco_atr:
+    _tag += f"_entryocoatr{entry_oco_atr:g}"
+    if entry_oco_both != "stop":
+        _tag += f"both{entry_oco_both}"
+if entry_limit or entry_limit_atr:
+    _tag += f"_entrylimit{entry_limit:g}" if entry_limit else f"_entrylimitatr{entry_limit_atr:g}"
+    if entry_limit_fallback:
+        _tag += "fb"
+if perfect_entry:
+    _tag += "_perfectentry"
 if breakout_no_min_peak != config.BREAKOUT_IGNORES_MIN_PEAK:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_bonopeak" if breakout_no_min_peak else "_nobonopeak"
 if regime_check.REVERSAL_USES_ADX_FLOOR != _rev_floor_default:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
@@ -1614,4 +1744,7 @@ if limit_rr:
     pd.DataFrame(limit_log).to_csv(f"replay_limits_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน limit order {len(limit_log)} ตัวลง replay_limits_{symbol}{_tag}.csv")
 t.to_csv(f"replay_trades_{symbol}{_tag}.csv", index=False)
+if entry_limit or entry_limit_atr or entry_oco_atr:
+    print(f"  --entry-limit {entry_limit:g}R/{entry_limit_atr:g}ATR: {entry_limit_stats}")
+    pd.DataFrame(entry_limit_missed).to_csv(f"replay_limitmissed_{symbol}{_tag}.csv", index=False)
 print(f"  เขียนไม้ทั้งหมดลง replay_trades_{symbol}{_tag}.csv")
