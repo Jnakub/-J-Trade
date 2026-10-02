@@ -1205,9 +1205,9 @@ BREAKOUT_IGNORES_MIN_PEAK = True
 #   ชุดนี้: 2022-24 185 ไม้ +0.163R/ไม้ · 2024-26 223 ไม้ +0.216 · รวม 408 ไม้ +78.32R t 2.64
 # 🔴 **ตกการทดสอบนอกข้อมูล**: กฎตรึงทั้งหมด กับ 22 symbol ที่ระบบไม่เคยเทรด (FX cross 12 · ดัชนี 8 ·
 #   XAG/USOIL · structure ค่ามาตรฐาน 58) = 707 ไม้ −20.22R avgR −0.029 t −0.54 · บวก 11/22
-#   = กฎนี้ fit กับ 10 symbol ที่ใช้ปรับ · **ผู้ใช้เลือกเอาเข้าระบบหลังเห็นผลนี้แล้ว** (เสี่ยง 1% ต่อไม้)
+#   = กฎนี้ fit กับ 10 symbol ที่ใช้ปรับ · **ผู้ใช้เลือกเอาเข้าระบบหลังเห็นผลนี้แล้ว**
 #   รายละเอียดทุกแบบที่ลอง: memory sideways-strategy-has-no-edge
-# การตัดสินใจของผู้ใช้ตอนเอาเข้า: ช่องร่วมกับ Scoring (slot_of) · เสี่ยง 1% · ไม่ใช้กฎ TP -> entry กับไม้
+# การตัดสินใจของผู้ใช้ตอนเอาเข้า: ช่องร่วมกับ Scoring (slot_of) · เสี่ยง 1% (เปลี่ยนเป็น 2% วันเดียวกัน) · ไม่ใช้กฎ TP -> entry กับไม้
 #   Sideway ทั้งสองทาง · Reversal มาก่อน (sideway เข้าได้เฉพาะ regime ที่อยู่ใน REGIME_NO_TRADE)
 # ถอยกลับ: SIDEWAY_ENABLED = False ที่เดียว (scheduler + backtest_replay อ่านค่านี้)
 # 🔻 replay เต็มในระบบ (2026-10-02 · 10 symbol · --end=2026-09-24T00:00 · --sideway): ไม้เดิม 247 ไม้**ไม่เปลี่ยนเลยสักไม้**
@@ -1215,9 +1215,10 @@ BREAKOUT_IGNORES_MIN_PEAK = True
 #    = **+18.31R ของระบบ (2%)** · avgR +0.19 · t 1.89 · จบ SL 99 TP 72 ADX-exit 12 BE 5 · ถือ median 16.5 ชม.
 #    ราย symbol: UKOIL +12.0 · ETH +11.6 · US500 +10.2 · HK50 +8.5 · USDJPY +7.7 · GBPCHF +2.5 · EUR −3.1 · BTC −5.0 · XAU −7.8
 #    (สคริปต์คัดกรองช่วงเดียวกันได้ 223 ไม้ +48.17R — replay น้อยกว่าเพราะช่องร่วม/cooldown/daily loss ของระบบจริง)
-#    ⚠️ เพดานพอร์ตนับไม้ใหม่เป็น 1R เต็มเสมอ (sideway เสี่ยงจริง 0.5R) · backtest_portfolio ยังไม่รู้จัก risk_w
+#    🔁 เปลี่ยนเป็นเสี่ยง 2% วันเดียวกัน: รัน replay ใหม่ ไม้ตรงกันทั้ง 435 ไม้ · R เป็นหน่วยเดียวกับกลยุทธ์อื่นแล้ว (risk_w = 1)
+#       Sideway 188 ไม้ +36.62R · base รวม 435 ไม้ +163.70R t 5.08
 SIDEWAY_ENABLED          = True
-SIDEWAY_RISK_PER_TRADE   = 0.01   # ครึ่งหนึ่งของ RISK_PER_TRADE (เพดานพอร์ตยังนับไม้ใหม่เป็น 1R เต็ม = ระวังเกิน)
+SIDEWAY_RISK_PER_TRADE   = 0.02   # = RISK_PER_TRADE (2026-10-02 ผู้ใช้เปลี่ยนจาก 1% "ให้ R เท่ากับกลยุทธ์อื่น")
 SIDEWAY_MIN_RUN_BARS     = 22     # ADX 4H < regime_check.ADX_CHOPPY ติดกันอย่างน้อยกี่แท่ง
 SIDEWAY_EDGE_PCTL        = 90     # ขอบกรอบ = high P90 / low P10 ของแท่ง 4H ทั้งช่วง sideway
 SIDEWAY_MIN_WIDTH_PCT    = 1.0    # กรอบต้องกว้าง ≥ X% ของราคา (คัดช่วงที่ผันผวนพอ · แทนด้วย spread แล้วแย่ลง)
