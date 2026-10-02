@@ -281,6 +281,44 @@ results += [
 ]
 
 
+# ── Sideway (2026-10-02 · config.SIDEWAY_*) ─────────────────────────────────────────────────────────
+# เปิดสวิตช์ชั่วคราวในเทสต์ (ค่าจริงอาจปิดอยู่) แล้วดูว่า scan_symbol ไปถึงด่านไหน
+import config as _config  # noqa: E402
+
+
+def sw_check(label, on_book, regime, adx, enabled, want):
+    _saved = scheduler.SIDEWAY_ENABLED
+    scheduler.SIDEWAY_ENABLED = enabled
+    try:
+        out = scan_output(on_book, regime, regime_extra={"adx_now": adx})
+    finally:
+        scheduler.SIDEWAY_ENABLED = _saved
+    got = ("ช่อง Scoring เต็ม" if "ช่อง Scoring มีไม้เปิดอยู่แล้ว" in out else
+           "ไม่เข้า (regime)" if "regime ยังไม่พร้อม" in out else
+           "ผ่านด่านช่อง" if "ดึงราคาไม่ได้" in out else "อื่นๆ")
+    ok = got == want
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {got}")
+    return ok
+
+
+print("\nSideway — ช่องร่วมกับ Scoring · เข้าเฉพาะ regime ห้ามเทรด + ADX < 20:")
+results += [
+    sw_check("CHOPPY ADX 15 + ว่าง -> ไปต่อ", [], "CHOPPY", 15.0, True, "ผ่านด่านช่อง"),
+    sw_check("CHOPPY ADX 15 + ถือ Scoring -> ช่องเต็ม", ["Scoring"], "CHOPPY", 15.0, True, "ช่อง Scoring เต็ม"),
+    sw_check("CHOPPY ADX 15 + ถือ Sideway -> ช่องเต็ม", ["Sideway"], "CHOPPY", 15.0, True, "ช่อง Scoring เต็ม"),
+    sw_check("CHOPPY ADX 15 + ถือ Reversal -> ไปต่อ", ["Reversal"], "CHOPPY", 15.0, True, "ผ่านด่านช่อง"),
+    sw_check("เขตเทา ADX 21 -> ไม่เข้า", [], "เขตเทา", 21.0, True, "ไม่เข้า (regime)"),
+    sw_check("CHOPPY แต่สวิตช์ปิด -> ไม่เข้า", [], "CHOPPY", 15.0, False, "ไม่เข้า (regime)"),
+]
+_ok = _config.slot_of("Sideway") == "Scoring"
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'config.slot_of(Sideway) == Scoring':52} -> {_config.slot_of('Sideway')}")
+results.append(_ok)
+_ti = exit_monitor.check_trend_invalidation("XAUUSDm", "Long", None, strategy="Sideway")
+_ok = _ti["keep_pct"] == 100 and not _ti["active"]
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'trend invalidation ข้ามไม้ Sideway':52} -> keep {_ti['keep_pct']}")
+results.append(_ok)
+
+
 # ── เกณฑ์ส่งคำสั่งขยับ SL/TP (2026-09-28) ──────────────────────────────────────────────────────
 # เรียก execute_decision ตัวจริง แทน modify_sltp ด้วยตัวจดคำสั่ง — ไม่มีการส่งคำสั่งไป broker
 _sent = []
@@ -409,6 +447,11 @@ results += [
               [(1, 24755.7)]),
     tpe_check("TP อยู่ที่ entry แล้ว -> ไม่ส่งซ้ำ", _hk(_B, 24503.4, 24755.7), "Short", []),
 ]
+# กฎ TP -> entry ไม่แตะไม้เก่าที่เป็น Sideway
+_saved_gs = journal.get_trade_strategy
+journal.get_trade_strategy = lambda t: "Sideway"
+results.append(tpe_check("ไม้เก่าเป็น Sideway ขาดทุน + ไม้ใหม่สวน -> ไม่แตะ", _hk(_B, 24503.4), "Short", []))
+journal.get_trade_strategy = _saved_gs
 
 # เคสข้างบนยิง WARNING "ไม่มี SL" จริง 2 บรรทัด — ต้องไม่มี handler ตัวไหนเขียนลงไฟล์ในโฟลเดอร์ logs/
 # (ถ้า get_logger เปลี่ยนวิธีเช็ค handler ซ้ำเมื่อไหร่ เคสนี้จะพังก่อนที่ log จริงจะถูกปนอีก)

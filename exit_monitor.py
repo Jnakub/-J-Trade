@@ -24,6 +24,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from config import MT5_TIMEFRAMES, get_asset_class
+import config as _cfg
 from mt5_connect import connect, get_tick_or_raise, is_demo_account, mt5_now
 from scoring import get_ohlcv, get_ohlcv_real, ema
 from swing import calc_atr, find_swing_highs, find_swing_lows, swing_vol_multiplier, swing_wick_ratio_min, collapse_swing_runs
@@ -911,6 +912,9 @@ def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timesta
     if strategy == "Reversal":
         return {"active": False, "consec_break": 0, "keep_pct": 100,
                 "reason": "ข้าม — ไม้ Reversal เข้าสวน trend โดยดีไซน์อยู่แล้ว"}
+    if strategy == "Sideway":
+        return {"active": False, "consec_break": 0, "keep_pct": 100,
+                "reason": "ข้าม — ไม้ Sideway ไม่ได้อิง trend 1D (ออกเมื่อ ADX ≥ SIDEWAY_EXIT_ADX แทน)"}
 
     df_1d = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=210, as_of=as_of)
     close = df_1d["close"]
@@ -1183,10 +1187,19 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         pinned_swing, pinned_atr_entry = ctx.get("pinned_swing"), ctx.get("pinned_atr_entry")
     else:
         pinned_swing, pinned_atr_entry = journal.get_pinned_anchor(pos.ticket)
-    trail       = calc_atr_trailing_sl(df, symbol, entry_time, direction,
-                                       pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
-                                       as_of=as_of)
-    initial_sl  = trail["initial_sl"] if trail else (sl if sl else None)
+    strategy = ctx.get("strategy") if ctx else journal.get_trade_strategy(pos.ticket)
+    # 2026-10-02: ไม้ Sideway ไม่ใช้ ATR trailing (สูตรนั้นจะถอย SL ออกไป 2 ATR จาก swing ทันทีรอบแรก)
+    #   และไม่ใช้ TP trailing (วัดแล้ว −10R · TP กลางกรอบอยู่ใน 1% แทบทุกไม้) — trail = None ปิดทั้งสองอย่าง
+    #   ระยะ 1R = SL ตอนเข้า ซึ่ง scheduler/replay เก็บไว้ใน pinned_swing (pinned_atr_entry = None)
+    #   เหลือแค่ BE ที่ BREAKEVEN_TRIGGER_R (วัดแล้วแทบไม่มีผลกับไม้ sideway — TP อยู่ราว 1.8R)
+    if strategy == "Sideway":
+        trail = None
+        initial_sl = pinned_swing if pinned_swing else (sl if sl else None)
+    else:
+        trail       = calc_atr_trailing_sl(df, symbol, entry_time, direction,
+                                           pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
+                                           as_of=as_of)
+        initial_sl  = trail["initial_sl"] if trail else (sl if sl else None)
     trailing_sl = trail["new_sl"] if trail else None
     effective_sl = trailing_sl if trailing_sl is not None else (sl if sl else None)
 
@@ -1213,7 +1226,6 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     market_days = market_days_held(symbol, entry_time, now)
 
     # ── 2) รัน Exit Decision Checklist โดยใช้ r_multiple/time_held ข้างบน (ก่อนคิด Chandelier) ──
-    strategy       = ctx.get("strategy") if ctx else journal.get_trade_strategy(pos.ticket)
     trend_info     = check_trend_invalidation(symbol, direction, entry_time, strategy, as_of=as_of)
     trend_keep_pct = trend_info["keep_pct"]
     trend_broken_full    = trend_keep_pct <= 0
@@ -1249,14 +1261,25 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     slow_trade       = (SLOW_TRADE_ENABLED and market_days >= SLOW_TRADE_DAYS
                         and r_multiple is not None and r_multiple < SLOW_TRADE_R)
     hold_cap         = time_held_days >= MAX_HOLD_DAYS   # เพดานเงินทุน = วันปฏิทิน (ตรงกับ backtest)
+    # Sideway: เพดานเวลาของตัวเอง + ออกเมื่อ ADX 4H กลับขึ้น ≥ SIDEWAY_EXIT_ADX (sideway จบ สมมติฐานหมด)
+    sideway_done = False
+    if strategy == "Sideway":
+        hold_cap = time_held_days * 24 >= _cfg.SIDEWAY_MAX_HOLD_H
+        from sideway import adx_now_closed          # import ช้า กันวนกับ scoring/regime_check
+        sideway_adx  = adx_now_closed(symbol, as_of=as_of)
+        sideway_done = sideway_adx >= _cfg.SIDEWAY_EXIT_ADX
 
     # ต่อท้ายเมื่อจุดล็อกไม่ใช่ entry — ไม่งั้นอ่าน log แล้วนึกว่าเสมอตัวทั้งที่ยอมเสียไว้แล้ว
     _be_note      = "" if not be_level else f" ({be_level:+g}R จาก entry)"
     breakeven_str = f"{be_price:,.3f}{_be_note}"
 
-    invalidated = trend_broken_full or structure_broken or post_news_exit or hold_cap
+    invalidated = trend_broken_full or structure_broken or post_news_exit or hold_cap or sideway_done
     if trend_broken_full or structure_broken:
         final_decision = ("ออก 100% ทันที — Trend/Structure พัง", RED)
+    elif sideway_done:
+        final_decision = (f"ออก 100% ทันที — Sideway จบ (ADX 4H {sideway_adx:.1f} ≥ {_cfg.SIDEWAY_EXIT_ADX:g})", RED)
+    elif hold_cap and strategy == "Sideway":
+        final_decision = (f"ออก 100% ทันที — Sideway ถือครบ {_cfg.SIDEWAY_MAX_HOLD_H:g} ชม.", RED)
     elif post_news_exit:
         final_decision = ("ออก 100% ทันที — ข่าวสงบแล้วแต่ไม่กำไร", RED)
     elif trend_broken_partial:

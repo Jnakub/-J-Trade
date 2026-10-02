@@ -302,6 +302,13 @@ if rev_tp_entry:
 # ตอนถูกเรียกทุกครั้ง (จาก get_regime) การ set ตรงนี้จึงมีผล
 # กับทั้งการจัด regime และสกอร์การ์ดพร้อมกัน เหมือนแก้ค่าคงที่จริงแต่เฉพาะรอบนี้
 import regime_check
+import sideway as _sideway_mod
+# --sideway / --no-sideway : กลยุทธ์ Sideway (config.SIDEWAY_ENABLED = default · กฎอยู่ที่ sideway.py)
+# เข้าได้เฉพาะรอบที่ regime อยู่ใน REGIME_NO_TRADE และ ADX 4H < ADX_CHOPPY (Reversal มาก่อน) ·
+# ช่องเดียวกับ Scoring (config.slot_of) · R ของไม้ Sideway = หน่วยความเสี่ยงของตัวเอง (1%) คอลัมน์
+# risk_w = SIDEWAY_RISK_PER_TRADE / RISK_PER_TRADE (0.5) ไว้แปลงเป็น R ของระบบ (2%) ตอนรวมยอด
+sideway_enabled = (config.SIDEWAY_ENABLED or "--sideway" in sys.argv) and "--no-sideway" not in sys.argv
+_SIDEWAY_W = config.SIDEWAY_RISK_PER_TRADE / config.RISK_PER_TRADE
 # --struct-reg : เปลี่ยน check_structure จาก "เทียบ swing high/low" เป็น "ความชัน regression + R²"
 # ดูเหตุผล/พารามิเตอร์เต็มที่ regime_check.check_structure_reg — พารามิเตอร์ (N ราย symbol จาก
 # คลื่นราคา x2 · R2_MIN 0.5) **ประกาศไว้ก่อนรัน ห้ามขยับหลังเห็นผล**
@@ -1023,8 +1030,9 @@ def close_pos(pos, key, t, r, how):
     global last_close_time, last_tp_close_time
     if use_cost:
         r -= cost_pct / 100 * pos["entry"] / abs(pos["entry"] - pos["sl0"])   # spread ขาเข้า+ออก ~1 ครั้ง
-    rec = {**pos, "exit_time": t, "R": r, "how": how}
-    daily_r[t.date()] = daily_r.get(t.date(), 0.0) + r
+    _w = _SIDEWAY_W if pos.get("strategy") == "Sideway" else 1.0
+    rec = {**pos, "exit_time": t, "R": r, "how": how, "risk_w": _w}
+    daily_r[t.date()] = daily_r.get(t.date(), 0.0) + r * _w   # daily loss นับเป็น R ของระบบ (2%)
     last_close_time = t
     if how == "TP":
         last_tp_close_time = t
@@ -1142,7 +1150,14 @@ for n, row in enumerate(clock.to_dict("records")):
             pending["log"].update(status="ยกเลิก: แตะ TP", resolved=now); pending = None
 
     # กลยุทธ์ที่ regime รอบนี้จะเปิด (ไม่มีทางเกิดพร้อมกัน — regime เป็นตัวเลือกให้ตัวเดียว)
-    _want = "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None)
+    _sw = False
+    if sideway_enabled and _rg in REGIME_NO_TRADE:
+        try:
+            _sw = regime_eff(now)["adx_now"] < regime_check.ADX_CHOPPY
+        except Exception:
+            _sw = False
+    _want = ("Sideway" if _sw else
+             "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None))
     _shadow = False
     if _want is not None and slot_of(_want) in _occupied:
         note("ถือไม้อยู่แล้ว (ช่องไม่ว่าง)"); fate("ถือไม้อื่นอยู่")
@@ -1177,13 +1192,20 @@ for n, row in enumerate(clock.to_dict("records")):
         note(f"regime error: {type(exc).__name__} {str(exc)[:40]}"); fate("regime error")
         continue
     regime = rinfo["regime"]
-    if regime in REGIME_NO_TRADE:
+    if regime in REGIME_NO_TRADE and not _sw:
         note(f"regime = {regime}")
         continue
+    if _sw:
+        regime = "SIDEWAY"
 
     entry = float(bar["close"])
     try:
-        if regime in REGIME_TREND:
+        if regime == "SIDEWAY":
+            sl_info = _sideway_mod.compute_sideway_entry(symbol, entry, as_of=now)
+            direction = sl_info["direction"]
+            sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Sideway"
+            exec_sl, atr_entry_ = sl_info["exec_sl"], None      # None = ไม่มี ATR trailing / TP_MAX_ATR
+        elif regime in REGIME_TREND:
             df_1d = df1d_at(now)
             direction, _ = get_trend_bias(symbol, df_1d)
             if direction is None:
@@ -1470,9 +1492,9 @@ for n, row in enumerate(clock.to_dict("records")):
                 _pl = _p["direction"] == "Long"
                 _r = ((entry - _p["entry"]) if _pl else (_p["entry"] - entry)) / abs(_p["entry"] - _p["sl0"])
                 trades.append(close_pos(_p, _k, now, _p["booked"] + _p["rem"] * _r, "REVERSE"))
-    if tp_entry_on_opposite:
+    if tp_entry_on_opposite and strategy != "Sideway":      # ไม่ใช้กับไม้ Sideway ทั้งสองทาง (ผู้ใช้ 2026-10-02)
         for _k, _p in list(positions.items()):
-            if _k != slot_of(strategy) and _p["direction"] != direction:
+            if _k != slot_of(strategy) and _p["direction"] != direction and _p["strategy"] != "Sideway":
                 _pl = _p["direction"] == "Long"
                 if (entry < _p["entry"]) if _pl else (entry > _p["entry"]):
                     _p["tp"] = _p["entry"]
@@ -1666,6 +1688,8 @@ if entry_limit or entry_limit_atr:
         _tag += "fb"
 if perfect_entry:
     _tag += "_perfectentry"
+if sideway_enabled != config.SIDEWAY_ENABLED:      # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_sideway" if sideway_enabled else "_nosideway"
 if breakout_no_min_peak != config.BREAKOUT_IGNORES_MIN_PEAK:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_bonopeak" if breakout_no_min_peak else "_nobonopeak"
 if regime_check.REVERSAL_USES_ADX_FLOOR != _rev_floor_default:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง

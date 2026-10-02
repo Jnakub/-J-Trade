@@ -723,6 +723,10 @@ def slot_of(strategy: str) -> str:
     ("Breakout") แล้วเช็คช่องด้วย "Reversal" => ระหว่างถือไม้ Breakout ระบบจริงเปิดไม้ Breakout
     ซ้ำได้ชั่วโมงละไม้ตลอดที่สัญญาณค้าง (XAU/US500/HK50/USDJPY/UKOIL ไม่อยู่ใน group มีแค่เพดาน
     พอร์ต 6R หยุด) ขณะที่ replay ให้ถือได้ไม้เดียว — ยังไม่เคยเกิดจริงเพราะยังไม่มีไม้ Breakout เลย"""
+    # 2026-10-02: ไม้ Sideway ใช้ช่องเดียวกับ Scoring (คำสั่งผู้ใช้ — ถ้ามีไม้ Scoring ค้างอยู่ ไม่เปิด sideway
+    # ความเสี่ยงต่อ symbol ไม่เพิ่ม) · ช่วงทดสอบ ~20% ของไม้ sideway เกิดตอนไม้ Scoring ยังค้าง
+    if strategy == "Sideway":
+        return "Scoring"
     return "Reversal" if strategy == "Breakout" else strategy
 
 
@@ -1194,6 +1198,34 @@ BREAKOUT_ENABLED      = True
 #   ไม้เพิ่ม 31 ไม้ = เพดานพอร์ต 6R บล็อกมากขึ้น (replay มองไม่เห็น ยังไม่ได้วัดด้วย backtest_portfolio)
 #   ผู้ใช้เลือกหลังเห็นผลครบ · ตามดูพร้อม BREAKOUT_ENABLED · ถอยกลับ: ตั้ง False ที่เดียว
 BREAKOUT_IGNORES_MIN_PEAK = True
+
+# ── Sideway: กลยุทธ์ที่ 4 · เทรดกรอบตอน ADX 4H ต่ำ (2026-10-02 คำสั่งผู้ใช้) ──────────────────────────
+# กฎทั้งหมดอยู่ที่ sideway.compute_sideway_entry (บ้านเดียวของ scheduler + backtest_replay)
+# ที่มา: ลองราว 40 แบบด้วยสคริปต์คัดกรองแยก (first-touch 1H · ไม่มีช่องร่วม/เพดานพอร์ต) 10 symbol × 2 ยุค
+#   ชุดนี้: 2022-24 185 ไม้ +0.163R/ไม้ · 2024-26 223 ไม้ +0.216 · รวม 408 ไม้ +78.32R t 2.64
+# 🔴 **ตกการทดสอบนอกข้อมูล**: กฎตรึงทั้งหมด กับ 22 symbol ที่ระบบไม่เคยเทรด (FX cross 12 · ดัชนี 8 ·
+#   XAG/USOIL · structure ค่ามาตรฐาน 58) = 707 ไม้ −20.22R avgR −0.029 t −0.54 · บวก 11/22
+#   = กฎนี้ fit กับ 10 symbol ที่ใช้ปรับ · **ผู้ใช้เลือกเอาเข้าระบบหลังเห็นผลนี้แล้ว** (เสี่ยง 1% ต่อไม้)
+#   รายละเอียดทุกแบบที่ลอง: memory sideways-strategy-has-no-edge
+# การตัดสินใจของผู้ใช้ตอนเอาเข้า: ช่องร่วมกับ Scoring (slot_of) · เสี่ยง 1% · ไม่ใช้กฎ TP -> entry กับไม้
+#   Sideway ทั้งสองทาง · Reversal มาก่อน (sideway เข้าได้เฉพาะ regime ที่อยู่ใน REGIME_NO_TRADE)
+# ถอยกลับ: SIDEWAY_ENABLED = False ที่เดียว (scheduler + backtest_replay อ่านค่านี้)
+# 🔻 replay เต็มในระบบ (2026-10-02 · 10 symbol · --end=2026-09-24T00:00 · --sideway): ไม้เดิม 247 ไม้**ไม่เปลี่ยนเลยสักไม้**
+#    (Sideway ออกที่ ADX ≥ 22 ก่อน Scoring จะเข้า · ช่องชนกันไม่เคยเกิด) · Sideway 188 ไม้ +36.62R ในหน่วยของตัวเอง (1%)
+#    = **+18.31R ของระบบ (2%)** · avgR +0.19 · t 1.89 · จบ SL 99 TP 72 ADX-exit 12 BE 5 · ถือ median 16.5 ชม.
+#    ราย symbol: UKOIL +12.0 · ETH +11.6 · US500 +10.2 · HK50 +8.5 · USDJPY +7.7 · GBPCHF +2.5 · EUR −3.1 · BTC −5.0 · XAU −7.8
+#    (สคริปต์คัดกรองช่วงเดียวกันได้ 223 ไม้ +48.17R — replay น้อยกว่าเพราะช่องร่วม/cooldown/daily loss ของระบบจริง)
+#    ⚠️ เพดานพอร์ตนับไม้ใหม่เป็น 1R เต็มเสมอ (sideway เสี่ยงจริง 0.5R) · backtest_portfolio ยังไม่รู้จัก risk_w
+SIDEWAY_ENABLED          = True
+SIDEWAY_RISK_PER_TRADE   = 0.01   # ครึ่งหนึ่งของ RISK_PER_TRADE (เพดานพอร์ตยังนับไม้ใหม่เป็น 1R เต็ม = ระวังเกิน)
+SIDEWAY_MIN_RUN_BARS     = 22     # ADX 4H < regime_check.ADX_CHOPPY ติดกันอย่างน้อยกี่แท่ง
+SIDEWAY_EDGE_PCTL        = 90     # ขอบกรอบ = high P90 / low P10 ของแท่ง 4H ทั้งช่วง sideway
+SIDEWAY_MIN_WIDTH_PCT    = 1.0    # กรอบต้องกว้าง ≥ X% ของราคา (คัดช่วงที่ผันผวนพอ · แทนด้วย spread แล้วแย่ลง)
+SIDEWAY_ZONE             = 0.15   # เข้าเมื่อราคาอยู่ใน X ของกรอบจากขอบ
+SIDEWAY_SL_EXT           = 0.15   # SL เลยขอบออกไป X ของความกว้างกรอบ (20%/25% แย่ลง)
+SIDEWAY_MIN_SL_ATR       = 1.0    # SL ใกล้จุดเข้ากว่า X ATR1H(14) = ไม่เข้า (กรอบแคบเทียบการแกว่งตอนนั้น)
+SIDEWAY_EXIT_ADX         = 22     # ระหว่างถือ ADX 4H ≥ X = sideway จบ ปิดไม้ (= regime_check.ADX_GRAY_HIGH)
+SIDEWAY_MAX_HOLD_H       = 120    # ถือไม่เกินกี่ชั่วโมง (แทน MAX_HOLD_DAYS 30 วันของกลยุทธ์อื่น)
 # ── TP ของไม้ Breakout — **วัดแล้วว่าแกนนี้ไม่สำคัญ อย่าเสียเวลาจูนอีก** (2026-09-22) ──
 # รัน replay เต็ม 8 symbol เทียบสองค่าบนระบบเดียวกัน เปลี่ยนตัวแปรเดียว:
 #   fib 2.618  188 ไม้ +69.80R WR 54.8%  |  Breakout 32 ไม้ +11.40R avgR +0.356 |t| 1.22

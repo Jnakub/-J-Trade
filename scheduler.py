@@ -25,7 +25,7 @@ from config import (
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
     BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE,
-    BREAKOUT_IGNORES_MIN_PEAK,
+    BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
 )
 from mt5_connect import connect, get_account_balance
 from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias
@@ -39,6 +39,7 @@ from exit_monitor import (
 )
 from regime_check import get_regime
 import regime_check
+import sideway
 import reversal
 import notify
 from logger_setup import get_logger, tee_print
@@ -252,6 +253,8 @@ def _tp_to_entry_on_opposite(symbol: str, direction: str, new_ticket) -> None:
     for pos in mt5.positions_get(symbol=symbol) or []:
         if pos.ticket == new_ticket:
             continue
+        if journal.get_trade_strategy(pos.ticket) == "Sideway":
+            continue                               # ไม่ใช้กฎนี้กับไม้ Sideway (คำสั่งผู้ใช้ 2026-10-02)
         old_long = pos.type == mt5.POSITION_TYPE_BUY
         if (direction == "Long") == old_long:
             continue                               # ทิศเดียวกัน — ไม่ใช่คู่สวน
@@ -396,7 +399,11 @@ def scan_symbol(symbol: str) -> None:
                       f"{regime_check.ADX_MIN_PEAK_REVERSAL:g}) — ถือเป็น REVERSAL-READY เพื่อเข้าทาง Breakout")
                 regime = "REVERSAL-READY"
 
-        if regime in REGIME_NO_TRADE:
+        # Sideway (config.SIDEWAY_*): เข้าได้เฉพาะรอบที่ regime ห้ามเทรดและ ADX 4H < ADX_CHOPPY
+        #   = Reversal (REVERSAL-READY ไม่อยู่ใน NO_TRADE) มาก่อนเสมอตามคำสั่งผู้ใช้ 2026-10-02
+        sideway_mode = (regime in REGIME_NO_TRADE and SIDEWAY_ENABLED
+                        and regime_info.get("adx_now", 99) < regime_check.ADX_CHOPPY)
+        if regime in REGIME_NO_TRADE and not sideway_mode:
             print(f"  [{symbol}] SKIP — regime ยังไม่พร้อมเปิด scorecard ใดๆ")
             return
 
@@ -404,7 +411,8 @@ def scan_symbol(symbol: str) -> None:
         #     (Mutual Exclusivity ตามข้อ 4) จึงรู้ได้ตั้งแต่ตรงนี้โดยไม่ต้องคำนวณสกอร์การ์ดก่อน
         #     occupied อ่านไว้ตั้งแต่ข้อ 1 ก่อนรัน Exit Monitor — ตรงลำดับกับ backtest_replay
         #     (ถ้า SLOT_PER_STRATEGY=False ข้อ 1 return ไปตั้งแต่มีไม้ใดๆ แล้ว มาไม่ถึงตรงนี้)
-        want = "Scoring" if regime in REGIME_TREND else "Reversal"
+        want = (slot_of("Sideway") if sideway_mode
+                else "Scoring" if regime in REGIME_TREND else "Reversal")
         if want in occupied:
             print(f"  [{symbol}] SKIP — ช่อง {want} มีไม้เปิดอยู่แล้ว")
             return
@@ -415,7 +423,13 @@ def scan_symbol(symbol: str) -> None:
             return
         entry = tick.bid
 
-        if regime in REGIME_TREND:
+        if sideway_mode:
+            # ── เปิด Sideway — ทิศมาจากตำแหน่งราคาในกรอบ (กฎทั้งหมดที่ sideway.compute_sideway_entry) ──
+            sl_info = sideway.compute_sideway_entry(symbol, entry)   # ไม่ผ่าน = ValueError -> BLOCKED
+            direction, strategy = sl_info["direction"], "Sideway"
+            print(f"  [{symbol}] เปิด Sideway {direction} — กรอบ {sl_info['range_low']:.5f}-"
+                  f"{sl_info['range_high']:.5f} · sideway {sl_info['sideway_bars']} แท่ง  Entry={entry:.5f}")
+        elif regime in REGIME_TREND:
             # ── เปิด Scoring (trend-following) ── ใช้ get_trend_bias ตัวเดียวกับที่
             # compute_entry เรียกภายใน (trend_flip เท่านั้น ไม่มี EMA fallback) กัน bias
             # สองจุดขัดกันเอง (เดิม scheduler ใช้ EMA แยกจาก compute_score ที่ใช้ trend_flip)
@@ -580,6 +594,8 @@ def scan_symbol(symbol: str) -> None:
         # เดิมคำนวณตรงนี้ *หลัง* ด่าน R:R ผ่านไปแล้ว ทำให้ด่านตรวจคนละระยะเสี่ยงกับที่ส่งจริง
         # และถ้าคำนวณสองที่ก็มีโอกาสได้ ATR คนละค่า (คนละวินาที/คนละจำนวนแท่ง) — ดู scoring.py
         pinned_swing = pinned_atr_entry = None
+        if strategy == "Sideway":
+            pinned_swing = sl_info["sl"]   # exit_monitor ใช้เป็นระยะ 1R (ไม่มี ATR trailing)
         exec_sl = sl_info.get("exec_sl") or sl   # SL ที่ส่ง broker จริง
         try:
             if sl_info.get("atr_entry") is not None:
@@ -610,13 +626,14 @@ def scan_symbol(symbol: str) -> None:
         except Exception as exc:
             print(f"  [{symbol}] WARNING — บันทึกฐานตรึงไม่ได้ ({exc}) — exit_monitor จะ fallback คำนวณเองภายหลัง")
 
-        lot, _ = calculate_lot_size(symbol, entry, exec_sl, balance, RISK_PER_TRADE)
+        _risk_frac = SIDEWAY_RISK_PER_TRADE if strategy == "Sideway" else RISK_PER_TRADE
+        lot, _ = calculate_lot_size(symbol, entry, exec_sl, balance, _risk_frac)
         lot    = clamp_lot(symbol, lot)
         # ทำให้การปัดเศษ lot "มองเห็นได้" — volume_step ของโบรกหยาบกว่าที่ต้องการบาง symbol
         # (XAU: 0.02 = 1.67% · 0.03 = 2.50% ไม่มีค่าไหนได้ 2%) เดิมมันเงียบสนิทเพราะ backtest
         # รายงานเป็น R ซึ่งไม่ขึ้นกับขนาดไม้ ดูที่มา/ตัวเลขทั้งหมดที่ config.LOT_ROUNDING
         _risk_pct = risk_pct_of(symbol, entry, exec_sl, lot, balance)
-        _target = RISK_PER_TRADE * 100
+        _target = _risk_frac * 100
         if _risk_pct == _risk_pct and abs(_risk_pct - _target) / _target * 100 > LOT_RISK_WARN_PCT:
             print(f"  [{symbol}] ⚠️ lot {lot} ทำให้เสี่ยงจริง {_risk_pct:.2f}% "
                   f"(เป้า {_target:.1f}% · เพี้ยน {(_risk_pct - _target) / _target * 100:+.0f}%) "
@@ -630,7 +647,7 @@ def scan_symbol(symbol: str) -> None:
                              strategy=strategy,
                              pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
-        if TP_TO_ENTRY_ON_OPPOSITE and ticket:
+        if TP_TO_ENTRY_ON_OPPOSITE and ticket and strategy != "Sideway":
             _tp_to_entry_on_opposite(symbol, direction, ticket)
 
     except ValueError as exc:
