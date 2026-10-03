@@ -8,8 +8,11 @@ Requires=jtrade-xvfb.service
 [Service]
 User=trader
 WorkingDirectory=/home/trader/-J-Trade
-# PYTHONUTF8 = ภาษาไทยใน print() · TZ = กันพลาดถ้า timezone เครื่องถูกเปลี่ยน
-Environment=DISPLAY=:99 WINEPREFIX=/home/trader/.wine-mt5 WINEDEBUG=-all PYTHONUTF8=1 TZ=Asia/Bangkok
+# PYTHONUTF8 = ภาษาไทยใน print()
+# 🔴 ห้ามใส่ TZ=Asia/Bangkok — Python ฝั่ง Windows (CRT) อ่าน TZ แบบ POSIX ของ Windows ("XXX-7")
+# ไม่เข้าใจชื่อ IANA แล้วคำนวณเวลาเพี้ยน: เจอจริง 2026-10-03 datetime.now() ได้ 06:57 ตอนเครื่อง 12:57
+# timezone มาจาก wine เอง (ตาม timedatectl ของเครื่อง = SE Asia Standard Time) ถูกต้องอยู่แล้ว
+Environment=DISPLAY=:99 WINEPREFIX=/home/trader/.wine-mt5 WINEDEBUG=-all PYTHONUTF8=1
 ExecStart=/usr/bin/wine /home/trader/.wine-mt5/drive_c/Python311/python.exe %i.py
 Restart=always
 RestartSec=60
