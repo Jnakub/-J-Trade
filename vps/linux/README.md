@@ -1,6 +1,7 @@
 # รันบอทบน Ubuntu VPS (Hostinger) — ผ่าน wine
 
 ใช้ทางนี้เมื่อ VPS เป็น Linux (Hostinger ไม่มี Windows) · ถ้าเป็น Windows VPS ใช้ `vps/README.md` แทน
+ใช้ได้ทั้ง Ubuntu 24.04 และ 26.04 — ถ้า WineHQ ยังไม่มีแพ็กเกจให้รุ่นนั้น setup.sh จะใช้ wine ของ Ubuntu แทนเอง
 หลักการเหมือนบน Mac ทุกอย่าง: MT5 + Python 3.11 **ฝั่ง Windows** รันใน wine (`MetaTrader5` import
 จาก python ของ Linux ไม่ได้ เหมือนฝั่ง mac) ต่างแค่ VPS ไม่มีจอ จึงใช้จอเสมือน Xvfb `:99`
 
@@ -20,12 +21,19 @@
 
 **[Mac]** เข้า VPS: `ssh root@<IP>` (รหัส root ที่ตั้งตอนซื้อ)
 
+**[VPS]** รันใน `tmux` เสมอ — ssh หลุดแล้วสคริปต์ยังรันต่อ (เกิดจริงครั้งแรก: หลุดกลางขั้น 6) · กลับเข้าไปดูด้วย `tmux attach`
+```
+tmux new -s setup
+```
 **[VPS]**
 ```
 curl -fsSLo /tmp/setup.sh https://raw.githubusercontent.com/Jnakub/-J-Trade/main/vps/linux/setup.sh
-bash /tmp/setup.sh
+bash /tmp/setup.sh 2>&1 | tee /tmp/setup.log
 ```
 ใช้เวลาราว 10-20 นาที (ดาวน์โหลด wine + Python + MT5)
+🔴 ขั้น 7 ต้อง **กด Next ในตัวติดตั้ง MT5 ผ่าน VNC** (ข้อ 3) — ตัวติดตั้งแบบเงียบ `/auto` ค้างโดยไม่มีอะไรบอก (เจอจริง 2026-10-03)
+และต้องเป็น wine **staging** + Windows 11 + WebView2 ตามสคริปต์ทางการของ MetaQuotes — กับ wine stable
+ตัวติดตั้งฟ้อง "A debugger has been found running in your system" (setup.sh ทำครบให้แล้ว)
 
 ## 2. ก๊อป `.env` + state จาก Mac
 

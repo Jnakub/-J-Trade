@@ -33,6 +33,15 @@ def connect() -> bool:
         code, msg = mt5.last_error()
         raise ConnectionError(f"mt5.initialize() ล้มเหลว  [{code}] {msg}")
 
+    # ใส่ทุก symbol เข้า Market Watch — symbol ที่ไม่อยู่ในนั้น symbol_info_tick/copy_rates คืน None
+    # ("[-4] Terminal: Not found") แล้ว scan ข้ามไปเงียบๆ · เจอจริง 2026-10-03 บน VPS ที่ลง MT5 ใหม่:
+    # 5/10 symbol หาย (XAU/USDJPY/US500/GBPCHF/AUDNZD) ส่วนบน Mac ไม่เคยเจอเพราะเคยเปิดไว้ด้วยมือ
+    # ไม่ raise — symbol เดียวที่โบรกถอดไม่ควรหยุดอีก 9 ตัว
+    for symbol in SYMBOLS:
+        if not mt5.symbol_select(symbol, True):
+            code, msg = mt5.last_error()
+            print(f"[WARN] ใส่ {symbol} เข้า Market Watch ไม่ได้  [{code}] {msg}")
+
     return True
 
 
