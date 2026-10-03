@@ -113,6 +113,11 @@ Mac ใช้ทำ backtest (`run_wine.sh`) เท่านั้น
 3. `sudo -iu trader git -C /home/trader/-J-Trade pull`
 4. `systemctl start jtrade@scheduler jtrade@exit_monitor` แล้ว `tail` log ดูรอบแรก
 (MT5 ไม่ต้องหยุด · แก้ไฟล์ใน `vps/linux/*.service` ต้อง `cp` ไป `/etc/systemd/system/` + `systemctl daemon-reload` เอง — pull ไม่ทำให้)
+🔴 **โค้ดใหม่ที่ `import` แพ็กเกจใหม่ ต้องลงบน VPS แยก** — Python บน VPS เป็นคนละตัวกับบน Mac (pull ไม่ลงแพ็กเกจให้)
+ไม่งั้นบอทตายตอน import แล้ว systemd เริ่มใหม่วนทุก 60 วิ:
+`sudo -iu trader env WINEPREFIX=/home/trader/.wine-mt5 wine /home/trader/.wine-mt5/drive_c/Python311/python.exe -m pip install <แพ็กเกจ>`
+**เพิ่ม symbol ใหม่:** ทำเช็คลิสต์ 8 ข้อที่ `config.py` + backtest บน Mac ตามปกติ แล้ว deploy ตามขั้นข้างบน —
+Market Watch บน VPS ไม่ต้องทำมือ (`connect()` ใส่ให้เอง) · หลังเริ่มบอทให้ grep `WARN` ใน `scheduler.log` ว่าใส่ symbol ได้
 
 **ดูหน้าจอ MT5 (ล็อกอินใหม่ / เปิดปุ่ม Algo Trading):** VPS: `sudo -iu trader /home/trader/-J-Trade/vps/linux/vnc.sh`
 · Mac แท็บใหม่: `ssh -L 5901:localhost:5900 root@<IP>` · Finder Cmd+K `vnc://localhost:5901` (รหัส VNC ผู้ใช้ตั้งเอง)
