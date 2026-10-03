@@ -31,6 +31,9 @@ curl -fsSLo /tmp/setup.sh https://raw.githubusercontent.com/Jnakub/-J-Trade/main
 bash /tmp/setup.sh 2>&1 | tee /tmp/setup.log
 ```
 ใช้เวลาราว 10-20 นาที (ดาวน์โหลด wine + Python + MT5)
+🔴 ขั้น 7 ต้อง **กด Next ในตัวติดตั้ง MT5 ผ่าน VNC** (ข้อ 3) — ตัวติดตั้งแบบเงียบ `/auto` ค้างโดยไม่มีอะไรบอก (เจอจริง 2026-10-03)
+และต้องเป็น wine **staging** + Windows 11 + WebView2 ตามสคริปต์ทางการของ MetaQuotes — กับ wine stable
+ตัวติดตั้งฟ้อง "A debugger has been found running in your system" (setup.sh ทำครบให้แล้ว)
 
 ## 2. ก๊อป `.env` + state จาก Mac
 
