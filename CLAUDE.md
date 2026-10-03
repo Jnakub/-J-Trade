@@ -91,6 +91,9 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 
 `python3 script.py` ตรงๆ ใช้ได้เฉพาะสคริปต์ที่อ่าน CSV อย่างเดียว ไม่ต่อ MT5
 
+**ระบบจริงบน Windows VPS** (2026-10-03) — ไม่ใช้ wine · ตัวเรียก + Task Scheduler + ขั้นตอนย้ายอยู่ที่ `vps/README.md`
+🔴 timezone ของ VPS ต้องเป็น UTC+7 (เวลาเครื่องถูกใช้ตัดสินขอบวัน daily loss / cooldown / trades_log)
+
 🔴 **รันจาก git worktree: โมดูลที่ import มาจาก checkout หลัก ไม่ใช่จาก worktree** (เจอ 2026-09-25)
 Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay\Desktop\-J-Trade` ไว้ใน sys.path
 และโหมด `._pth` **ไม่ใส่โฟลเดอร์ของสคริปต์ให้** => `./run_wine.sh backtest_replay.py` ใน worktree
