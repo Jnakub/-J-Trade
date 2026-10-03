@@ -1,0 +1,12 @@
+# จอเสมือนให้ MT5 terminal (มันต้องมีหน้าต่างถึงจะรันได้)
+[Unit]
+Description=J-Trade virtual display :99
+After=network.target
+
+[Service]
+User=trader
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1280x800x24 -nolisten tcp
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

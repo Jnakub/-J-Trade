@@ -1,0 +1,15 @@
+# MT5 terminal — python ของบอทเกาะ terminal ตัวนี้ผ่าน mt5.initialize()
+[Unit]
+Description=J-Trade MetaTrader 5 terminal
+After=jtrade-xvfb.service network-online.target
+Requires=jtrade-xvfb.service
+
+[Service]
+User=trader
+Environment=DISPLAY=:99 WINEPREFIX=/home/trader/.wine-mt5 WINEDEBUG=-all
+ExecStart=/usr/bin/wine "/home/trader/.wine-mt5/drive_c/Program Files/MetaTrader 5/terminal64.exe"
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
