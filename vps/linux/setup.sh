@@ -62,7 +62,10 @@ systemctl daemon-reload
 systemctl enable --now jtrade-xvfb
 
 # ทุกคำสั่ง wine ด้านล่างรันเป็น trader บนจอ :99 ใน prefix แยกของบอท
-as_bot() { sudo -u $BOT_USER env DISPLAY=:99 WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEARCH=win64 "$@"; }
+# WINEDLLOVERRIDES ปิดหน้าต่าง "ติดตั้ง Mono/Gecko ไหม" ตอนสร้าง prefix — บนจอเสมือนไม่มีใครกดได้ = ค้างตลอดไป
+# (บอทไม่ใช้ .NET/IE engine · Python กับ MT5 ไม่ต้องพึ่งสองตัวนี้)
+as_bot() { sudo -u $BOT_USER env DISPLAY=:99 WINEPREFIX="$PREFIX" WINEDEBUG=-all WINEARCH=win64 \
+    WINEDLLOVERRIDES="mscoree,mshtml=" "$@"; }
 
 echo "== 6/7 Python $PY_VER (Windows) ใน wine =="
 if [ ! -f "$PREFIX/drive_c/Python311/python.exe" ]; then

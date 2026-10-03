@@ -21,10 +21,14 @@
 
 **[Mac]** เข้า VPS: `ssh root@<IP>` (รหัส root ที่ตั้งตอนซื้อ)
 
+**[VPS]** รันใน `tmux` เสมอ — ssh หลุดแล้วสคริปต์ยังรันต่อ (เกิดจริงครั้งแรก: หลุดกลางขั้น 6) · กลับเข้าไปดูด้วย `tmux attach`
+```
+tmux new -s setup
+```
 **[VPS]**
 ```
 curl -fsSLo /tmp/setup.sh https://raw.githubusercontent.com/Jnakub/-J-Trade/main/vps/linux/setup.sh
-bash /tmp/setup.sh
+bash /tmp/setup.sh 2>&1 | tee /tmp/setup.log
 ```
 ใช้เวลาราว 10-20 นาที (ดาวน์โหลด wine + Python + MT5)
 
