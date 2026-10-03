@@ -154,7 +154,10 @@ results += [
           _base + [pos_at("ETHUSDm", "Long", 0.5)], "BTCUSDm", False),
 ]
 
-print("\nเพดานกลุ่ม (2.0R) — CRYPTO = BTC+ETH, EURGBP = EUR+GBP:")
+# กลไกเพดานกลุ่มตรึงที่ 2.0R (ค่าจริงใน config อาจสูงกว่า) — ทดสอบค่าจริงแยกด้านล่าง
+_LIVE_GROUP = scheduler.MAX_GROUP_RISK_R
+scheduler.MAX_GROUP_RISK_R = 2.0
+print("\nเพดานกลุ่ม (ตรึงที่ 2.0R เพื่อทดสอบกลไก) — CRYPTO = BTC+ETH:")
 results += [
     check("ETH เปิด 1.0R + BTC ใหม่ 1R = 2.0R พอดี", [
         pos_at("ETHUSDm", "Long", 1.0)], "BTCUSDm", True),
@@ -164,10 +167,18 @@ results += [
     check("เท่ากันเป๊ะแต่ไม้ใหม่เป็น XAU (คนละกลุ่ม) -> ผ่าน", [
         pos_at("ETHUSDm", "Long", 1.0), pos_at("BTCUSDm", "Long", 0.5)],
         "XAUUSDm", True),
-    check("GBP 1.5R + EUR ใหม่ -> เกินเพดานกลุ่ม", [
-        pos_at("GBPUSDm", "Long", 1.5)], "EURUSDm", False),
+    check("EUR ไม่อยู่กลุ่มแล้ว: EUR 1.12R + EUR ใหม่ -> ผ่าน", [
+        pos_at("EURUSDm", "Short", 1.12)], "EURUSDm", True),
     check("US500 1.5R + XAU ใหม่ (ไม่อยู่กลุ่มไหน) -> ผ่าน", [
         pos_at("US500m", "Long", 1.5)], "XAUUSDm", True),
+]
+scheduler.MAX_GROUP_RISK_R = _LIVE_GROUP
+print(f"\nเพดานกลุ่มค่าจริงใน config ({_LIVE_GROUP:g}R):")
+results += [
+    check("ETH 1R + BTC 1R + BTC ใหม่ = 3R พอดี", [
+        pos_at("ETHUSDm", "Long", 1.0), pos_at("BTCUSDm", "Long", 1.0)], "BTCUSDm", _LIVE_GROUP >= 3.0),
+    check("ETH 1R + BTC 1.2R + ETH ใหม่ = 3.2R เกิน", [
+        pos_at("ETHUSDm", "Long", 1.0), pos_at("BTCUSDm", "Long", 1.2)], "ETHUSDm", False),
 ]
 
 # เคส "ไม่มี SL = 1R" พิสูจน์ด้วยการให้ 2R + 0.5R + ไม้ใหม่ 1R = 3.5R ทะลุเพดาน -> ต้องตรึงที่ 3.0R
