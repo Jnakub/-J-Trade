@@ -92,6 +92,7 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 `python3 script.py` ตรงๆ ใช้ได้เฉพาะสคริปต์ที่อ่าน CSV อย่างเดียว ไม่ต่อ MT5
 
 **ระบบจริงบน Windows VPS** (2026-10-03) — ไม่ใช้ wine · ตัวเรียก + Task Scheduler + ขั้นตอนย้ายอยู่ที่ `vps/README.md`
+· **Ubuntu VPS (Hostinger · ไม่มี Windows)**: wine + Xvfb + systemd ที่ `vps/linux/README.md`
 🔴 timezone ของ VPS ต้องเป็น UTC+7 (เวลาเครื่องถูกใช้ตัดสินขอบวัน daily loss / cooldown / trades_log)
 
 🔴 **รันจาก git worktree: โมดูลที่ import มาจาก checkout หลัก ไม่ใช่จาก worktree** (เจอ 2026-09-25)

@@ -1,0 +1,18 @@
+# บอท 1 ตัวต่อ instance:  jtrade@scheduler  ·  jtrade@exit_monitor
+# Restart=always = ตายแล้วเริ่มใหม่เองใน 60 วิ (แทน start_bot.bat ของ Windows)
+[Unit]
+Description=J-Trade %i.py
+After=jtrade-mt5.service
+Requires=jtrade-xvfb.service
+
+[Service]
+User=trader
+WorkingDirectory=/home/trader/-J-Trade
+# PYTHONUTF8 = ภาษาไทยใน print() · TZ = กันพลาดถ้า timezone เครื่องถูกเปลี่ยน
+Environment=DISPLAY=:99 WINEPREFIX=/home/trader/.wine-mt5 WINEDEBUG=-all PYTHONUTF8=1 TZ=Asia/Bangkok
+ExecStart=/usr/bin/wine /home/trader/.wine-mt5/drive_c/Python311/python.exe %i.py
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
