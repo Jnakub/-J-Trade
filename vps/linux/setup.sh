@@ -30,7 +30,9 @@ if ! command -v wine >/dev/null; then
     winehq_src="https://dl.winehq.org/wine-builds/ubuntu/dists/$codename/winehq-$codename.sources"
     if wget -q --spider "$winehq_src"; then
         mkdir -pm755 /etc/apt/keyrings
-        wget -qO /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+        # apt ของ 26.04 ไม่รับ key แบบ ASCII-armored ในไฟล์ .key ("unsupported filetype" -> repo ไม่ถูก sign)
+        # -> แปลงเป็น binary ด้วย gpg --dearmor (ชื่อไฟล์ต้องคงเดิม เพราะไฟล์ .sources ของ WineHQ อ้างชื่อนี้)
+        wget -qO- https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor --yes -o /etc/apt/keyrings/winehq-archive.key
         wget -qNP /etc/apt/sources.list.d/ "$winehq_src"
         apt-get update
         apt-get install -y --install-recommends winehq-stable
