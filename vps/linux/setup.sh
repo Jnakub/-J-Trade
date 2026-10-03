@@ -82,8 +82,16 @@ as_bot wine "$PREFIX/drive_c/Python311/python.exe" -m pip install --upgrade \
 echo "== 7/7 MetaTrader 5 ใน wine =="
 if [ ! -f "$PREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe" ]; then
     as_bot wget -qO /tmp/mt5setup.exe "$MT5_URL"
-    as_bot wine /tmp/mt5setup.exe /auto
-    as_bot wineserver -w
+    as_bot wine /tmp/mt5setup.exe /auto &
+    # installer เปิด terminal64.exe เองหลังลงเสร็จ -> `wineserver -w` จะรอไม่จบ
+    # จึงรอแค่ให้ไฟล์โผล่ แล้วปิด terminal ทิ้ง (systemd จะเปิดเองทีหลัง)
+    for _ in $(seq 1 120); do
+        [ -f "$PREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe" ] && break
+        sleep 5
+    done
+    sleep 30   # ให้ installer เขียนไฟล์ที่เหลือจนเสร็จ
+    pkill -u $BOT_USER -f terminal64.exe || true
+    pkill -u $BOT_USER -f mt5setup.exe || true
 fi
 
 # services ของ MT5 + บอท — ติดตั้งแต่ยัง **ไม่ enable** จนกว่าจะล็อกอิน MT5 และก๊อป state จาก Mac แล้ว
