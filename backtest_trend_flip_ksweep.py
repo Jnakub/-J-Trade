@@ -14,8 +14,14 @@ backtest_trend_flip_ksweep.py — ขั้นตอน E: หา k* ที่�
 ไม่งั้นไม่มีประโยชน์ที่จะใช้แทน EMA — เป็นเกณฑ์เลือกอัตโนมัติเบื้องต้น ดูตารางเต็มประกอบ
 การตัดสินใจเองได้เสมอ
 
-ใช้: python backtest_trend_flip_ksweep.py <SYMBOL> <BARS>
-     python backtest_trend_flip_ksweep.py BTCUSDm 2000
+🔴 **ต้องส่ง `1D` ต่อท้ายเสมอ — default 4H ของไฟล์นี้ตอบคำถามที่ไม่มีใครถาม**
+ระบบจริงเรียก `compute_trend_regime` บนแท่ง **1D** เท่านั้น (`scoring.get_trend_flip_bias`
+ใช้ `df_1d.iloc[:-1]`) ค่า k ที่ได้จาก 4H จึงเป็นของ timeframe ที่ไม่ได้ใช้งาน
+เจอกับตัวเอง 2026-09-19 ตอนตั้ง HK50m: 4H ให้ FalseFlip 2.1% ส่วน 1D ให้ 0% ทุกค่า k
+(default ไม่ถูกแก้เป็น 1D เพราะจะทำให้ตัวเลขเก่าที่จดไว้ในไฟล์อื่นอ่านไม่ตรงกับคำสั่งที่เขียนไว้)
+
+ใช้: python backtest_trend_flip_ksweep.py <SYMBOL> <BARS> 1D
+     python backtest_trend_flip_ksweep.py BTCUSDm 3000 1D
 """
 import sys
 

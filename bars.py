@@ -65,14 +65,146 @@ from config import MT5_TIMEFRAMES
 # — ยังไม่ได้เทียบ ATR/ADX กับ TradingView ยืนยัน แค่ override ตามที่ขอ
 BAR_OFFSET_H = {
     "BTCUSDm": 0,
-    "XAUUSDm": 2,
+    "XAUUSDm": 1,   # 2026-09-09: 2 -> 1 ยืนยันกับจอผู้ใช้ (ADX 20 บน 4H = 23.8, 6 แท่ง/วัน)
+                    # offset=1 ให้ 23.74 ส่วน 0/2/3 ให้ 26.70 / 19.46 / 22.41
+                    # ⚠️ ต้องคู่กับ DAILY_GAP_SYMBOLS ด้านล่าง ไม่งั้นยังได้ 5 แท่ง/วันอยู่ดี
     "ETHUSDm": 0,
     "XRPUSDm": 0,
     "USDJPYm": 1,
     "US500m":  0,
     "EURUSDm": 3,
     "GBPUSDm": 1,
+    # 2026-09-19: HK50m — **ยืนยันกับจอผู้ใช้แล้วว่า offset=1** (เช็คลิสต์ข้อ 4)
+    #   offset 0 -> ADX 32.06   ·   **1 -> ADX 35.22**   ·   2 -> 27.67   ·   3 -> 31.03
+    #   ผู้ใช้อ่านจากจอได้ ~35.2
+    # 🔴 **แกว่ง 7.55 จุดตาม offset = มากที่สุดในระบบ** (US500 5.00 · EUR 4.22 · GBP 2.54
+    #   · UKOIL 2.40) และช่วง 27.7-35.2 นี้คร่อมทั้งเส้น ADX_GRAY_HIGH (22) และ
+    #   ADX_STRONG_TREND (40) ได้ในบางจังหวะ = ตั้งผิดแล้วระบบเห็น regime คนละแบบกับจอ
+    #   ถ้าวันหนึ่งสงสัยว่า HK50 ตัดสิน regime แปลกๆ ให้กลับมาตรวจค่านี้เป็นอย่างแรก
+    # ไม่ใส่ DAILY_GAP_SYMBOLS — HK50 มีแท่ง 1H ครบ 23 ชม./วัน (หายแค่ชั่วโมง 21)
+    # ต่างจาก UKOIL ที่หยุด 3 ชม. จึงไม่มีปัญหาบัคเก็ตเหลือแท่งย่อยไม่ครบ
+    "HK50m":   1,
+    # 2026-09-28: GBPCHFm — **ยืนยันกับจอผู้ใช้แล้วว่า offset=0** (แท่งที่ปิดล่าสุด ณ 22:06 ไทย)
+    #   **0 -> 20.92** · 1 -> 20.00 · 2 -> 21.84 · 3 -> 23.93 (แกว่ง 3.9 จุด ทั้งช่วงคร่อมเส้น 22)
+    # 🔴 copy_rates ครั้งแรกหลัง select อาจคืนแท่งค้างหลายชั่วโมง — ตอนวัดต้องขอซ้ำจนแท่งล่าสุดถึงปัจจุบัน
+    "GBPCHFm": 0,
+    # 2026-09-29: AUDNZDm — **ผู้ใช้ยืนยันกับจอว่า offset=1** (ADX ทั้ง 4 offset ห่างกันไม่ถึง 1.3 จุด
+    #   14.66-15.72 ตัดสินจากเวลาเริ่มแท่งบนจอแทน) · ⚠️ ต่างจาก GBPCHF (0) ทั้งที่เป็น FX เหมือนกัน
+    "AUDNZDm": 1,
+    # 2026-09-18: UKOILm — **ยืนยันกับจอผู้ใช้แล้วว่า offset=1** (เช็คลิสต์ข้อ 4)
+    #   offset 0 -> 6 แท่ง/วัน ADX 22.64   ·   **1 -> ADX 23.64 (5 แท่ง) / 22.94 (6 แท่ง)**
+    #   offset 2 -> 4 แท่ง ADX 24.94       ·   3 -> 4 แท่ง ADX 22.20
+    # ✅ **ผู้ใช้อ่านจากจอได้ ~23.6 = ค่าที่ตรงกับ "ไม่ใส่ DAILY_GAP_SYMBOLS" (5 แท่ง/วัน)**
+    #   ถามแยกแล้วเพราะที่ offset=1 มีสองค่าให้เลือก: 23.64 (5 แท่ง) vs 22.94 (6 แท่ง)
+    # 🔴 ผลที่ตามมาที่ต้องรู้ตัว: UKOIL หยุด **3 ชม./วัน (21:00-23:59)** ต่างจาก XAU/US500
+    #   ที่หยุดแค่ชั่วโมงเดียว บัคเก็ต 21:00-00:59 จึงเหลือแท่งย่อยไม่ครบ 4 และถูก
+    #   get_aligned_4h ตัดทิ้งทุกวัน = ระบบไม่เห็นช่วง 21:00-00:59 เลย
+    #   **ไม่ใช่บั๊ก** — เป็นผลของการเลือกให้ตรงกับจอ และช่วงที่หายคือช่วงที่ตลาดปิดจริง 3 ใน 4 ชม.
+    #   ถ้าวันหนึ่งพบว่ามันทำให้พลาดสัญญาณ ให้ใส่ UKOILm ใน DAILY_GAP_SYMBOLS แล้ว ADX จะ
+    #   กลายเป็น 22.94 (6 แท่ง/วัน) ซึ่ง **ไม่ตรงกับจอ** — ต้องเลือกอย่างใดอย่างหนึ่ง
+    "UKOILm": 1,
 }
+
+# symbol ที่โบรกพักตลาดกลางวัน (ไม่ใช่แค่สุดสัปดาห์) — ยกเว้นจากตัวกรอง "แท่งย่อยต้องครบ 4"
+# ใน get_aligned_4h เพราะ gap ประจำวันทำให้ bucket เดิมโดนตัดทิ้งทุกวัน = ตาบอดอย่างเป็นระบบ
+# วิธีเช็คว่า symbol ใหม่ต้องอยู่ในลิสต์นี้ไหม: นับแท่ง 1H แยกตามชั่วโมงของวัน ถ้ามีชั่วโมงไหน
+# หายเกือบทุกวัน (XAUUSDm = 21:00) และ symbol นั้น offset != 0 -> ต้องใส่
+# วัดแล้ว: XAUUSDm หาย 21:00 ทุกวัน / US500m หาย 21:00 เหมือนกันแต่ offset=0 (ใช้แท่ง native
+# ของ MT5 ไม่ผ่านตัวกรองนี้เลย) / USDJPYm-EURUSDm-GBPUSDm ไม่มีชั่วโมงหายประจำวัน
+DAILY_GAP_SYMBOLS = {"XAUUSDm"}
+
+
+# วินาทีต่อแท่งของแต่ละ timeframe — ใช้คำนวณ "เวลาปิดแท่ง" (time + TF_SECONDS) ใน as_of mode
+TF_SECONDS = {"1D": 86400, "4H": 14400, "1H": 3600, "M15": 900}
+
+# TF ย่อยที่ใช้ประกอบ "แท่งที่ยังไม่ปิด" ณ as_of (ดู _partial_bar) — 1D/4H ประกอบจาก 1H,
+# 1H ประกอบจาก M15 (ละเอียดกว่านี้ไม่คุ้ม MT5 call ที่เพิ่ม)
+PARTIAL_SRC = {"1D": "1H", "4H": "1H", "1H": "M15"}
+
+
+def _copy_rates(symbol: str, tf_name: str, bars: int, as_of=None) -> pd.DataFrame:
+    """ดึงแท่งดิบจาก MT5 (รองรับ M15 ที่ไม่มีใน config.MT5_TIMEFRAMES ด้วย)"""
+    import MetaTrader5 as mt5
+
+    tf = MT5_TIMEFRAMES.get(tf_name) or {"M15": mt5.TIMEFRAME_M15}[tf_name]
+    if as_of is None:
+        rates = mt5.copy_rates_from_pos(symbol, tf, 0, bars)
+    else:
+        rates = mt5.copy_rates_from(symbol, tf, as_of, bars)
+    if rates is None or len(rates) == 0:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"ดึงข้อมูล {symbol} {tf_name} ไม่ได้  [{code}] {msg}")
+    df = pd.DataFrame(rates)
+    df["time"] = pd.to_datetime(df["time"], unit="s")
+    return df
+
+
+def _partial_bar(symbol: str, tf_name: str, bar_start, as_of) -> dict | None:
+    """ประกอบแท่งที่ "กำลังก่อตัว" ณ as_of จากแท่ง TF ย่อยที่ปิดแล้วเท่านั้น
+    คืน None ถ้ายังไม่มีแท่งย่อยปิดเลย (as_of อยู่ตรงขอบแท่งพอดี) หรือดึง TF ย่อยไม่ได้"""
+    src = PARTIAL_SRC.get(tf_name)
+    if src is None:
+        return None
+    sub_dur = pd.Timedelta(seconds=TF_SECONDS[src])
+    need    = int(TF_SECONDS[tf_name] / TF_SECONDS[src]) + 4
+    try:
+        sub = _copy_rates(symbol, src, need, as_of)
+    except RuntimeError:
+        return None
+    sub = sub[(sub["time"] >= bar_start) & (sub["time"] + sub_dur <= as_of)]
+    if sub.empty:
+        return None
+    return {"time": bar_start, "open": sub["open"].iloc[0], "high": sub["high"].max(),
+            "low": sub["low"].min(), "close": sub["close"].iloc[-1],
+            "tick_volume": float(sub["tick_volume"].sum())}
+
+
+def get_bars(symbol: str, tf_name: str, bars: int = 100, as_of=None) -> pd.DataFrame:
+    """จุดเดียวทั้งระบบสำหรับดึงแท่งราคา — scoring.get_ohlcv() เป็นแค่ wrapper ของตัวนี้
+
+    as_of=None (รันสด) = เหมือนเดิมทุกประการ: แท่งล่าสุดจาก MT5 โดยแท่งท้ายสุดคือแท่งที่ยัง
+    ไม่ปิด (live)
+
+    as_of=datetime (backtest) = **คืนเฉพาะข้อมูลที่มีอยู่จริง ณ วินาทีนั้น** คือแท่งที่ปิดแล้ว
+    (time + TF_SECONDS <= as_of) บวกแท่งที่กำลังก่อตัวซึ่งประกอบขึ้นใหม่จาก TF ย่อยที่ปิดแล้ว
+    (ดู _partial_bar) ให้หน้าตาเหมือนที่ MT5 คืนตอนรันสดเป๊ะ
+
+    🔴 2026-08-26 นี่คือจุดที่แก้บั๊ก lookahead ที่กระทบ backtest ทุกตัวในระบบ: mt5.copy_rates_from
+    (สิ่งที่ฟังก์ชันนี้เคยเรียกตรงๆ) คืนแท่งที่ "ครอบ" as_of มาให้แบบ **ปิดสมบูรณ์แล้ว** ทำให้
+    backtest เห็นอนาคตของแท่งนั้นทั้งแท่ง — 4 ชม.บนกราฟ 4H และเต็มวันบนกราฟ 1D (ราคาปิดของ
+    วันตัวเองก่อนตัดสินใจ! กระทบ Trend 1D / OBV 1D / EMA50 1D ตรงๆ) ยืนยันด้วยการทดสอบจริงกับ
+    MT5 เครื่องนี้: copy_rates_from(as_of=16:00) คืนแท่ง 4H ของ 16:00 มาทั้งแท่ง และ 1H ของ
+    16:00 มาทั้งแท่ง ผลคือ entry price ใน backtest = ราคาในอนาคตอีก 1 ชม.
+    ตัวเลข backtest ทั้งหมดที่รันก่อนวันนี้จึงเทียบกับหลังวันนี้ไม่ได้ (ของเก่าดีเกินจริง)"""
+    if as_of is None:
+        return (get_aligned_4h(symbol, bars, None) if tf_name == "4H"
+                else _copy_rates(symbol, tf_name, bars, None))
+
+    as_of = pd.Timestamp(as_of)
+    dur   = pd.Timedelta(seconds=TF_SECONDS[tf_name])
+    raw   = (get_aligned_4h(symbol, bars + 2, as_of) if tf_name == "4H"
+             else _copy_rates(symbol, tf_name, bars + 2, as_of))
+
+    out     = raw[raw["time"] + dur <= as_of].tail(bars).reset_index(drop=True)
+    forming = raw[(raw["time"] <= as_of) & (raw["time"] + dur > as_of)]
+    if forming.empty or out.empty:
+        return out
+
+    bar_start = forming["time"].iloc[0]
+    part = _partial_bar(symbol, tf_name, bar_start, as_of)
+    if part is None:
+        # as_of ตรงขอบแท่งพอดี (ยังไม่มีแท่งย่อยปิดเลย) — ใส่แท่งความกว้างศูนย์ที่ราคาล่าสุด
+        # แทน ให้รูปร่างเฟรมเหมือนตอนรันสดเสมอ (โค้ดหลายที่ตัด iloc[-1] ทิ้งเองเพราะถือว่า
+        # แท่งท้ายคือแท่ง live เช่น regime_check.get_regime / get_trend_bias)
+        last = out["close"].iloc[-1]
+        part = {"time": bar_start, "open": last, "high": last, "low": last,
+                "close": last, "tick_volume": 0.0}
+
+    row = pd.DataFrame([part])
+    for col in out.columns:            # spread/real_volume ฯลฯ ที่ MT5 แถมมา — ยกค่าล่าสุดมาใส่
+        if col not in row.columns:
+            row[col] = out[col].iloc[-1]
+    return pd.concat([out, row[out.columns]], ignore_index=True).tail(bars).reset_index(drop=True)
 
 
 def get_aligned_4h(symbol: str, bars: int, as_of=None) -> pd.DataFrame:
@@ -135,8 +267,30 @@ def get_aligned_4h(symbol: str, bars: int, as_of=None) -> pd.DataFrame:
                 close=("close", "last"), tick_volume=("tick_volume", "sum"),
                 n_sub_bars=("open", "count"))
            .dropna())
-    live_bar = g.iloc[[-1]]                    # เก็บแท่งสุดท้ายไว้ก่อนกรอง (ป้องกันไม่ครบ 4 โดยชอบธรรม)
-    g = g[g["n_sub_bars"] == 4]
+    # ตัวกรองแท่งพร่อง — ตัดแท่ง 4H ที่ประกอบจากแท่งย่อย 1H ไม่ครบ 4 ทิ้ง (เหตุผลเดิมด้านบน)
+    # 2026-09-09: เพิ่มข้อยกเว้นรายตัวผ่าน DAILY_GAP_SYMBOLS — กรองแบบเดิมพังกับโบรกที่พัก
+    # ตลาด 1 ชม. **ทุกวัน** ไม่ใช่แค่สุดสัปดาห์: XAUUSDm ไม่มีแท่ง 1H เวลา 21:00 ทุกวัน
+    # bucket ที่คร่อมช่วงนั้นจึงเหลือแท่งย่อย 3 แท่งและถูกตัดทิ้ง **ทุกวัน** => ระบบเห็น XAU
+    # แค่ 5 แท่ง/วันแทนที่จะเป็น 6 ช่วง 18:00-20:59 (ตลาดอเมริกาของทอง) หายจากสายตาทั้งหมด
+    # ยืนยันกับจอผู้ใช้ (ADX 20 บน 4H): ของจริง 6 แท่ง/วัน ADX = 23.8
+    #   เดิม (offset=2 + กรอง)  ADX 19.83  5 แท่ง/วัน   <- ต่ำกว่าเส้น CHOPPY=20 = ไม่เทรด
+    #   ใหม่ (offset=1 + ยกเว้น) ADX 23.74  6 แท่ง/วัน   <- ตรงจอ และเกิน 22 = TREND เทรดได้
+    # ไม่ใช่แค่ตัวเลขคลาด แต่คร่อมเส้นแบ่ง regime พอดี ระบบจริงจึงข้าม XAU มาตลอดโดยไม่ควรข้าม
+    #
+    # ⚠️ เคยลองถอดตัวกรองทั้งระบบแล้ว **แย่ลง** — อย่าทำซ้ำ (backtest 730 วัน):
+    #   XAUUSDm +4.73 -> +6.92R (+2.19)   แต่ USDJPYm -3.51 / EURUSDm -2.00 / GBPUSDm -0.49
+    #   รวม 181 ไม้ +20.26R -> 196 ไม้ +16.45R
+    # บทเรียน: ตอนตัดสินใจถอด ผมดูแค่ค่า ADX ณ วินาทีเดียว (USDJPY 50.70 เท่ากันทั้ง 3 แบบ,
+    # GBP 12.18 เท่ากัน) แล้วสรุปว่า "ปลอดภัย" ซึ่งไม่ได้บอกอะไรเลยเกี่ยวกับอีก 730 วัน —
+    # สามตัวนั้น gap เฉพาะสุดสัปดาห์ ตัวกรองทำหน้าที่ถูกอยู่แล้ว มีแต่ XAU ที่โดนลูกหลง
+    # ข้อยกเว้น: แท่งตัวสุดท้าย (live ที่ยังไม่ปิด หรือแท่ง ณ as_of ที่ query ระหว่างแท่งกำลังก่อตัว)
+    # มีแท่งย่อยไม่ครบ 4 ได้ "โดยปกติ" ไม่ใช่ gap — ต้องเก็บไว้เสมอ ไม่งั้น caller ที่คาดหวัง
+    # แท่งสุดท้ายเป็นแท่ง live จะพัง (get_regime ตัด iloc[-1] ออกเองตอนหา closed_idx จะกลาย
+    # เป็นตัดซ้ำสองครั้ง = ตัดสินใจบนแท่งที่เก่ากว่าที่ควร) — 2026-09-09 เคยเผลอลบทิ้งตอนแก้
+    # ตัวกรองด้านบน ผลคือ USDJPYm/EURUSDm/GBPUSDm เปลี่ยนไปทั้งที่ไม่ได้แตะ (USDJPY +2.90R
+    # ดูเหมือนดีขึ้นแต่มาจากบั๊กนี้ล้วนๆ)
+    live_bar = g.iloc[[-1]]
+    g = g[(g["n_sub_bars"] == 4) | (symbol in DAILY_GAP_SYMBOLS)]
     if live_bar.index[0] not in g.index:
         g = pd.concat([g, live_bar])
     g = g.drop(columns="n_sub_bars").sort_index().reset_index()

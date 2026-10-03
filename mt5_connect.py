@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime, timezone
 import MetaTrader5 as mt5
 from dotenv import load_dotenv
 
@@ -60,6 +61,22 @@ def is_demo_account() -> bool:
     (exit_monitor.execute_decision) และเป็น label ในข้อความแจ้งเตือน (notify.py)"""
     info = mt5.account_info()
     return info is not None and info.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
+
+
+def mt5_now() -> datetime:
+    """"ตอนนี้" บนนาฬิกาเดียวกับเวลาที่ MT5 คืนมา (pos.time, deal.time, คอลัมน์ time ของแท่ง)
+    — naive datetime เพื่อลบกับ `pd.to_datetime(pos.time, unit="s")` ได้ตรงๆ
+
+    🔴 2026-09-24: เดิม exit_monitor ใช้ `datetime.now()` (เวลาเครื่อง = UTC+7) ลบกับเวลาเข้าไม้
+    จาก MT5 (UTC) → เวลาที่ถือไม้ในระบบจริง**เกินไป 7 ชม. ทุกไม้** (HK50 #4741691730 รายงาน 3.3 วัน
+    ทั้งที่ถือจริง 2.97) ผลจริง: กฎ slow trade ตัด HK50 ครึ่งไม้ตอน 00:49 ทั้งที่ถือจริงแค่ 2.73
+    วันทำการ  ถ้านับถูกมันจะยิง 07:13 ซึ่งเลยเวลารีสตาร์ทที่โหลดโค้ดปิดกฎนั้นไปแล้ว
+    backtest ไม่โดนเพราะ as_of มาจากเวลาแท่งซึ่งเป็นนาฬิกาเดียวกับ entry อยู่แล้ว
+
+    ใช้ UTC ได้เพราะ**เซิร์ฟเวอร์ Exness = UTC+0** — ตรวจจากดีลจริง: deal.time 1789949607 =
+    2026-09-21 00:13:27 UTC ตรงกับ trades_log 07:13:27 (เวลาเครื่อง +7) เป๊ะ
+    (check_recent_news กับ binance.py ก็ถือว่า MT5 = UTC อยู่แล้ว) ย้ายโบรกเมื่อไหร่ต้องตรวจใหม่"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def get_tick_or_raise(symbol: str):

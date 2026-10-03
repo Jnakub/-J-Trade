@@ -1,6 +1,6 @@
 """
 backtest_exit_compare.py — เทียบ P&L: Fixed SL/TP (เดิม) vs Chandelier Exit (ATR trailing)
-บน BTCUSDm ย้อนหลัง 1 เดือน โดยใช้ entry logic เดียวกับ scheduler.py (compute_score)
+บน BTCUSDm ย้อนหลัง 1 เดือน โดยใช้ entry logic เดียวกับ scheduler.py (compute_entry)
 
 ใช้: python backtest_exit_compare.py
 """
@@ -17,10 +17,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from mt5_connect import connect
 from config import MT5_TIMEFRAMES
-from scoring import compute_score, get_trend_bias, calc_rr
+from scoring import compute_entry, get_trend_bias, calc_rr, get_ohlcv
 from swing import calc_atr, find_swing_lows, find_swing_highs
 from indicators import calc_adx
-from binance import merge_real_volume
 
 SYMBOL          = "BTCUSDm"
 LOOKBACK_DAYS   = 30
@@ -42,23 +41,22 @@ COOLDOWN_BARS   = 6        # เข้าได้อีกทีหลังไ
 
 
 def get_hist(symbol, tf, dt, bars):
-    rates = mt5.copy_rates_from(symbol, tf, dt, bars)
-    if rates is None or len(rates) == 0:
+    """2026-08-26: เดิมเรียก mt5.copy_rates_from() ตรงๆ ซึ่งคืนแท่งที่ครอบ dt มาแบบปิดแล้ว
+    = มองอนาคต (1D เห็นราคาปิดของวันตัวเอง!) — เปลี่ยนมาใช้ scoring.get_ohlcv ที่ route ผ่าน
+    bars.get_bars() แล้ว ตัดแท่งอนาคตออกให้จุดเดียวทั้งระบบ (ดู bars.get_bars docstring)"""
+    try:
+        return get_ohlcv(symbol, tf, bars=bars, as_of=dt)
+    except RuntimeError:
         return None
-    df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s")
-    return df
 
 
-def score_entry(symbol, snap_dt):
-    """เรียก scoring.compute_score(as_of=snap_dt) ตรงๆ แทนการ reimplement logic ของมัน
-    (เดิมไฟล์นี้ copy compute_score มาทั้งดุ้นเหมือน backtest_score.py ก่อนแก้ — ดู
-    scoring.py.compute_score docstring) ต้องหา bias เองก่อนเพื่อรู้ว่าจะส่ง direction
-    ไหนให้ compute_score (มันเองก็ตรวจ bias ซ้ำภายในอีกที กันเพี้ยน)"""
+def find_entry(symbol, snap_dt):
+    """เรียก scoring.compute_entry(as_of=snap_dt) ตรงๆ แทนการ reimplement logic ของมัน
+    ต้องหา bias เองก่อนเพื่อรู้ว่าจะส่ง direction ไหนให้ compute_entry (มันเองก็ตรวจ bias
+    ซ้ำภายในอีกที กันเพี้ยน)"""
     df_1d = get_hist(symbol, MT5_TIMEFRAMES["1D"], snap_dt, 800)   # 800 บาร์ให้ trend_flip มีประวัติพอ
     if df_1d is None or len(df_1d) < 205:
         return None
-    df_1d = merge_real_volume(df_1d, symbol, "1D")
     direction, _ = get_trend_bias(symbol, df_1d)
     if direction is None:
         return None   # trend_flip ไม่มี k หรือ bootstrap ยังไม่พร้อม — ข้ามจุดนี้
@@ -69,17 +67,15 @@ def score_entry(symbol, snap_dt):
     entry = df_1h_snap["close"].iloc[-1]
 
     try:
-        total, criteria, passed, sl_info = compute_score(symbol, direction, entry, as_of=snap_dt)
+        sl_info = compute_entry(symbol, direction, entry, as_of=snap_dt, df_1d=df_1d)
     except ValueError:
-        return None
-    if not passed:
         return None
 
     sl, tp = sl_info["sl"], sl_info["tp"]
     rr = calc_rr(entry, sl, tp, direction)
 
     return {"direction": direction, "entry": entry, "sl": sl, "tp": tp, "rr": rr,
-            "score": total, "time": snap_dt}
+            "time": snap_dt}
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +271,7 @@ def main():
     step_count = 0
     while snap_dt <= now - timedelta(hours=1):
         step_count += 1
-        sig = score_entry(SYMBOL, snap_dt)
+        sig = find_entry(SYMBOL, snap_dt)
         if sig:
             idx_arr = big_1h.index[big_1h["time"] <= snap_dt]
             if len(idx_arr) == 0:
@@ -310,7 +306,7 @@ def main():
                 trades.append({**sig, "fixed": fixed, "chandelier": chand, "mult45": mult45,
                                "structure": struct, "regime": regime, "regime2": regime2, "widest": widest})
                 last_entry_bar_idx = start_idx
-                print(f"  [{snap_dt}] {sig['direction']:<5}  Score={sig['score']:.1f}  "
+                print(f"  [{snap_dt}] {sig['direction']:<5}  "
                       f"Fixed={fixed['r_multiple']:+.2f}  Chand3={chand['r_multiple']:+.2f}  "
                       f"Chand4.5={mult45['r_multiple']:+.2f}  Struct={struct['r_multiple']:+.2f}  "
                       f"Regime={regime['r_multiple']:+.2f}  Regime2={regime2['r_multiple']:+.2f}  "
@@ -322,11 +318,11 @@ def main():
 
     print()
     print("=" * 70)
-    print(f"  ทดสอบ {step_count} จุดเวลา  พบ entry ที่ผ่าน score {len(trades)} ไม้")
+    print(f"  ทดสอบ {step_count} จุดเวลา  พบ entry ที่ผ่านด่าน {len(trades)} ไม้")
     print("=" * 70)
 
     if not trades:
-        print("ไม่มี entry ที่ผ่าน score ในช่วงนี้ — ลองขยาย LOOKBACK_DAYS หรือลด MIN_SCORE")
+        print("ไม่มี entry ที่ผ่านด่านในช่วงนี้ — ลองขยาย LOOKBACK_DAYS")
         return
 
     variants = [

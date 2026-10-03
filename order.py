@@ -7,7 +7,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-from config import RISK_PER_TRADE
+from config import RISK_PER_TRADE, LOT_ROUNDING
 from mt5_connect import connect, get_account_balance, get_tick_or_raise, get_position_or_raise, is_demo_account
 import journal
 import notify
@@ -24,28 +24,84 @@ def _decimals_from_step(step: float) -> int:
     return len(s.split(".")[1]) if "." in s else 0
 
 
+def money_per_price_unit(info) -> float:
+    """เงินสกุลบัญชี (USD) ต่อราคาขยับ 1.0 ต่อ 1 lot — **ตัวเดียวที่ทุกสูตร sizing ใช้**
+
+    ใช้ค่าที่โบรกคำนวณให้ (tick_value / tick_size) ซึ่งแปลงสกุลกำไรเป็นสกุลบัญชีให้แล้ว
+    🔴 2026-09-24: เดิม 3 ฟังก์ชันในไฟล์นี้คิด `ระยะ × trade_contract_size` แล้ว "แก้พิเศษ" เฉพาะ
+    ชื่อที่มี JPY — ถือว่าทุกอย่างที่เหลือกำไรเป็น USD  **HK50m กำไรเป็น HKD** โค้ดจึงคิด 1 จุด =
+    $1/lot ขณะที่โบรกให้ $0.1275 => ไม้ HK50 ทุกไม้เล็กไป **7.8 เท่า (เสี่ยงจริง ~0.25% ไม่ใช่ 2%)**
+    และเพดานความเสี่ยงพอร์ตนับ HK50 เกินจริง 7.8 เท่า (09-23 บล็อกทุก symbol ~16 ชม. ด้วยความเสี่ยง
+    ที่ไม่มีจริง ~0.9R)  หลักฐาน: ดีลปิดบางส่วน #4193547532 HK50 0.18 lot ห่าง 84.3 จุด โค้ดคิด
+    −$15.17 โบรกลงบัญชี −$1.93  ไม่มี backtest ตัวไหนเห็นเพราะทุกตัวรายงานเป็น R
+    symbol ที่กำไรเป็น USD ได้ค่าเท่าเดิมเป๊ะ (tick_value = tick_size × contract) ส่วน USDJPY
+    ต่างจากสูตรเดิม (หารด้วย entry) แค่ระดับการขยับของค่าเงินระหว่างวัน
+
+    ใช้ tick_value_loss ก่อน (มูลค่าตอนขาดทุน = คำถามของ sizing) ต่างจาก tick_value ~0.05%
+    ค่าเป็น 0 = โบรกยังไม่ส่งข้อมูล (symbol ไม่อยู่ใน Market Watch ฯลฯ) -> raise ไม่เดาแทน"""
+    tick_value = info.trade_tick_value_loss or info.trade_tick_value
+    if not tick_value or not info.trade_tick_size:
+        raise RuntimeError(f"{info.name}: tick_value={tick_value} tick_size={info.trade_tick_size} "
+                           f"— โบรกยังไม่ส่งมูลค่าต่อจุด คิดขนาดไม้ไม่ได้")
+    return tick_value / info.trade_tick_size
+
+
 def calculate_lot_size(symbol: str, entry: float, sl: float,
                        balance: float, risk_pct: float) -> tuple[float, int]:
-    """Return (lot, decimal_places). ใช้ trade_contract_size จริงจาก MT5
+    """Return (lot, decimal_places). มูลค่าต่อจุดมาจากโบรก (money_per_price_unit)
     แทนการเดาจากชื่อ symbol — กันเดาผิดถ้า broker เปลี่ยน spec หรือเพิ่ม symbol ใหม่"""
     info = mt5.symbol_info(symbol)
     if info is None:
         code, msg = mt5.last_error()
         raise RuntimeError(f"หา symbol info ของ {symbol} ไม่ได้  [{code}] {msg}")
 
-    risk_amount   = balance * risk_pct
-    distance      = abs(entry - sl)
-    contract_size = info.trade_contract_size
-    decimals      = _decimals_from_step(info.volume_step)
+    risk_amount = balance * risk_pct
+    distance    = abs(entry - sl)
+    decimals    = _decimals_from_step(info.volume_step)
+    raw_lot     = risk_amount / (distance * money_per_price_unit(info))
 
-    if "JPY" in symbol.upper():
-        # คู่ที่ quote currency เป็น JPY ไม่ใช่ account currency (USD) — แปลงคร่าวๆ ด้วย entry
-        raw_lot = risk_amount / (distance * contract_size / entry)
-    else:
-        raw_lot = risk_amount / (distance * contract_size)
-
-    lot = math.floor(raw_lot * 10 ** decimals) / 10 ** decimals
+    # ปัดเศษตาม config.LOT_ROUNDING — ดูที่มา/ตัวเลขที่วัดได้ทั้งหมดที่นั่น
+    # floor ปัดลงเสมอ = ความเสี่ยงจริงต่ำกว่าเป้าอย่างเป็นระบบ (XAU median 1.67% จาก 2%)
+    # ซึ่งมองไม่เห็นจาก backtest เพราะ R ไม่ขึ้นกับขนาดไม้ — ผู้เรียกควรใช้ค่าที่คืนไปเตือน
+    scaled = raw_lot * 10 ** decimals
+    lot = (math.floor(scaled + 0.5) if LOT_ROUNDING == "nearest"
+           else math.floor(scaled)) / 10 ** decimals
     return lot, decimals
+
+
+def risk_pct_of(symbol: str, entry: float, sl: float, lot: float, balance: float) -> float:
+    """ความเสี่ยงจริงของ lot นี้ คิดเป็น % ของ balance — ใช้เทียบกับ RISK_PER_TRADE ว่าการ
+    ปัดเศษทำให้เพี้ยนไปเท่าไหร่ (สูตรเดียวกับ calculate_lot_size กลับด้าน ผ่าน money_per_price_unit)"""
+    info = mt5.symbol_info(symbol)
+    if info is None or not balance:
+        return float("nan")
+    try:
+        per_lot = abs(entry - sl) * money_per_price_unit(info)
+    except RuntimeError:
+        return float("nan")
+    return lot * per_lot / balance * 100
+
+
+def position_risk_amount(symbol: str, direction: str,
+                         entry: float, sl: float, lot: float) -> float:
+    """เงินที่ยังเสี่ยงอยู่จริงของ position หนึ่งไม้ (USD) = ถ้าโดน SL ตอนนี้จะขาดทุนเท่าไหร่
+    เทียบกับราคาเข้า
+
+    เป็นสูตรกลับด้านของ calculate_lot_size() เป๊ะ — ทั้งคู่ใช้ money_per_price_unit() ตัวเดียว
+    (เดิมแต่ละตัวมีสูตรแปลงค่าเงินของตัวเอง แล้วพลาดเหมือนกันทั้ง 3 ที่กับ HK50)
+
+    SL ที่เลยจุด entry ไปแล้ว (breakeven/ล็อกกำไร) คืน 0.0 ไม่ใช่ค่าติดลบ เพราะกำไรที่
+    ล็อกไว้ของไม้หนึ่งเอาไปหักความเสี่ยงของอีกไม้ไม่ได้ถ้าสองไม้วิ่งสวนกัน — และนี่คือ
+    เหตุผลที่เพดานคิดจากความเสี่ยง ไม่ใช่จำนวนไม้: ไม้ที่ BE แล้วคืนโควตาให้ไม้ถัดไป
+    """
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"หา symbol info ของ {symbol} ไม่ได้  [{code}] {msg}")
+
+    distance = (entry - sl) if direction == "Long" else (sl - entry)
+    distance = max(0.0, distance)
+    return distance * money_per_price_unit(info) * lot
 
 
 def clamp_lot(symbol: str, lot: float) -> float:
@@ -80,7 +136,7 @@ def _filling_mode(symbol: str) -> int:
 def place_order(symbol: str, direction: str, entry: float,
                 sl: float, tp: float, lot: float,
                 comment: str = "auto-trader",
-                score: float = 0.0, strategy: str = "Scoring",
+                strategy: str = "Scoring",
                 pinned_swing: float = None, pinned_atr_entry: float = None) -> int:
     # 2026-08-09: บันทึก journal ในนี้เสมอ (ดูท้ายฟังก์ชัน) แทนที่จะปล่อยให้ผู้เรียกแยกไปเรียก
     # journal.log_trade_open() เอง — เดิม scheduler.py/bot.py ต่างก็เรียกแยกหลัง place_order()
@@ -140,7 +196,7 @@ def place_order(symbol: str, direction: str, entry: float,
     print(f"  Comment   : {comment}")
 
     import journal
-    journal.log_trade_open(symbol, direction, result.price, sl, tp, lot, score, result.order,
+    journal.log_trade_open(symbol, direction, result.price, sl, tp, lot, result.order,
                            pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry,
                            strategy=strategy)
 
@@ -153,7 +209,10 @@ def place_order(symbol: str, direction: str, entry: float,
 # Close position
 # ---------------------------------------------------------------------------
 
-def close_order(ticket: int) -> None:
+def close_order(ticket: int, exit_rule: str = "") -> None:
+    """exit_rule: ชื่อกฎที่ทำให้ปิด — ส่งมาเฉพาะตอน exit_monitor สั่งปิดตามกฎ
+    เว้นว่าง = ถูกเรียกมือ (CLI/สคริปต์) ซึ่งบันทึกเป็น 'Manual Cut' ตามจริง
+    """
     pos       = get_position_or_raise(ticket)
     symbol    = pos.symbol
     lot       = pos.volume
@@ -198,13 +257,18 @@ def close_order(ticket: int) -> None:
     print(f"  P/L         : {pos.profit:+.2f} USD")
 
     import journal
-    result_label = "Manual Cut"
+    # 2026-09-12: เดิม hardcode "Manual Cut" ทุกกรณี ทำให้ไม้ที่ exit_monitor สั่งปิดตามกฎ
+    # กับไม้ที่คนกดปิดเอง แยกกันไม่ออกใน log — ทั้งที่ตอนเรียกมาถึงตรงนี้รู้อยู่แล้วว่าเป็นอันไหน
+    result_label = "Bot Exit" if exit_rule else "Manual Cut"
+    exit_by      = "bot" if exit_rule else "manual"
     try:
-        journal.log_trade_close(ticket, result_label, round(pos.profit, 2))
+        journal.log_trade_close(ticket, result_label, round(pos.profit, 2),
+                                exit_by=exit_by, exit_rule=exit_rule)
     except ValueError:
         journal.log_trade_open(symbol, direction, pos.price_open,
-                               pos.sl, pos.tp, lot, 0.0, ticket)
-        journal.log_trade_close(ticket, result_label, round(pos.profit, 2))
+                               pos.sl, pos.tp, lot, ticket)
+        journal.log_trade_close(ticket, result_label, round(pos.profit, 2),
+                                exit_by=exit_by, exit_rule=exit_rule)
 
     notify.notify_order_closed(symbol, direction, ticket, result_label,
                                round(pos.profit, 2), is_demo=is_demo_account())
@@ -214,7 +278,11 @@ def close_order(ticket: int) -> None:
 # Partial close (ปิดบางส่วน)
 # ---------------------------------------------------------------------------
 
-def partial_close_order(ticket: int, close_volume: float, comment: str = "partial exit auto") -> None:
+def partial_close_order(ticket: int, close_volume: float, comment: str = "partial exit auto",
+                        m: dict = None) -> None:
+    """m: dict จาก exit_monitor.analyze_position() — ส่งมาเพื่อให้บันทึกลง cuts_log.csv ได้ว่า
+    กฎข้อไหนทำให้ปิดส่วนนี้ เว้นว่าง = ถูกเรียกมือ จะบันทึกเฉพาะ lot ที่ปิดโดยไม่มีชื่อกฎ
+    """
     pos     = get_position_or_raise(ticket)
     symbol  = pos.symbol
     is_long = pos.type == mt5.ORDER_TYPE_BUY
@@ -268,6 +336,20 @@ def partial_close_order(ticket: int, close_volume: float, comment: str = "partia
     lot_basis    = original_lot if original_lot is not None else pos.volume
     keep_pct = round((pos.volume - close_volume) / lot_basis * 100, 1)
     notify.notify_partial_close(symbol, ticket, close_volume, keep_pct, is_demo=is_demo_account())
+
+    # 2026-09-12: บันทึกลง cuts_log.csv — เดิมการปิดบางส่วนทิ้งไว้แค่ข้อความ Telegram
+    # การบันทึกล้มต้องไม่ทำให้การเทรดล้มตาม ไม้ถูกปิดไปเรียบร้อยแล้วตอนมาถึงบรรทัดนี้
+    try:
+        ctx = dict(m) if m else {"ticket": ticket, "symbol": symbol,
+                                 "entry": pos.price_open, "sl": pos.sl}
+        ctx["ticket"] = ticket
+        # ราคาที่ fill จริง ไม่ใช่ current_price ตอน analyze — ต่างกันได้ตามสเปรด/slippage
+        # และ log นี้มีไว้เทียบกับของจริง จึงต้องเก็บของจริง
+        ctx["current_price"] = result.price
+        journal.log_cut(ctx, closed_lot=close_volume,
+                        remaining_lot=round(pos.volume - close_volume, 3))
+    except Exception as exc:
+        print(f"  WARNING — บันทึก cut ของ #{ticket} ไม่ได้ ({exc})")
 
 
 # ---------------------------------------------------------------------------

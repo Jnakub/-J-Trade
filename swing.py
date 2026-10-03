@@ -3,6 +3,27 @@ import pandas as pd
 from config import TP_FIB_RATIO, ASSET_CLASS
 from indicators import calc_atr, calc_di   # re-exported เพื่อไม่ให้ต้องแก้ import ที่อื่น
 
+# สวิตช์ทดลอง — ค่า default = พฤติกรรมระบบจริง ห้ามแก้ที่นี่
+# False = find_sl_from_structure กลับไปตรวจด่าน still_valid ด้วย close ของแท่ง 4H ล่าสุดแทน
+# ราคาที่จะเข้าไม้จริง (= พฤติกรรมก่อน 2026-09-12 ดูคำอธิบายเต็มในฟังก์ชัน)
+# backtest_replay.py ตั้งค่านี้เฉพาะรอบที่รันด้วย --sl-guard-legacy ไว้เทียบว่าการแก้คุ้มไหม
+USE_ENTRY_AS_CURRENT_PRICE = True
+
+# ความสดของ swing ใน collapse_swing_runs — None = พฤติกรรมเดิมเป๊ะ (จุดที่สุดขั้วที่สุดชนะเสมอ
+# ไม่ว่าจะเก่าแค่ไหน) ตัวเลข = ยอมให้ "จุดล่าสุดของรัน" ชนะได้ถ้ามันแพ้จุดสุดขั้วไม่เกิน
+# ATR(ที่จุดล่าสุด) × ค่านี้
+# 2026-09-15: เพิ่มเพื่อทดลองตามข้อสังเกตของผู้ใช้ว่า "ความสดของ swing ก็สำคัญ ไม่ใช่แค่สุดขั้ว"
+# วัดความถี่ก่อนเขียน (7 symbol 4H 1000 แท่ง): 521 run · มี >1 จุด 241 (46%) · **จุดเก่าชนะ
+# จุดล่าสุด 134 ครั้ง (26% ของทุก run)** · ระยะที่จุดล่าสุดแพ้ มัธยฐาน 0.58 ATR เฉลี่ย 1.23 สูงสุด 7.15
+# ที่ 0.22 ATR จะสลับ 41% ของเคสนั้น · ที่ 0.5 ATR สลับ 49%
+# ⚠️ ค่า 0 **ไม่ใช่** no-op: ตอนนี้ max()/min() คืนตัวแรกเมื่อราคาเท่ากัน = จุดเก่าชนะเคสเสมอ
+#    พอตั้ง 0 เงื่อนไข "แพ้ <= 0" จะจริงทันทีบนเคสเสมอและสลับไปใช้จุดล่าสุด ตัวตรวจ identity
+#    ของสวิตช์นี้จึงเป็น None เท่านั้น
+# ⚠️ กระทบ 6 จุดพร้อมกัน (SL/TP · structure · confirmation · ATR trailing anchor · structure
+#    break · regime) แยกวัดทีละขาไม่ได้ในรอบเดียว — และมันเปลี่ยนระยะ SL = เปลี่ยน R:R =
+#    เปลี่ยนชุดไม้ ต้องวัดด้วย backtest_replay เต็มเท่านั้น (backtest_exit_rules ใช้ไม่ได้)
+SWING_RECENCY_TOL_ATR = None
+
 
 # 2026-08-13: ลบ has_rejection() / _rejection_ok() ทิ้ง — ทั้งคู่ไม่มีใครเรียกเลย (ตรวจทั้ง repo
 # แล้ว) แต่ scoring.py ยังพิมพ์ `sl_info.get('rejection', '-')` อยู่ ทั้งที่ find_sl_from_structure
@@ -30,11 +51,66 @@ from indicators import calc_atr, calc_di   # re-exported เพื่อไม�
 # ตามคำสั่งผู้ใช้ (ดู config.py หัวไฟล์) — ค่า 8 ตัวข้างบนคือของเดิมเป๊ะ ย้ายมาเป็น dict เฉยๆ
 # ไม่เปลี่ยนพฤติกรรม ส่วน *_BY_CLASS เป็น default ใหม่สำหรับ symbol ที่ยังไม่เคย tune เท่านั้น
 VOL_MULTIPLIER_BY_SYMBOL = {
+    # 2026-09-20: HK50m — **ผู้ใช้เปลี่ยน vol 1.5 -> 1.6 (wick คง 0.45)** หลังดูตารางรายจุด
+    #   ว่าแต่ละจุดผ่านมาด้วยเกณฑ์ไหน — ที่ 1.6 เสียจุด "ใช้จริง" 3 จุดที่ผ่านด้วย vol ล้วน
+    #   ในช่วง 1.54-1.59 (07-10 · 07-16 · 08-07) แต่ยังเก็บยอด/ก้นอันดับ 2 ของช่วงไว้ได้ทั้งคู่
+    #   (06-02 26,064.4 vol 1.16x และ 06-22 23,430.6 vol 1.42x — ทั้งคู่เข้ามาทาง wick 0.47/0.46
+    #    ซึ่งจะหายทันทีถ้าดัน wick ขึ้น 0.50 นี่คือเหตุผลที่ wick ไม่ขยับ)
+    # เดิม 2026-09-19 เลือก 1.5/0.45 — ตัวเลข replay 13 ไม้ +7.83R ในบล็อก SYMBOLS มาจากค่านั้น
+    # 🔴 **ยังไม่ได้รัน replay ซ้ำที่ 1.6** ตัวเลขของ HK50m ที่จดไว้ที่อื่นจึงเป็นของ 1.5
+    # 🔴 **vol เป็นคันโยกหลักของ HK50 ไม่ใช่ wick** (กลับกับ UKOILm) — vol_ratio ของจุด swing
+    #    กระจุกที่ 1.5-1.8x ไม่ใช่ 2x+ แบบ US500m: **18 จาก 48 จุดอยู่ในช่วง 1.50-1.65**
+    #    1.5/0.45 -> 48 จุด (clean 27) · 1.55 -> 47 · 1.6 -> 41 · 1.6/0.50 -> 37 (clean 18)
+    #    ขณะที่ลด wick ต่ำกว่า 0.45 **ไม่ได้อะไรเลย** (0.40 ได้ 48 เท่าเดิม — พื้นอยู่ที่ 0.44)
+    # 🔑 เหตุผลที่เลือกตัวหลวมกว่า ไม่ใช่แค่ "จุดเยอะกว่า": ที่ 1.6/0.50 **จุดสุดขั้วจริงของ
+    #    กราฟหายไป 2 จุด** — ยอดอันดับ 2 (06-02 26,064.4 · vol 1.16x/wick 0.47) และก้นอันดับ 2
+    #    (06-22 23,430.6 · 1.42x/0.46) ทั้งคู่พลาดทั้งสองเกณฑ์ไปนิดเดียว
+    # ⚠️ ตัวเลขทั้งชุดนี้วัดที่ BAR_OFFSET_H=1 — ตอน offset=0 ได้ 75 จุด และอ่านออกมาคนละข้อสรุป
+    #    (ตอนนั้นดูเหมือน vol ไม่ใช่ตัวตัด) เปลี่ยน offset เมื่อไหร่ต้องมาดูตารางใหม่ทั้งหมด
+    # ⚠️ ตารางบอกได้แค่ "จุดเยอะขึ้น" **บอกไม่ได้ว่าอันไหนทำเงิน** (เคส UKOILm: จุด +79%
+    #    ได้ไม้เพิ่ม 1 ไม้) และตัวที่ตัดสินจริงคือ collapse_swing_runs — 48 จุดเหลือใช้จริง 27
+    "HK50m":   1.6,
+    # 2026-09-29: GBPCHFm 1.69 (คู่กับ wick 0.59) ผู้ใช้เลือกหลังดูตาราง 5 ชุด (0.45/1.5 · 0.5/1.6 ·
+    #   0.6/1.63 · 0.59/1.69 · 0.58/1.71) ที่ offset 0 — ได้ 47 จุด ใช้จริง 28 (14H/14L)
+    # 🔑 ไม่มี real volume (FX OTC) vol ของคู่นี้คือ **นาฬิกา session**: จุดที่ผ่าน vol ~95% เป็นแท่ง
+    #   08:00/12:00 UTC (เปิดลอนดอน/ลอนดอนทับนิวยอร์ก) แท่ง 20:00-04:00 UTC เข้าได้ทาง wick อย่างเดียว
+    # ⚠️ 1.69 อยู่ใต้กอง 1.70-1.71x พอดี (29/07 H · 26/08 H · 08/07 L = ก้นจริง) ขยับเป็น 1.71 แล้ว
+    #   ก้น 08/07 หาย ตัวแทนเลื่อนไปจุดที่สูงกว่า 7 pip — ถ้าจะจูนต่อให้ดูตารางใหม่ทั้งชุด
+    "GBPCHFm": 1.69,
+    # 2026-09-30: AUDNZDm 1.3 (คู่กับ wick 0.65) ผู้ใช้เลือกจาก 3 ตาราง (0.45/1.5 · 0.5/1.6 · 0.65/1.3) ที่ offset 1
+    #   ได้ 28 จุด ใช้จริง 17 (9H/8L) · ผ่านด้วย vol ล้วน 12 · wick ล้วน 14 · ทั้งคู่ 2
+    # 🔑 ต่างจาก GBPCHF: tick volume ของ AUDNZD ไม่พุ่งตาม session (สกุลโซนเดียวกัน) ที่ vol 1.5 แทบไม่มี
+    #   จุดผ่าน vol เลย (4/43) — vol 1.3 จึงเป็นการเปิดทางที่สองให้ ไม่ใช่การคลายเกณฑ์ที่เคยทำงาน
+    "AUDNZDm": 1.3,
     "XAUUSDm": 1.6,
     "USDJPYm": 1.6,
     "US500m":  2.0,
-    "EURUSDm": 1.8,
+    # 2026-09-20: EURUSDm 1.8 -> 2.0 **ตามคำสั่งผู้ใช้** หลังไล่ดูตารางรายจุด 8 ค่า
+    # (คู่กับ wick 0.6 -> 0.46 ดู WICK_RATIO_MIN_BY_SYMBOL) บริบท: EUR เป็น 1 ใน 2 symbol
+    # ที่ติดลบ (-1.44R จาก 15 ไม้) จึงไล่ดูว่าเกณฑ์ swing เป็นสาเหตุไหม
+    # จุด/จุดใช้จริง บน 400 แท่ง 4H ที่ offset=3 ตามค่าที่ไล่:
+    #   1.8/0.6 (เดิม) 43/30 · 1.8/0.5 52/35 · 1.9/0.5 47/27 · 1.95/0.48 48/27
+    #   1.95/0.46 50/27 · 2.0/0.6 32/18 · 2.0/0.48 43/23 · **2.0/0.46 45/23 (ที่เลือก)**
+    # 🔴 สิ่งที่ต้องรู้ว่าแลกอะไร: **จุดฝั่ง Low ที่ vol 1.82-1.90 หายทั้งชุด** (07-15 1.83x ·
+    #    08-26 1.84x · 08-27 1.90x ทั้งสามเป็นจุดใช้จริงของเดิม) และ wick ของมันคือ
+    #    0.28/0.09/0.14 = ลด wick ยังไงก็ไม่ได้คืน ต้องอยู่ที่ vol <= 1.8 เท่านั้น
+    #    => ค่าระหว่าง 1.85-2.0 ให้ผลเหมือนกันหมดในแง่นี้ 2.0 ไม่ได้ "เข้มกว่า" 1.9 ตรงไหน
+    # 🔴 น้ำหนักย้ายไปทาง wick เกือบหมด: wick พา 33 จุด (รอด 42%) · vol เหลือ 6 จุด (รอด 83%)
+    #    เทียบของเดิมที่ vol พา 19 จุด (รอด 84%) — ทางที่รอด collapse ต่ำกว่ากลายเป็นทางหลัก
+    # ⚠️ ตารางบอกได้แค่จำนวนกับองค์ประกอบ **บอกไม่ได้ว่าทำเงิน** และ EUR มี 15 ไม้ SE 4.7R
+    #    ผลต่างที่วัดได้จะอยู่ในเขต noise เสมอ — ห้ามอ้างตัวเลขจากการเปลี่ยนนี้เป็นหลักฐาน
+    "EURUSDm": 2.0,
     "GBPUSDm": 1.8,
+    # 2026-09-19: UKOILm — ไม่มี real volume ให้ merge ต้องใช้ tick_volume เป็น proxy
+    # (เหตุผลเดียวกับ XAUUSDm/USDJPYm ที่ลดมาที่ 1.6) **ผู้ใช้เลือกค่านี้หลังไล่ดูตาราง
+    # swing จริงทีละค่า** (เกณฑ์เดียวกับที่ตั้ง US500m/USDJPYm/EUR/GBP มา)
+    # จำนวนจุดที่ระบบใช้จริง (clean) บน 400 แท่ง 4H ที่ offset=1 ตามค่าที่ไล่ลอง:
+    #   1.9/0.50 -> 14 จุด · 1.6/0.54 -> 15 · 1.55/0.54 -> 17 · 1.5/0.54 -> 19
+    #   **1.55/0.47 -> 25 (ที่เลือก)** · 1.5/0.45 -> 28 · 1.5/0.40 -> 31
+    # ⚠️ ตารางบอกได้แค่ "จุดเยอะขึ้น" **บอกไม่ได้ว่าอันไหนทำเงิน** — และสิ่งที่ตัดสินว่าจุดไหน
+    #    ได้ใช้จริงคือ collapse_swing_runs ไม่ใช่เกณฑ์ที่ปรับ (จุดที่ผ่านทั้ง vol และ wick
+    #    ยังถูกยุบทิ้งได้ เช่น 07-15 13:00 ที่ผ่านทั้งคู่ทุกค่าที่ลอง แต่ไม่เคยได้ใช้เลย)
+    "UKOILm":  1.55,
 }
 VOL_MULTIPLIER_BY_CLASS = {
     "CRYPTO": 1.9,
@@ -85,14 +161,76 @@ def swing_vol_multiplier(symbol: str) -> float:
 # ไม่เปลี่ยนพฤติกรรม (รวม GBPUSDm ที่แม้ตรงกับ default แต่ต้องระบุชัดเจน กัน FOREX class
 # default ด้านล่างที่ตั้งเป็น 0.55 มาแทนที่ค่าเดิม 0.5 ของมันโดยไม่ตั้งใจ)
 WICK_RATIO_MIN_BY_SYMBOL = {
+    # 2026-09-19: HK50m — ผู้ใช้เลือกคู่กับ vol 1.5 (ดูเหตุผลเต็มที่ VOL_MULTIPLIER_BY_SYMBOL)
+    # ที่ HK50 เกณฑ์นี้ **ชนพื้นแล้ว** — จุด swing ที่ wick ต่ำสุดอยู่ที่ 0.44 การลดต่ำกว่า
+    # 0.45 จึงไม่ได้จุดเพิ่มเลยสักจุด (ต่างจาก UKOILm ที่ wick 0.54->0.45 ได้เพิ่ม 9 จุด)
+    # สองทางแบ่งกันคนละครึ่งพอดี: ผ่านด้วย vol ล้วน 19 จุด · wick ล้วน 17 · ทั้งคู่ 12
+    "HK50m":   0.52,
+    # 2026-09-29: GBPCHFm 0.59 — ดูเหตุผลที่ VOL_MULTIPLIER_BY_SYMBOL (0.59 ให้จุดเท่ากับ 0.60 ทุกจุด
+    #   เพราะไม่มีไส้เทียนในช่วง 0.59-0.60 เลย)
+    "GBPCHFm": 0.59,
+    # 2026-09-30: AUDNZDm 0.65 — ดูเหตุผลที่ VOL_MULTIPLIER_BY_SYMBOL · ช่วง wick 0.45-0.64 ถูกตัดออกหมด
+    #   ทำให้คลื่นย่อยหายหลายลูก (เช่นก้น 14/09 หาย ยอด 18/09 จึงถูกยุบ) — รู้แล้วตอนเลือก
+    "AUDNZDm": 0.65,
     "XAUUSDm": 0.3,
-    "BTCUSDm": 0.5,
+    # 2026-09-21: BTCUSDm 0.5 -> 0.48 ตามคำสั่งผู้ใช้ (vol คงที่ 1.9)
+    # ⚠️ ลองที่ 0.49 ก่อนแล้ว **ไม่มีผลอะไรเลย** — รัน replay เต็มยืนยัน 26 ไม้ +5.82R
+    # เท่าเดิมทุกไม้ (SL0 เปลี่ยน 0 · วิธีออกเปลี่ยน 0) เพราะ wick จริงของแท่งเป้าหมายคือ
+    # **0.488265** ไม่ใช่ 0.49 — เลข 0.49 ที่เห็นในตารางเป็นค่าที่ถูกปัด 2 ตำแหน่ง
+    # 🔴 บทเรียน: ตาราง swing ทุกใบในโปรเจกต์นี้ปัดทศนิยม 2 ตำแหน่ง **ห้ามตั้งเกณฑ์จาก
+    #    ตัวเลขในตาราง** ต้องดึงค่าจริงออกมาก่อน (เจอกับตัวเองแล้ว 2026-09-21)
+    # ที่มา: ไล่ดูไม้ Breakout ที่แพ้ BTCUSDm 2025-05-13 20:00 Long −1.00R แล้วพบว่า
+    # **pivot low จริงของช่วงนั้น (05-12 16:00 @ 100,673 = ต่ำสุดทั้งช่วง) ตกเกณฑ์ทั้งคู่**
+    #   vol 1.05x (ต้อง 1.9) · **wickDn 0.49 (ต้อง 0.50) = พลาดไป 0.01**
+    # ระบบจึงถอยไปใช้ swing low 05-10 20:00 @ 102,980 ซึ่งตื้นกว่า 2,307 จุด
+    # ผลที่ตามมา: SL 101,512 (1R = 3,281) -> R:R 1.62 ผ่าน MIN_RR_HARD_BLOCK พอดี
+    # แล้วราคาลงไปต่ำสุด 101,471 = เขี่ย SL ที่ **41 จุดเหนือก้น** แล้วดีดกลับ 103,287 ใน 6 ชม.
+    # ถ้าใช้ก้นจริง SL จะอยู่ ~99,324 · 1R ~5,470 · R:R ~0.97 = **ไม้นี้จะถูกตัดทิ้งตั้งแต่ต้น**
+    # 🔴 **นี่คือการปรับขอบเกณฑ์ให้พอดีกับไม้ที่เพิ่งเปิดดู (fit ขอบ) — รู้ตัวตอนตัดสินใจ**
+    #    ผู้ใช้ตัดสินใจหลังได้รับคำเตือนนี้ 2 ครั้งและหลังเห็นผลวัดข้างล่างแล้ว
+    #
+    # ── ผลวัดจริง (replay เต็ม BTCUSDm 730 วัน · symbol อื่นไม่กระทบเพราะเป็นค่าราย symbol) ──
+    #   ชุดไม้ปกติ: 26 ไม้ +5.82R -> **27 ไม้ +1.78R  (ΔR −4.04R · WR 50% -> 44%)**
+    #   ชุด --breakout ของ BTC: −1.79R -> **+0.68R (+2.47R)**  [ธงยังปิด ไม่อยู่ในระบบจริง]
+    #   แยกที่มาของ −4.04R: ไม้หาย 2 (−0.07) · ไม้ใหม่ 3 แพ้ทั้งหมด (−2.60) · ไม้เดิม R เปลี่ยน
+    #   2 ไม้ (−1.37)   · ไม้ที่เปลี่ยนจริง 7 ไม้ -> SE ≈ 1.46×√7 = 3.9R -> **|t| ≈ 1.04**
+    #   = ยังต่ำกว่าเส้น noise อ่านได้แค่ "ไม่มีหลักฐานว่าดีขึ้น" ไม่ใช่ "พิสูจน์แล้วว่าแย่กว่า"
+    # 🔴 **สิ่งที่แลกไป ไม่ใช่สิ่งที่ตั้งใจแก้** — ตั้งใจแก้การวาง SL แต่ 3 ใน 4 ของความเสียหาย
+    #   มาจากระบบอื่นที่ใช้ชุด swing เดียวกัน:
+    #     · ไม้ 2026-06-10 (+1.11R TP) **หายทั้งไม้** เพราะ swing ที่เพิ่มเข้ามาทำให้
+    #       _find_spacing_partner จับคู่ใหม่ -> divergence หายไปเลย -> regime ตกจาก
+    #       REVERSAL-READY เป็น REVERSAL-WATCH   (กลไกเดียวกับเคส --div-wick-tickvol)
+    #     · ไม้ 2025-10-27 เสีย −1.37R เพราะจุด B ของ fib เปลี่ยน -> TP ขยับไกลขึ้น
+    #     · ไม้ใหม่ 2025-12-17 (−1.01R) เกิดเพราะ collapse_swing_runs จัดพวงใหม่ -> SL แคบลง
+    #       จาก 91,959 เป็น 89,460 -> R:R พลิกจาก 0.92 (ถูกบล็อก) เป็น 3.12 (ผ่าน) แล้วราคา
+    #       แทงถึง 90,359 พอดี = **SL เดิมจะรอด SL ใหม่ไม่รอด**
+    # ⚠️ ตัวเลข control วัดเวลา 07:10 ส่วนรอบ 0.48 วัด 12:45 ของวันเดียวกัน — BTC เทรด 24 ชม.
+    #   หน้าต่าง 730 วันจึงเลื่อนไป ~5.5 ชม. ไม้ 2024-09-26 ที่ขยับ 08:00->07:00 (ต้นหน้าต่างพอดี)
+    #   อาจมาจากการเลื่อนนี้ ไม่ใช่จาก wick — ส่วนไม้อื่นอยู่กลางหน้าต่าง อธิบายด้วยการเลื่อนไม่ได้
+    # 👉 ถ้าจะแก้เรื่อง "SL ควรอยู่ใต้ก้นจริง" ให้ตรงจุดกว่านี้: แยก find_sl_from_structure ให้ใช้
+    #   pivot ดิบ (ไม่กรอง vol/wick) ส่วน divergence/structure ยังใช้ชุดกรองเหมือนเดิม — จะได้
+    #   SL ที่ถูกต้องโดยไม่ไปแตะการตรวจจับ divergence เลย (ยังไม่ได้วัด)
+    "BTCUSDm": 0.48,
     "ETHUSDm": 0.52,
     "XRPUSDm": 0.5,
     "USDJPYm": 0.55,
     "US500m":  0.6,
-    "EURUSDm": 0.6,
+    # 2026-09-20: EURUSDm 0.6 -> 0.46 ตามคำสั่งผู้ใช้ (คู่กับ vol 2.0 — ดูเหตุผลเต็มที่
+    # VOL_MULTIPLIER_BY_SYMBOL) ที่ 0.46 ดึงก้นจริง 2 จุดที่เคยพลาดหวุดหวิดเข้ามาได้:
+    #   09-14 11:00 (wickL 0.48) = ก้นจริงของช่วง 14-15 ก.ย. ที่เดิมตกทั้งสองเกณฑ์
+    #   07-12 23:00 (wickL 0.47)
+    # ⚠️ แต่ 0.48 -> 0.46 ให้จุดใช้จริง **เท่าเดิมที่ 23 จุด** — ได้ 2 จุดใหม่ แลกกับ
+    #    07-08 11:00 ที่หลุดไปเพราะ collapse_swing_runs จัดรันใหม่ = ขยับ 0.02 ได้ผลสุทธิศูนย์
+    "EURUSDm": 0.46,
     "GBPUSDm": 0.5,
+    # 2026-09-19: UKOILm — ที่ default 0.5 มี **25/26 จุดผ่าน** = ตัวกรองแทบไม่ได้กรองอะไร
+    # (wick_ratio ของจุด swing อยู่ที่ 0.38-0.91) **ผู้ใช้เลือก 0.47 หลังไล่ดูตารางทีละค่า**
+    # 0.47 เป็นจุดที่พวง 09-11 (3 จุดใน 8 ชม.) คลายออกจนมีตัวแทน และจุดคุณภาพสูงสุดในตาราง
+    # (06-09 13:00 · 1.92x/0.56 ผ่านทั้งสองเกณฑ์) ยังได้ใช้ ต่างจาก 0.40 ที่มันถูกยุบทิ้ง
+    # ⚠️ wick เป็นคันโยกที่แรงกว่า vol มากสำหรับ UKOIL — 0.54->0.45 ได้จุดเพิ่ม 9 จุด
+    #    ขณะที่ vol 1.9->1.5 ได้เพิ่มแค่ 5 จุด (เพราะจุดส่วนใหญ่ผ่านทาง wick อยู่แล้ว)
+    #    และช่วง 0.45-0.54 คือโซนที่ไส้เทียนของ UKOIL กระจุกที่สุด = **ไวต่อการสุ่มมาก**
+    "UKOILm":  0.47,
 }
 WICK_RATIO_MIN_BY_CLASS = {
     "CRYPTO": 0.5,
@@ -155,8 +293,11 @@ def find_swing_highs(df: pd.DataFrame, left: int = 3, right: int = 3,
                  tolerance_atr > 0 → อนุญาตให้ต่ำกว่า peak ได้ไม่เกิน ATR × tolerance_atr
 
     wick_ratio_min: ถ้าส่งมา (ไม่ใช่ None) จะเปลี่ยนเป็น OR-logic — ผ่านได้ถ้า volume
-    เข้าเกณฑ์ **หรือ** wick ratio >= ค่านี้ (ดู swing_wick_ratio_min — เฉพาะ XAU เท่านั้น
-    symbol อื่นส่ง None เสมอ = พฤติกรรมเดิม (AND กับ volume อย่างเดียว) ไม่เปลี่ยนแปลง)
+    เข้าเกณฑ์ **หรือ** wick ratio >= ค่านี้ (ดู swing_wick_ratio_min)
+    🔴 2026-09-20 แก้: บรรทัดนี้เคยเขียนว่า "เฉพาะ XAU เท่านั้น symbol อื่นส่ง None เสมอ"
+    ซึ่ง**หมดอายุไปนานแล้ว** — ตอนนี้ทั้ง 9 symbol มีค่า wick ของตัวเองใน
+    WICK_RATIO_MIN_BY_SYMBOL ทุกตัว = OR-logic ทำงานทั้งระบบ ไม่มีตัวไหนเป็น AND ล้วน
+    (คำเตือนที่ค้างแบบนี้เคยทำให้อ่านตาราง swing ผิดมาแล้วจริง 1 ครั้ง — ดู inspect_swings)
     """
     atr = calc_atr(df) if tolerance_atr > 0 else None
     highs = []
@@ -186,6 +327,9 @@ def collapse_swing_runs(swing_highs: list[int], swing_lows: list[int],
     ไม่ใช้กับ check_key_level (จงใจนับทุกจุดแยกเพื่อ cluster เป็นโซน) หรือ
     check_divergence (จงใจเทียบจุดดิบ 2 จุดล่าสุดตามนิยาม divergence คลาสสิก)
 
+    SWING_RECENCY_TOL_ATR (ปกติ None = ปิด): ถ้าตั้งเป็นตัวเลข จุด "ล่าสุดของรัน" จะชนะแทน
+    ถ้ามันแพ้จุดสุดขั้วไม่เกิน ATR × ค่านั้น — ดูเหตุผลและตัวเลขความถี่ที่ตัวแปรนั้น
+
     คืน (clean_highs, clean_lows) — สลับ High/Low จริงเสมอ ไม่มี type เดียวกันติดกัน 2 ครั้ง"""
     points = sorted(
         [(i, "H") for i in swing_highs] + [(i, "L") for i in swing_lows],
@@ -194,6 +338,10 @@ def collapse_swing_runs(swing_highs: list[int], swing_lows: list[int],
     if not points:
         return [], []
 
+    # ATR คำนวณครั้งเดียวต่อการเรียก และเฉพาะตอนเปิดสวิตช์ — ฟังก์ชันนี้ถูกเรียกทุกรอบสแกน
+    # จาก 6 จุด รอบที่ไม่ได้ทดลองจึงต้องไม่จ่ายค่า calc_atr เลย
+    _atr = calc_atr(df) if SWING_RECENCY_TOL_ATR is not None else None
+
     def pick_extreme(run):
         idx_list = [i for i, _ in run]
         kind = run[0][1]
@@ -201,6 +349,13 @@ def collapse_swing_runs(swing_highs: list[int], swing_lows: list[int],
             best = max(idx_list, key=lambda i: df["high"].iloc[i])
         else:
             best = min(idx_list, key=lambda i: df["low"].iloc[i])
+        if _atr is not None and len(idx_list) > 1:
+            latest = idx_list[-1]
+            if latest != best:
+                col  = "high" if kind == "H" else "low"
+                lost = abs(df[col].iloc[best] - df[col].iloc[latest])
+                if lost <= _atr.iloc[latest] * SWING_RECENCY_TOL_ATR:
+                    best = latest          # แพ้ไม่มาก แต่สดกว่า -> เอาจุดล่าสุด
         return (best, kind)
 
     clean = []
@@ -233,7 +388,8 @@ def find_sl_from_structure(df: pd.DataFrame,
                            right: int = 4,
                            tolerance_atr: float = 0.22,   # 2026-07-23: เปลี่ยนจาก 0.05 — ยังไม่มี backtest ยืนยัน
                            vol_multiplier: float = 1.9,
-                           wick_ratio_min: float | None = None) -> dict:
+                           wick_ratio_min: float | None = None,
+                           current_price: float | None = None) -> dict:
     """
     หา SL อัตโนมัติจาก Swing High/Low **ล่าสุดสุดเท่านั้น** — จุดเดียวกับที่
     find_tp_from_fibonacci ใช้เป็น origin (B) เสมอ ทำให้ SL/TP อ้างอิง swing point
@@ -261,7 +417,20 @@ def find_sl_from_structure(df: pd.DataFrame,
     """
     is_short      = direction.capitalize() == "Short"
     atr           = calc_atr(df)
-    current_price = df["close"].iloc[-1]
+    # current_price = ราคาที่จะใช้เข้าไม้จริง ส่งมาจากผู้เรียก (compute_entry/compute_reversal_entry)
+    # 2026-09-12: เดิมอ่าน df["close"].iloc[-1] เอง ซึ่งเป็น close ของแท่ง **4H** ที่ปิดล่าสุด
+    # แต่ราคาที่เอาไปเข้าไม้จริงคือ tick/close ของแท่ง 1H ณ วินาทีที่ตัดสินใจ — ห่างกันได้ถึง
+    # 3 ชม. (bars.py กรองแท่ง 4H ที่ยังไม่ครบทิ้งอยู่แล้ว แท่งล่าสุดจึงปิดไปแล้วเสมอ)
+    # ผล: ด่าน still_valid ด้านล่างประกาศว่ากันไม่ให้ราคาทะลุ swing เกิน ATR×tolerance_atr
+    # (0.22) แต่บังคับกับราคาที่เก่าได้ถึง 3 ชม. ซึ่งบนแท่ง 1H ราคาวิ่งเกิน 0.22 ATR ได้สบาย
+    # = ด่านหลวมกว่าที่เขียนไว้มาก เจอจากไม้ BTCUSDm 2025-03-04 02:00 Long ที่ผ่านด่านมาได้
+    # ทั้งที่ SL โครงสร้างอยู่ **เหนือ** ราคาเข้า 0.95 ATR (ถอดกลับแล้วราคาที่ด่านใช้ตรวจสูงกว่า
+    # ราคาเข้าจริงอย่างน้อย 0.83 ATR) — ไม้แบบนั้นชนะไม่ได้ตั้งแต่ก่อนเข้าเพราะ SL ผิดฝั่ง
+    # เป็นบั๊กประเภทเดียวกับ lookahead ที่แก้ไปเมื่อ 2026-09-01 (ตัดสินใจด้วยราคาหนึ่ง เทรดด้วย
+    # อีกราคาหนึ่ง) ต่างกันที่ครั้งนี้เป็นราคาเก่า ไม่ใช่ราคาอนาคต
+    # ไม่ส่งมา = ใช้พฤติกรรมเดิม (ผู้เรียกที่เป็นเครื่องมือวินิจฉัยยังเรียกแบบเดิมได้)
+    if current_price is None or not USE_ENTRY_AS_CURRENT_PRICE:
+        current_price = df["close"].iloc[-1]
     break_tolerance = atr.iloc[-1] * tolerance_atr
     swing_highs   = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,
                                      vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
@@ -302,61 +471,6 @@ def find_sl_from_structure(df: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Confirmation Candle — ปิดเหนือ/ใต้ Swing High/Low
-# ---------------------------------------------------------------------------
-
-def check_confirmation(current_price: float, df: pd.DataFrame,
-                       direction: str, symbol: str,
-                       left: int = 4, right: int = 4,
-                       tolerance_atr: float = 0.22) -> dict:
-    """
-    Short: ราคาปัจจุบัน < Swing Low ล่าสุด (4H) = support แตก
-    Long:  ราคาปัจจุบัน > Swing High ล่าสุด (4H) = resistance แตก
-    ใช้เกณฑ์ swing เดียวกับ find_sl_from_structure/find_tp_from_fibonacci
-    (left/right=4, tolerance=0.05, vol_multiplier ตาม symbol) — df ต้องเป็น 4H
-    """
-    is_short       = direction.capitalize() == "Short"
-    vol_multiplier = swing_vol_multiplier(symbol)
-    wick_ratio_min = swing_wick_ratio_min(symbol)
-
-    highs = find_swing_highs(df, left=left, right=right, tolerance_atr=tolerance_atr,
-                             vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
-    lows  = find_swing_lows(df, left=left, right=right, tolerance_atr=tolerance_atr,
-                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min)
-    highs, lows = collapse_swing_runs(highs, lows, df)
-
-    if is_short:
-        if not lows:
-            return {"conf_ok": False, "current_price": current_price,
-                    "key_level": None, "reason": "ไม่พบ Swing Low บน 4H"}
-        key_level = df["low"].iloc[lows[-1]]
-        conf_ok   = current_price < key_level
-        reason    = (
-            f"ราคา {current_price:.2f} < Swing Low {key_level:.2f} ✅"
-            if conf_ok else
-            f"ราคา {current_price:.2f} ยังไม่ต่ำกว่า Swing Low {key_level:.2f}"
-        )
-    else:
-        if not highs:
-            return {"conf_ok": False, "current_price": current_price,
-                    "key_level": None, "reason": "ไม่พบ Swing High บน 4H"}
-        key_level = df["high"].iloc[highs[-1]]
-        conf_ok   = current_price > key_level
-        reason    = (
-            f"ราคา {current_price:.2f} > Swing High {key_level:.2f} ✅"
-            if conf_ok else
-            f"ราคา {current_price:.2f} ยังไม่สูงกว่า Swing High {key_level:.2f}"
-        )
-
-    return {
-        "conf_ok":       conf_ok,
-        "current_price": current_price,
-        "key_level":     key_level,
-        "reason":        reason,
-    }
-
-
-# ---------------------------------------------------------------------------
 # Fibonacci — หา TP  (ดู find_tp_from_fibonacci ด้านล่าง)
 # ---------------------------------------------------------------------------
 # 2026-08-13: ลบ FIB_LEVELS (0.382/0.618/1.000) + calc_fibonacci_levels() ทิ้ง — เป็นกับดัก
@@ -378,7 +492,12 @@ def find_swing_lows(df: pd.DataFrame, left: int = 3, right: int = 3,
     Swing Low = low[i] ต่ำที่สุดใน window [i-left, i+right]
                 tolerance_atr > 0 → อนุญาตให้สูงกว่า trough ได้ไม่เกิน ATR × tolerance_atr
 
-    wick_ratio_min: เหมือน find_swing_highs — OR-logic เฉพาะเมื่อส่งมา (XAU เท่านั้น)
+    wick_ratio_min: เหมือน find_swing_highs — OR-logic เฉพาะเมื่อส่งมา
+    🔴 2026-09-21 แก้: บรรทัดนี้เคยต่อท้ายว่า "(XAU เท่านั้น)" ซึ่ง**หมดอายุไปแล้ว** เหมือนกับ
+    ที่แก้ใน find_swing_highs เมื่อ 2026-09-20 — ตอนนี้ทุก symbol ใน SYMBOLS มีค่า wick ของ
+    ตัวเองใน WICK_RATIO_MIN_BY_SYMBOL ครบ ผู้เรียกทุกทาง (find_sl_from_structure ·
+    find_tp_from_fibonacci · check_structure · check_divergence) ส่งค่าจริงมาเสมอ ไม่มี None
+    (รอบ 09-20 แก้ไปแค่ฝั่ง highs ฝั่ง lows ตกหล่น — เจอตอนไล่ grep 2026-09-21)
     """
     atr = calc_atr(df) if tolerance_atr > 0 else None
     lows = []
@@ -401,7 +520,8 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
                            left: int = 4, right: int = 4,
                            tolerance_atr: float = 0.22,
                            vol_multiplier: float = 1.9,
-                           wick_ratio_min: float | None = None) -> dict:
+                           wick_ratio_min: float | None = None,
+                           ratio: float | None = None) -> dict:
     """
     หา TP อัตโนมัติจาก Fibonacci Extension — ใช้ swing 3 จุดสลับกัน (X -> A -> B)
     วัด "ขนาด impulse เดิม" จากช่วง X->A แล้วฉายต่อจาก B ไปในทิศที่เทรด
@@ -490,7 +610,10 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
     # levels = ตารางอ้างอิงไว้ดูประกอบเท่านั้น — TP ที่ระบบใช้จริงคือ key "tp" ด้านล่าง
     # (2026-08-13: เพิ่ม TP_FIB_RATIO เข้าไปในลิสต์ด้วย เผื่อปรับ config เป็นค่าที่ไม่อยู่ในนี้
     # จะได้ยังเห็นในตาราง — ไม่งั้นตารางกับ TP จริงจะไม่ตรงกัน)
-    ratios = sorted({0, 0.236, 0.382, 0.5, 0.618, 0.786, 0.886, 1.0, 1.272, 1.618, TP_FIB_RATIO})
+    # ratio: ทับอัตราส่วน TP เฉพาะการเรียกครั้งนี้ (None = TP_FIB_RATIO ของ module — Breakout สลับค่านี้
+    # ชั่วคราวอยู่ ต้องอ่านตอนเรียกเสมอ ห้าม bind เป็น default argument) · 2026-09-26 เพิ่มให้ Reversal
+    _r = TP_FIB_RATIO if ratio is None else ratio
+    ratios = sorted({0, 0.236, 0.382, 0.5, 0.618, 0.786, 0.886, 1.0, 1.272, 1.618, _r})
     levels = {str(r): round(origin + sign * move * r, 5) for r in ratios}
 
     return {
@@ -499,8 +622,8 @@ def find_tp_from_fibonacci(df: pd.DataFrame, direction: str,
         "move":         round(move, 5),
         # TP ที่ใช้จริง — คำนวณจาก config.TP_FIB_RATIO จุดเดียว (เดิม caller ไปหยิบ
         # levels["1.618"] ด้วย string key hardcode เองคนละที่ จน backtest หลุด sync)
-        "tp":           round(origin + sign * move * TP_FIB_RATIO, 5),
-        "tp_ratio":     TP_FIB_RATIO,
+        "tp":           round(origin + sign * move * _r, 5),
+        "tp_ratio":     _r,
         "swing_high":   b_price if is_short else a_price,
         "swing_low":    a_price if is_short else b_price,
         "x_price":      x_price,

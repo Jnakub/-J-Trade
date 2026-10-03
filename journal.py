@@ -5,22 +5,36 @@ import MetaTrader5 as mt5
 import pandas as pd
 
 import notify
-from mt5_connect import is_demo_account
+from mt5_connect import is_demo_account, mt5_now
 
 LOG_FILE = os.path.join(os.path.dirname(__file__), "trades_log.csv")
 
+# 2026-09-25: ถอด "score" ออก (สกอร์การ์ดถูกลบทั้งใบ ดู config.py) — ไฟล์เดิมที่มีคอลัมน์นี้
+# ยังอ่าน/เขียนได้ปกติ: _load อ่านทุกคอลัมน์ในไฟล์ แถวเก่าเก็บคะแนนไว้ แถวใหม่เป็นค่าว่าง
 COLUMNS = [
     "date", "time", "symbol", "direction", "entry", "sl", "tp",
-    "lot", "score", "ticket", "status", "net_pnl", "note",
+    "lot", "ticket", "status", "net_pnl", "note",
     "pinned_swing", "pinned_atr_entry", "close_date", "close_time",
-    "strategy",
+    "strategy", "exit_by", "exit_rule",
 ]
 
 
 # คอลัมน์ที่เก็บข้อความ — ต้องบังคับเป็น object dtype ตอนโหลด ไม่งั้นคอลัมน์ที่ยังว่างทั้งหมด
 # (เช่น close_date/note ของไฟล์เก่า) จะถูก pandas อ่านเป็น float64 แล้วเวลาเขียนสตริงลงไปจะโดน
 # FutureWarning "incompatible dtype" (pandas รุ่นถัดไปจะ raise จริง)
-_TEXT_COLUMNS = ("date", "time", "symbol", "direction", "ticket", "status", "note", "close_date", "close_time", "strategy")
+_TEXT_COLUMNS = ("date", "time", "symbol", "direction", "ticket", "status", "note",
+                 "close_date", "close_time", "strategy", "exit_by", "exit_rule")
+
+# ไฟล์คู่ขนานสำหรับ "ไม้ที่ปิดบางส่วน" — เทียบตรงกับ replay_cuts_*.csv ที่ backtest เขียน
+# แยกไฟล์เพราะไม้เดียวปิดบางส่วนได้หลายครั้ง ถ้ายัดลง trades_log.csv จะมี ticket ซ้ำหลายแถว
+# ซึ่งพังทันที — log_trade_close/get_original_lot ทั้งคู่ทำงานบนสมมติฐาน 1 ticket = 1 แถว
+CUTS_FILE = os.path.join(os.path.dirname(__file__), "cuts_log.csv")
+
+CUT_COLUMNS = [
+    "cut_date", "cut_time", "ticket", "symbol", "direction", "strategy",
+    "entry", "sl", "price", "R_ตอนตัด", "ตัดไป_lot", "เหลือ_lot",
+    "base_keep", "stage_keep", "กฎที่ยิง", "ชม.ที่ถือมา", "final",
+]
 
 
 def _load() -> pd.DataFrame:
@@ -50,7 +64,7 @@ def _save(df: pd.DataFrame) -> None:
 
 def log_trade_open(symbol: str, direction: str, entry: float,
                    sl: float, tp: float, lot: float,
-                   score: float, ticket: int,
+                   ticket: int,
                    pinned_swing: float = None, pinned_atr_entry: float = None,
                    strategy: str = "Scoring") -> None:
     """pinned_swing/pinned_atr_entry: ฐานตรึงของ ATR Trailing SL ณ ตอนเปิดไม้ (exit_monitor.py
@@ -73,7 +87,6 @@ def log_trade_open(symbol: str, direction: str, entry: float,
         "sl":        sl,
         "tp":        tp,
         "lot":       lot,
-        "score":     score,
         "ticket":    str(ticket),
         "status":    "Open",
         "net_pnl":   "",
@@ -155,12 +168,16 @@ def get_original_lot(ticket: int) -> float | None:
 
 def log_trade_close(ticket: int, result: str,
                     net_pnl: float, note: str = "",
-                    close_date: str = None, close_time: str = None) -> None:
-    """result: 'Take Profit' | 'Stop Loss' | 'Manual Cut'
+                    close_date: str = None, close_time: str = None,
+                    exit_by: str = "", exit_rule: str = "") -> None:
+    """result: 'Take Profit' | 'Stop Loss' | 'Bot Exit' | 'Manual Cut' | 'Stop Out'
     close_date: 'YYYY-MM-DD' ของ "วันที่ปิด" (ไม่ใส่ = วันนี้) — คนละคอลัมน์กับ 'date' ที่เป็น
     วันเปิดไม้ เพราะ check_daily_loss ต้องนับตามวันที่ปิดจริง (ไม้ถือข้ามวันเป็นเรื่องปกติ)
     close_time: 'HH:MM:SS' ของเวลาปิด (ไม่ใส่ = ตอนนี้) — ใช้คู่กับ close_date ให้ check_cooldown
-    นับ cooldown ได้ละเอียดถึงชั่วโมง ไม่ใช่แค่วัน"""
+    นับ cooldown ได้ละเอียดถึงชั่วโมง ไม่ใช่แค่วัน
+    exit_by: 'bot' | 'manual' | 'broker' — ใครเป็นคนปิด
+    exit_rule: ชื่อกฎที่ยิง (มีเฉพาะตอน exit_monitor สั่งปิด) — ตัวเดียวกับคอลัมน์ final ใน
+    replay_cuts_*.csv เพื่อให้เทียบไม้จริงกับ backtest ได้ตรงๆ"""
     df = _load()
     mask = df["ticket"] == str(ticket)
     if not mask.any():
@@ -171,18 +188,106 @@ def log_trade_close(ticket: int, result: str,
     df.loc[mask, "note"]       = str(note)
     df.loc[mask, "close_date"] = close_date or now.strftime("%Y-%m-%d")
     df.loc[mask, "close_time"] = close_time or now.strftime("%H:%M:%S")
+    df.loc[mask, "exit_by"]    = str(exit_by)
+    df.loc[mask, "exit_rule"]  = str(exit_rule)
     _save(df)
     sign = "+" if net_pnl >= 0 else ""
     print(f"[journal] Close logged  ticket=#{ticket}  {result}  P/L {sign}{net_pnl:.2f}")
+
+
+def log_cut(m: dict, closed_lot: float, remaining_lot: float) -> None:
+    """บันทึกการปิดบางส่วน 1 ครั้งลง cuts_log.csv
+
+    2026-09-12: ก่อนหน้านี้ partial_close_order() ยิง Telegram อย่างเดียว ไม่เขียนอะไรลง
+    journal เลย ผลคือ "ปิดครึ่งที่ 1R" ซึ่งเป็นกฎที่ยิงบ่อยที่สุดใน backtest ไม่ทิ้งร่องรอย
+    ในไฟล์ log สักตัว — net_pnl ของไม้เป็นก้อนเดียว จะแยกว่ากำไรมาจากไม้ส่วนไหนก็ไม่ได้
+    และ reconstruct R ของไม้จริงย้อนหลังไม่ได้ด้วย
+
+    `m` คือ dict ที่ exit_monitor.analyze_position() คืนมา — คอลัมน์ที่เขียนจึงล้อกับ
+    replay_cuts_*.csv ให้มากที่สุด เพื่อให้เอาไม้จริงมาต่อท้าย backtest แล้วอ่านด้วยสายตา
+    เดียวกันได้
+    """
+    now = datetime.now()   # เวลาเครื่อง — ใช้กับ cut_date/cut_time ให้ตรงกับ trades_log เท่านั้น
+    held_h = ""
+    entry_time = m.get("entry_time")
+    if entry_time is not None:
+        try:
+            # entry_time เป็นเวลา MT5 (UTC) — ลบด้วย now ข้างบนจะเกินไป 7 ชม. ดู mt5_now()
+            held_h = round((mt5_now() - entry_time).total_seconds() / 3600, 1)
+        except TypeError:
+            held_h = ""
+
+    row = {
+        "cut_date":   now.strftime("%Y-%m-%d"),
+        "cut_time":   now.strftime("%H:%M:%S"),
+        "ticket":     str(m.get("ticket", "")),
+        "symbol":     m.get("symbol", ""),
+        "direction":  m.get("direction", ""),
+        "strategy":   get_trade_strategy(m["ticket"]) if m.get("ticket") else "",
+        "entry":      m.get("entry", ""),
+        "sl":         m.get("sl", ""),
+        "price":      m.get("current_price", ""),
+        "R_ตอนตัด":   m.get("r_multiple", ""),
+        "ตัดไป_lot":  closed_lot,
+        "เหลือ_lot":  remaining_lot,
+        "base_keep":  m.get("base_keep_pct", ""),
+        "stage_keep": m.get("stage_keep_pct", ""),
+        "กฎที่ยิง":   "|".join(r["name"] for r in m.get("position_rules", []) if r["trigger"]),
+        "ชม.ที่ถือมา": held_h,
+        "final":      m.get("final_decision", ("", ""))[0],
+    }
+
+    df = pd.DataFrame([row], columns=CUT_COLUMNS)
+    try:
+        df.to_csv(CUTS_FILE, mode="a", index=False,
+                  header=not os.path.exists(CUTS_FILE))
+    except PermissionError:
+        # ห้ามให้การบันทึกล้มทำให้การเทรดล้มตาม — ไม้ถูกปิดไปแล้วตอนมาถึงบรรทัดนี้
+        print(f"[journal] เขียน {CUTS_FILE} ไม่ได้ — ปิด Excel ที่เปิดไฟล์นี้ค้างอยู่ก่อน")
+        return
+    print(f"[journal] Cut logged  ticket=#{row['ticket']}  ปิด {closed_lot} lot "
+          f"(เหลือ {remaining_lot})  {row['กฎที่ยิง'] or 'ไม่มีกฎยิง'}")
 
 
 # ---------------------------------------------------------------------------
 # Reconcile — ไม้ที่ broker ปิดเอง (ชน SL/TP) ไม่มีใครเรียก log_trade_close ให้
 # ---------------------------------------------------------------------------
 
+# 2026-09-12: เดิม map แค่ SL/TP แล้วที่เหลือตกถัง "Manual Cut" ทั้งหมด ซึ่งเอาไม้ที่ *บอทปิด
+# เองตามกฎ* กับไม้ที่ *คนกดปิดใน MT5* มากองรวมกันในคำเดียว = ตอบไม่ได้เลยว่าระบบจริงเดินตามกฎ
+# ที่ backtest จำลองหรือเปล่า ทั้งที่ MT5 แยกให้อยู่แล้วใน deal.reason
+#
+# ⚠️ แถวที่ปิดก่อน 2026-09-12 ที่เป็น "Manual Cut" คือถังรวมแบบเก่า — แยกไม่ได้ย้อนหลัง
+#    ใช้ note="auto-reconciled from MT5 history" ช่วยเดาได้หยาบๆ (มี note = MT5 ปิดไปก่อน
+#    บอทมารู้ทีหลัง ซึ่งถ้าไม่ใช่ SL/TP ก็มักแปลว่ามีคนกดเอง) แต่อย่าเอาไปนับเป็นตัวเลขจริง
 _RESULT_BY_DEAL_REASON = {
-    mt5.DEAL_REASON_SL: "Stop Loss",
-    mt5.DEAL_REASON_TP: "Take Profit",
+    mt5.DEAL_REASON_SL:       "Stop Loss",
+    mt5.DEAL_REASON_TP:       "Take Profit",
+    mt5.DEAL_REASON_EXPERT:   "Bot Exit",     # EA/script สั่งปิด = exit_monitor ของเรา
+    mt5.DEAL_REASON_CLIENT:   "Manual Cut",   # คนกดใน MT5 terminal
+    mt5.DEAL_REASON_MOBILE:   "Manual Cut",
+    mt5.DEAL_REASON_WEB:      "Manual Cut",
+    mt5.DEAL_REASON_SO:       "Stop Out",     # margin call — ต้องแยกจาก SL ให้ออก
+    mt5.DEAL_REASON_ROLLOVER: "Broker Action",
+    mt5.DEAL_REASON_VMARGIN:  "Broker Action",
+    mt5.DEAL_REASON_SPLIT:    "Broker Action",
+}
+
+# status ที่ยอมให้พิมพ์ผ่าน CLI — "Bot Exit" ไม่อยู่ในนี้โดยตั้งใจ คนพิมพ์เองไม่ใช่บอทปิด
+VALID_CLOSE_RESULTS = ("Take Profit", "Stop Loss", "Manual Cut", "Stop Out")
+
+# ใครเป็นคนปิด — หยาบกว่า status แต่เป็นตัวที่ใช้ตอบคำถาม "ระบบเดินเองหรือเราเข้าไปแทรก"
+_EXIT_BY_DEAL_REASON = {
+    mt5.DEAL_REASON_SL:       "broker",   # SL/TP ที่ฝากไว้กับโบรก — ระบบตั้งไว้ โบรกยิงให้
+    mt5.DEAL_REASON_TP:       "broker",
+    mt5.DEAL_REASON_EXPERT:   "bot",
+    mt5.DEAL_REASON_CLIENT:   "manual",
+    mt5.DEAL_REASON_MOBILE:   "manual",
+    mt5.DEAL_REASON_WEB:      "manual",
+    mt5.DEAL_REASON_SO:       "broker",
+    mt5.DEAL_REASON_ROLLOVER: "broker",
+    mt5.DEAL_REASON_VMARGIN:  "broker",
+    mt5.DEAL_REASON_SPLIT:    "broker",
 }
 
 
@@ -221,7 +326,8 @@ def reconcile_closed_positions() -> int:
 
         net_pnl   = sum(d.profit + d.swap + d.commission for d in deals)
         last_out   = max(out_deals, key=lambda d: d.time)
-        result     = _RESULT_BY_DEAL_REASON.get(last_out.reason, "Manual Cut")
+        result     = _RESULT_BY_DEAL_REASON.get(last_out.reason, "Unknown")
+        exit_by    = _EXIT_BY_DEAL_REASON.get(last_out.reason, "")
         close_dt   = datetime.fromtimestamp(last_out.time)
         close_day  = close_dt.strftime("%Y-%m-%d")
         close_time = close_dt.strftime("%H:%M:%S")
@@ -231,6 +337,10 @@ def reconcile_closed_positions() -> int:
         df.at[idx, "note"]       = "auto-reconciled from MT5 history"
         df.at[idx, "close_date"] = close_day
         df.at[idx, "close_time"] = close_time
+        df.at[idx, "exit_by"]    = exit_by
+        # exit_rule เว้นว่างไว้โดยตั้งใจ — มาทางนี้แปลว่าไม้ปิดไปโดยที่ exit_monitor ไม่ได้สั่ง
+        # (ชน SL/TP เอง หรือคนกดปิด) จึงไม่มี "กฎที่ยิง" ให้บันทึก ถ้าบอทสั่งปิดเอง
+        # close_order() จะเขียน exit_rule ไว้ก่อนที่ reconcile จะมาเจอ
         closed += 1
         sign = "+" if net_pnl >= 0 else ""
         print(f"[journal] Reconciled #{ticket}  {result}  P/L {sign}{net_pnl:.2f}  ({close_day})")
@@ -319,6 +429,41 @@ def check_cooldown(symbol: str, cooldown_hours: float) -> tuple[bool, str]:
     return True, "OK"
 
 
+def check_tp_cooldown(symbol: str, hours: float, now: datetime | None = None) -> tuple[bool, str]:
+    """Return False ถ้าไม้ล่าสุดของ symbol นี้ที่ **ชน TP** ปิดไปไม่ถึง `hours` ชม. (ดู
+    config.TP_COOLDOWN_HOURS) — นับเฉพาะ TP ไม่นับ SL/Bot Exit/Manual Cut
+    เรียกหลัง reconcile_closed_positions() เสมอ (ไม้ที่ broker ปิดด้วย TP ถูก mark ที่นั่น)
+
+    นาฬิกา: close_time ใน CSV มาจาก `datetime.fromtimestamp(deal.time)` = เวลาเครื่อง และ
+    datetime.now() ก็เวลาเครื่อง จึงลบกันตรงๆ ได้ (ห้ามเอา mt5_now() มาลบ — นั่นคือ UTC)
+    `now` มีไว้ให้ทดสอบย้อนเวลาได้เท่านั้น"""
+    if not hours or hours <= 0:
+        return True, "OK"
+
+    df = _load()
+    # อ้างสตริงผ่านตาราง ไม่พิมพ์ "Take Profit" ซ้ำ — ถ้าวันหนึ่ง label ถูก rename ด่านนี้จะยัง
+    # ตามทัน แทนที่จะเลิกเจอไม้ TP เงียบๆ (รูปแบบเดียวกับ backtest_portfolio เมื่อ 2026-09-15)
+    tp = df[(df["symbol"] == symbol) & (df["status"] == _RESULT_BY_DEAL_REASON[mt5.DEAL_REASON_TP])]
+    now = now or datetime.now()
+    # ตัดเวลาปิดที่ "อยู่ในอนาคต" ทิ้ง — ถ้าวันไหนนาฬิกาของ close_time เพี้ยน (เช่นมีคนเขียนเป็น UTC)
+    # elapsed จะติดลบแล้วล็อก symbol นานเกินจริงเงียบๆ ให้ fail-open แทน (แบบเดียวกับ reject cooldown)
+    close_times = [dt for dt in tp.apply(_closed_datetime, axis=1)
+                   if dt is not None and dt <= now] if len(tp) else []
+    if not close_times:
+        return True, "OK"
+
+    last_tp = max(close_times)
+    elapsed = now - last_tp
+    cooldown = timedelta(hours=hours)
+    if elapsed < cooldown:
+        hrs = (cooldown - elapsed).total_seconds() / 3600
+        return False, (
+            f"Cooldown หลัง TP {symbol}: ชน TP เมื่อ {last_tp.strftime('%Y-%m-%d %H:%M')} "
+            f"— ต้องรออีก {hrs:.1f} ชม. ({hours:g} ชม.)"
+        )
+    return True, "OK"
+
+
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
@@ -384,12 +529,11 @@ if __name__ == "__main__":
     def _usage():
         print("Usage:")
         print("  python journal.py stats")
-        print("  python journal.py open  <ticket> <symbol> <direction> <entry> <sl> <tp> <lot> [score]")
+        print("  python journal.py open  <ticket> <symbol> <direction> <entry> <sl> <tp> <lot>")
         print("  python journal.py close <ticket> <result> <pnl>")
         print()
         print("  direction : Long | Short")
-        print("  result    : 'Take Profit' | 'Stop Loss' | 'Manual Cut'")
-        print("  score     : optional (default 0)")
+        print(f"  result    : {' | '.join(repr(r) for r in VALID_CLOSE_RESULTS)}")
         print()
         print("Example:")
         print("  python journal.py open  123456 BTCUSDm Short 65000 67500 59000 0.01")
@@ -413,7 +557,7 @@ if __name__ == "__main__":
         print("=" * 38)
 
     elif sys.argv[1] == "open":
-        if len(sys.argv) not in (9, 10):
+        if len(sys.argv) != 9:
             print("Error: ต้องใส่ argument ให้ครบ")
             _usage()
             sys.exit(1)
@@ -425,7 +569,6 @@ if __name__ == "__main__":
             sl        = float(sys.argv[6])
             tp        = float(sys.argv[7])
             lot       = float(sys.argv[8])
-            score     = float(sys.argv[9]) if len(sys.argv) == 10 else 0.0
         except ValueError:
             print("Error: ตัวเลขไม่ถูกต้อง")
             sys.exit(1)
@@ -434,7 +577,7 @@ if __name__ == "__main__":
             print("Error: direction ต้องเป็น Long หรือ Short")
             sys.exit(1)
 
-        log_trade_open(symbol, direction, entry, sl, tp, lot, score, ticket)
+        log_trade_open(symbol, direction, entry, sl, tp, lot, ticket)
 
     elif sys.argv[1] == "close":
         if len(sys.argv) != 5:
@@ -449,13 +592,14 @@ if __name__ == "__main__":
             print("Error: ticket ต้องเป็นตัวเลข, pnl ต้องเป็นทศนิยม")
             sys.exit(1)
 
-        valid = ("Take Profit", "Stop Loss", "Manual Cut")
-        if result not in valid:
-            print(f"Error: result ต้องเป็นหนึ่งใน {valid}")
+        if result not in VALID_CLOSE_RESULTS:
+            print(f"Error: result ต้องเป็นหนึ่งใน {VALID_CLOSE_RESULTS}")
             sys.exit(1)
 
         try:
-            log_trade_close(ticket, result, net_pnl)
+            # มาทาง CLI = คนพิมพ์เอง จึงเป็น exit_by='manual' เสมอ ต่อให้ result เป็น
+            # 'Stop Loss' (คนกำลังบันทึกย้อนหลังว่าไม้ชน SL ไม่ใช่ระบบบันทึกให้)
+            log_trade_close(ticket, result, net_pnl, exit_by="manual")
         except ValueError as e:
             print(f"Error: {e}")
             sys.exit(1)

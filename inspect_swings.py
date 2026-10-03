@@ -5,8 +5,16 @@ wick_ratio_min ของ symbol ใหม่ (เช่น US500m) — left/righ
 find_sl_from_structure (4, 4, 0.22) เพราะเป็นค่าที่ใช้เทรดจริง ไม่ใช้ default ของ
 find_swing_highs/lows เฉยๆ (3, 3, 0.0) ซึ่งไม่ตรงกับพฤติกรรมจริงของระบบ
 
-ใช้: python inspect_swings.py <SYMBOL> [TIMEFRAME=4H] [BARS=400]
+ใช้: python inspect_swings.py <SYMBOL> [TIMEFRAME=4H] [BARS=400] [WICK] [VOL]
      python inspect_swings.py US500m 4H 400
+     python inspect_swings.py UKOILm 4H 400 0.45 1.5    # ทับค่าชั่วคราว ไม่แตะ swing.py
+
+🔴 **เพิ่ม asset ใหม่ ให้รัน 2 ค่านี้เสมอแล้วเอาตารางให้ผู้ใช้เลือก** (คำสั่งผู้ใช้ 2026-09-19):
+     ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.45 1.5
+     ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.5  1.6
+   ไม่ต้องไล่จูนเองทีละค่า — ผู้ใช้จะจูนต่อจากสองตารางนี้เอง
+   (ที่ต้องมี override เป็น arg เพราะการแก้ swing.py ไปมาระหว่างดู = เสี่ยงลืมค่าค้างไว้
+    ในไฟล์ที่ระบบจริงอ่าน)
 """
 import sys
 
@@ -72,13 +80,16 @@ def main():
     symbol    = sys.argv[1] if len(sys.argv) > 1 else "US500m"
     timeframe = sys.argv[2] if len(sys.argv) > 2 else "4H"
     bars      = int(sys.argv[3]) if len(sys.argv) > 3 else 400
-    # arg 4 (optional): override wick_ratio_min ไว้ทดลองค่าอื่นโดยไม่ต้องแก้ swing.py ก่อน
+    # arg 4/5 (optional): override wick_ratio_min / vol_multiplier ไว้ทดลองค่าอื่นโดยไม่ต้อง
+    # แก้ swing.py ก่อน — จำเป็นตอนเพิ่ม symbol ใหม่ เพราะต้องดูตารางหลายค่าก่อนตัดสินใจ
+    # และการแก้ swing.py ไปมาระหว่างดู = เสี่ยงลืมค่าค้างไว้ในไฟล์ที่ระบบจริงอ่าน
     wmin_override = float(sys.argv[4]) if len(sys.argv) > 4 else None
+    vmult_override = float(sys.argv[5]) if len(sys.argv) > 5 else None
 
     connect()
     df = get_hist(symbol, timeframe, bars)
 
-    vmult = swing_vol_multiplier(symbol)
+    vmult = vmult_override if vmult_override is not None else swing_vol_multiplier(symbol)
     wmin  = wmin_override if wmin_override is not None else swing_wick_ratio_min(symbol)
 
     raw_highs = find_swing_highs(df, left=STRUCT_LEFT_RIGHT, right=STRUCT_LEFT_RIGHT,

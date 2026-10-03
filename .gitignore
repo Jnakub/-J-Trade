@@ -12,3 +12,41 @@ __pycache__/
 
 # Claude Code session metadata
 .claude/
+
+# macOS
+.DS_Store
+
+# ผลลัพธ์ของ backtest_criteria.py (ลบสคริปต์ไปแล้ว 2026-09-25 — ไฟล์เก่ายังค้างอยู่ได้)
+criteria_samples_*.csv
+replay_trades_*.csv
+replay_cuts_*.csv
+# backtest_replay.py --log-blocked
+replay_blocked_*.csv
+# backtest_exit_rules.py
+exit_rules_*.csv
+# backtest_entry_lead.py
+entry_lead_*.csv
+# backtest_blocked_value.py
+blocked_value_*.csv
+# backtest_mfe.py
+mfe_trades*.csv
+# entry_features.py
+entry_features.csv
+# news_paths.py (สร้างใหม่ได้ ~1 นาที — ป้อนให้ news_sensitivity.py)
+news_paths.csv
+
+# state ของ cooldown หลังถูกด่านปฏิเสธ (scheduler สร้างเอง ดู config.REJECT_COOLDOWN_HOURS)
+reject_cooldown.json
+# สรุปรายวันส่งไปแล้วถึงวันไหน (scheduler สร้างเอง ดู scheduler.send_daily_summary_if_due)
+daily_summary_state.json
+
+# log ของระบบจริง — exit_monitor เขียนเองทุกครั้งที่กฎสั่งปิดบางส่วน
+cuts_log.csv
+
+# ไฟล์ที่ Wine สร้างทิ้งไว้ตอนรัน python ผ่าน run_wine.sh
+msedgewebview2.dxvk-cache
+settings.dat
+entry_structure.csv
+replay_limits_*.csv
+replay_rrblocked_*.csv
+replay_limitmissed_*.csv

@@ -53,17 +53,15 @@ def send(message: str) -> bool:
 
 def notify_order_opened(symbol: str, direction: str, entry: float,
                         sl: float, tp: float, lot: float, ticket: int,
-                        score: float = None, is_demo: bool = True) -> None:
+                        is_demo: bool = True) -> None:
     account_tag = "DEMO" if is_demo else "⚠️ REAL"
     rr = abs(tp - entry) / abs(entry - sl) if entry != sl else 0
-    score_line = f"\nScore: {score:.1f}" if score is not None else ""
     send(
         f"🟢 <b>เปิดไม้ใหม่</b> [{account_tag}]\n"
         f"{symbol}  {direction}\n"
         f"Entry: {entry:,.3f}\n"
         f"SL: {sl:,.3f}   TP: {tp:,.3f}\n"
-        f"R:R: {rr:.2f}   Lot: {lot}"
-        f"{score_line}\n"
+        f"R:R: {rr:.2f}   Lot: {lot}\n"
         f"Ticket: #{ticket}"
     )
 
@@ -100,9 +98,9 @@ def notify_error(context: str, error: str) -> None:
     send(f"🔴 <b>ERROR</b>\n{context}\n{error}")
 
 
-def notify_daily_summary(stats: dict) -> None:
+def notify_daily_summary(stats: dict, day: str = "") -> None:
     send(
-        f"📊 <b>สรุปรายวัน</b>\n"
+        f"📊 <b>สรุปรายวัน{f' {day}' if day else ''}</b>\n"
         f"เทรดทั้งหมด: {stats['total_trades']}\n"
         f"Win Rate: {stats['win_rate']:.1f}%\n"
         f"Total P&L: {stats['total_pnl']:+.2f} USD\n"

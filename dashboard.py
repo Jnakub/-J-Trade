@@ -29,7 +29,6 @@ def load(symbol: str = None, date_from: str = None, date_to: str = None) -> tupl
 
     df["net_pnl"] = pd.to_numeric(df["net_pnl"], errors="coerce")
     df["entry"]   = pd.to_numeric(df["entry"],   errors="coerce")
-    df["score"]   = pd.to_numeric(df["score"],   errors="coerce")
 
     if symbol:
         df = df[df["symbol"].str.upper() == symbol.upper()]
@@ -107,7 +106,6 @@ def print_summary(closed: pd.DataFrame) -> None:
     max_win_s, max_loss_s = calc_streak(closed["net_pnl"])
     best_trade  = closed["net_pnl"].max()
     worst_trade = closed["net_pnl"].min()
-    avg_score   = closed["score"].mean() if "score" in closed.columns else float("nan")
 
     print(SEP)
     print("  TRADE SUMMARY")
@@ -128,8 +126,6 @@ def print_summary(closed: pd.DataFrame) -> None:
     print(SEP2)
     print(f"  Max Win Streak  : {max_win_s}")
     print(f"  Max Loss Streak : {max_loss_s}")
-    if not pd.isna(avg_score):
-        print(f"  Avg Score       : {avg_score:.1f}")
     print(SEP)
 
 
@@ -202,12 +198,11 @@ def print_open(open_pos: pd.DataFrame) -> None:
     print()
     print("  OPEN POSITIONS")
     print(SEP)
-    print(f"  {'Ticket':<14} {'Date':<12} {'Sym':<10} {'Dir':<6} {'Entry':>10} {'Score':>6}")
+    print(f"  {'Ticket':<14} {'Date':<12} {'Sym':<10} {'Dir':<6} {'Entry':>10}")
     print(SEP2)
     for _, row in open_pos.iterrows():
-        score_str = f"{row['score']:.1f}" if pd.notna(row["score"]) else "-"
         print(f"  {row['ticket']:<14} {row['date']:<12} {row['symbol']:<10} "
-              f"{row['direction']:<6} {row['entry']:>10.2f} {score_str:>6}")
+              f"{row['direction']:<6} {row['entry']:>10.2f}")
     print(SEP)
 
 
