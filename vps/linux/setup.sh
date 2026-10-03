@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ติดตั้งบอทบน Ubuntu VPS (24.04) — MT5 + Python 3.11 ฝั่ง Windows รันผ่าน wine
+# ติดตั้งบอทบน Ubuntu VPS (24.04 / 26.04) — MT5 + Python 3.11 ฝั่ง Windows รันผ่าน wine
 # แบบเดียวกับบน Mac (run_wine.sh) ต่างกันแค่ไม่มีจอ จึงใช้จอเสมือน Xvfb :99
 #
 # รันด้วย root ครั้งเดียว:   sudo bash vps/linux/setup.sh
@@ -22,16 +22,28 @@ echo "== 1/7 timezone UTC+7 =="
 timedatectl set-timezone Asia/Bangkok
 
 echo "== 2/7 wine + Xvfb + x11vnc =="
+command -v wget >/dev/null || { apt-get update; apt-get install -y wget; }
 if ! command -v wine >/dev/null; then
     dpkg --add-architecture i386
-    mkdir -pm755 /etc/apt/keyrings
-    wget -qO /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
-    codename=$(lsb_release -cs)
-    wget -qNP /etc/apt/sources.list.d/ \
-        "https://dl.winehq.org/wine-builds/ubuntu/dists/$codename/winehq-$codename.sources"
-    apt-get update
-    apt-get install -y --install-recommends winehq-stable
+    . /etc/os-release
+    codename=$VERSION_CODENAME
+    winehq_src="https://dl.winehq.org/wine-builds/ubuntu/dists/$codename/winehq-$codename.sources"
+    if wget -q --spider "$winehq_src"; then
+        mkdir -pm755 /etc/apt/keyrings
+        wget -qO /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+        wget -qNP /etc/apt/sources.list.d/ "$winehq_src"
+        apt-get update
+        apt-get install -y --install-recommends winehq-stable
+    else
+        # WineHQ ยังไม่ออกแพ็กเกจให้ Ubuntu รุ่นใหม่เสมอ (เจอจริง 2026-10-03: Hostinger ลง 26.04 มาให้)
+        # -> ใช้ wine ของ Ubuntu เอง · wine32 ใส่ไว้เผื่อ installer 32-bit (mt5setup) ไม่มีก็ไปต่อได้
+        echo "WineHQ ไม่มีแพ็กเกจสำหรับ $codename — ใช้ wine ของ Ubuntu แทน"
+        apt-get update
+        apt-get install -y wine
+        apt-get install -y wine32:i386 || echo "ไม่มี wine32 — ข้าม"
+    fi
 fi
+wine --version
 apt-get install -y xvfb x11vnc git wget
 
 echo "== 3/7 user $BOT_USER =="

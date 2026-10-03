@@ -1,6 +1,7 @@
 # รันบอทบน Ubuntu VPS (Hostinger) — ผ่าน wine
 
 ใช้ทางนี้เมื่อ VPS เป็น Linux (Hostinger ไม่มี Windows) · ถ้าเป็น Windows VPS ใช้ `vps/README.md` แทน
+ใช้ได้ทั้ง Ubuntu 24.04 และ 26.04 — ถ้า WineHQ ยังไม่มีแพ็กเกจให้รุ่นนั้น setup.sh จะใช้ wine ของ Ubuntu แทนเอง
 หลักการเหมือนบน Mac ทุกอย่าง: MT5 + Python 3.11 **ฝั่ง Windows** รันใน wine (`MetaTrader5` import
 จาก python ของ Linux ไม่ได้ เหมือนฝั่ง mac) ต่างแค่ VPS ไม่มีจอ จึงใช้จอเสมือน Xvfb `:99`
 
