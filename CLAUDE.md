@@ -80,6 +80,52 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 
 ---
 
+## 🔴 ระบบจริงรันบน VPS — ไม่ใช่บน Mac (ตั้งแต่ 2026-10-03 13:00 +07)
+
+**ที่ไหน:** Hostinger VPS · Ubuntu 26.04 · user `root` (เข้า) / `trader` (รันบอท) · repo ที่ `/home/trader/-J-Trade`
+**IP ไม่จดในไฟล์นี้โดยตั้งใจ — repo เป็น public** ดู IP ได้ที่ memory `live-bot-runs-on-vps` หรือหน้า Hostinger (hPanel -> VPS)
+รหัส root: ผู้ใช้เก็บเอง — **ห้ามขอ ห้ามจด** (เคยหลุดลงแชท/ภาพหน้าจอมาแล้ว ต้องเปลี่ยนทิ้ง)
+
+**ทำงานยังไง:** MT5 + Python 3.11 ฝั่ง Windows รันใน wine **staging** (prefix `/home/trader/.wine-mt5`) บนจอเสมือน Xvfb `:99`
+คุมด้วย systemd 4 ตัว — `jtrade-xvfb` · `jtrade-mt5` · `jtrade@scheduler` · `jtrade@exit_monitor`
+(ตายแล้วเริ่มใหม่เอง · VPS รีบูตแล้วขึ้นเอง · ปิด Terminal/ปิด Mac ได้ บอทไม่หยุด) · คู่มือติดตั้งเต็มที่ `vps/linux/README.md`
+
+🔴 **ห้ามรัน scheduler/exit_monitor บน Mac อีก** — สองเครื่องพร้อมกัน = เปิดไม้ซ้ำ + แย่งกันขยับ SL/TP
+Mac ใช้ทำ backtest (`run_wine.sh`) เท่านั้น
+🔴 **`trades_log.csv` / `reject_cooldown.json` / `daily_summary_state.json` / `cuts_log.csv` ฉบับจริงอยู่บน VPS**
+ของบน Mac/ใน git ล้าหลังตั้งแต่วันย้าย · **ห้าม commit `trades_log.csv` จาก Mac** (`git pull` บน VPS จะชน)
+อยากวิเคราะห์ไม้จริงบน Mac: `scp root@<IP>:/home/trader/-J-Trade/trades_log.csv /tmp/` แล้วอ่านจากนั้น
+
+**คำสั่งประจำ** — ผู้ใช้วางเองใน Terminal บน Mac หลัง `ssh root@<IP>` (ปุ่ม Run ในแชทรันบน **Mac** ไม่ใช่ VPS —
+ผู้ใช้เคยสับสนแล้ว · ผู้ใช้ไม่คุ้น Linux ให้บอกทีละขั้นว่าวางแท็บไหน)
+
+| ทำอะไร | คำสั่งบน VPS |
+|---|---|
+| สถานะ | `systemctl status jtrade-mt5 jtrade@scheduler jtrade@exit_monitor --no-pager \| grep -E "●\|Active"` |
+| log สด | `tail -f /home/trader/-J-Trade/logs/scheduler.log` (หรือ `exit_monitor.log`) |
+| หยุด / เริ่มบอท | `systemctl stop jtrade@scheduler jtrade@exit_monitor` / `systemctl start ...` |
+| เช็คกฎ exit | `sudo -iu trader /home/trader/-J-Trade/vps/linux/run.sh exit_monitor.py --rules` |
+| รันสคริปต์อื่น | `sudo -iu trader /home/trader/-J-Trade/vps/linux/run.sh <script.py>` (= `run_wine.sh` ของ VPS) |
+
+**อัปเดตโค้ด (ทุกครั้งที่แก้โค้ดที่ระบบจริงใช้):**
+1. บน Mac: commit -> push -> **merge เข้า `main`** (VPS ดึงจาก `main` เท่านั้น — branch อื่นไม่ถึง VPS)
+2. บน VPS: `systemctl stop jtrade@scheduler jtrade@exit_monitor`
+3. `sudo -iu trader git -C /home/trader/-J-Trade pull`
+4. `systemctl start jtrade@scheduler jtrade@exit_monitor` แล้ว `tail` log ดูรอบแรก
+(MT5 ไม่ต้องหยุด · แก้ไฟล์ใน `vps/linux/*.service` ต้อง `cp` ไป `/etc/systemd/system/` + `systemctl daemon-reload` เอง — pull ไม่ทำให้)
+
+**ดูหน้าจอ MT5 (ล็อกอินใหม่ / เปิดปุ่ม Algo Trading):** VPS: `sudo -iu trader /home/trader/-J-Trade/vps/linux/vnc.sh`
+· Mac แท็บใหม่: `ssh -L 5901:localhost:5900 root@<IP>` · Finder Cmd+K `vnc://localhost:5901` (รหัส VNC ผู้ใช้ตั้งเอง)
+
+**กับดักที่เจอตอนติดตั้ง (แก้ใน repo แล้ว อย่าย้อนกลับ):**
+- wine **stable** -> `mt5setup.exe` ฟ้อง "A debugger has been found" แล้วค้าง · ต้อง staging + `winecfg -v=win11` + WebView2 (ตาม `mt5linux.sh` ของ MetaQuotes)
+- `mt5setup.exe /auto` ค้างเงียบ — ต้องกด Next ผ่าน VNC
+- `TZ=Asia/Bangkok` ใน service ทำ Python ใน wine ได้เวลาเพี้ยน 6 ชม. (06:57 ตอนเครื่อง 12:57) — timezone มาจาก `timedatectl` ของเครื่องผ่าน wine เอง
+- MT5 ลงใหม่ไม่มี symbol ใน Market Watch -> 5/10 ตัว `[-4] Not found` เงียบๆ — แก้ที่ `mt5_connect.connect()` (`symbol_select`)
+- ไฟล์สำหรับ Windows VPS (`vps/*.bat`, `install_tasks.ps1`) ทำไว้ก่อนรู้ว่า Hostinger ไม่มี Windows — ยังไม่เคยใช้จริง
+
+---
+
 ## รันยังไง
 
 `MetaTrader5` เป็น extension ของ Windows — **python ฝั่ง mac import ไม่ได้** ทุกอย่างที่แตะ MT5
@@ -90,10 +136,6 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 ```
 
 `python3 script.py` ตรงๆ ใช้ได้เฉพาะสคริปต์ที่อ่าน CSV อย่างเดียว ไม่ต่อ MT5
-
-**ระบบจริงบน Windows VPS** (2026-10-03) — ไม่ใช้ wine · ตัวเรียก + Task Scheduler + ขั้นตอนย้ายอยู่ที่ `vps/README.md`
-· **Ubuntu VPS (Hostinger · ไม่มี Windows)**: wine + Xvfb + systemd ที่ `vps/linux/README.md`
-🔴 timezone ของ VPS ต้องเป็น UTC+7 (เวลาเครื่องถูกใช้ตัดสินขอบวัน daily loss / cooldown / trades_log)
 
 🔴 **รันจาก git worktree: โมดูลที่ import มาจาก checkout หลัก ไม่ใช่จาก worktree** (เจอ 2026-09-25)
 Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay\Desktop\-J-Trade` ไว้ใน sys.path
