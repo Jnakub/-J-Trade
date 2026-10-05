@@ -365,6 +365,36 @@ results += [
     move_check("ยังไม่มี TP บน broker (0) -> ตั้งได้เสมอ", "EURUSDm", 1.16200, 0.0,
                1.16200, 1.18460, [(None, 1.18460)]),
 ]
+
+
+# ── แจ้ง Telegram ตอนเลื่อน SL ไป BE (2026-10-05) ────────────────────────────────────────────
+# แทน notify ด้วยตัวจด — ไม่มีข้อความไป Telegram จริง
+_be_sent = []
+_saved_be = exit_monitor.notify.notify_breakeven
+exit_monitor.notify.notify_breakeven = lambda *a, **k: _be_sent.append(a)
+
+
+def be_check(label, sl, desired_sl, be_lock, be_price, want_notify):
+    _sent.clear(); _be_sent.clear()
+    m = {"ticket": 7, "symbol": "XAUUSDm", "direction": "Long", "lot": 0.2, "entry": 4000.0,
+         "sl": sl, "tp": 4300.0, "recommended_keep_pct": 100, "desired_sl": desired_sl,
+         "desired_tp": None, "be_lock": be_lock, "be_price": be_price, "r_multiple": 1.52,
+         "final_decision": ("ทดสอบ", "")}
+    with contextlib.redirect_stdout(io.StringIO()):
+        exit_monitor.execute_decision(m)
+    ok = (len(_be_sent) == 1) == want_notify
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {'แจ้ง' if _be_sent else 'ไม่แจ้ง'}")
+    return ok
+
+
+print("\nแจ้ง Telegram ตอนเลื่อน SL ไป BE:")
+results += [
+    be_check("ถึง 1.5R ขยับ SL 3900 -> entry -> แจ้ง", 3900.0, 4000.0, True, 4000.0, True),
+    be_check("รอบถัดไป SL อยู่ที่ BE แล้ว -> ไม่ส่ง ไม่แจ้งซ้ำ", 4000.0, 4000.0, True, 4000.0, False),
+    be_check("ขยับ SL ที่ไม่ใช่ BE (ยังไม่ถึง 1.5R) -> ไม่แจ้ง", 3900.0, 3890.0, False, 4000.0, False),
+    be_check("be_lock แต่ SL ไปที่อื่น ไม่ใช่ be_price -> ไม่แจ้ง", 3900.0, 3950.0, True, 4000.0, False),
+]
+exit_monitor.notify.notify_breakeven = _saved_be
 for _k, _v in _saved_em.items():
     setattr(exit_monitor, _k, _v)
 

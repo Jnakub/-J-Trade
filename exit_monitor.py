@@ -1531,6 +1531,7 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         "entry": entry, "sl": sl, "tp": tp, "lot": lot,
         "trail": trail, "initial_sl": initial_sl,
         "trailing_sl": trailing_sl, "desired_sl": desired_sl,
+        "be_lock": be_lock, "be_price": be_price,
         "sl_widen_capped": sl_widen_capped,
         "desired_tp": desired_tp,
         "entry_time": entry_time, "current_price": current_price,
@@ -1799,6 +1800,13 @@ def execute_decision(m: dict) -> None:
         if desired_sl is not None and _price_moved(desired_sl, sl, _digits):
             modify_sltp(ticket, new_sl=desired_sl)
             print(f"  {CYAN}[AUTO] ขยับ SL #{ticket} -> {desired_sl:,.{_digits or 3}f} (ATR Trailing){RESET}")
+            # แจ้ง Telegram เฉพาะตอนที่การขยับนี้คือ "ไป BE" — ATR trailing ปิดอยู่และขึ้นไม่ถึง entry
+            # โดยโครงสร้าง SL ที่ไปนั่งตรง be_price จึงมาจากกฎ BE เท่านั้น · ยิงครั้งเดียวต่อไม้เอง
+            # (รอบถัดไป SL = be_price แล้ว _price_moved เป็น False ไม่ส่ง modify ซ้ำ)
+            # การขยับอื่น (เช่นขยาย SL รอบแรกหลังเปิดไม้) ไม่แจ้ง — ผู้ใช้ขอแค่ BE
+            if m.get("be_lock") and not _price_moved(desired_sl, m["be_price"], _digits):
+                notify.notify_breakeven(symbol, m["direction"], ticket, entry, desired_sl,
+                                        m.get("r_multiple"), is_demo=is_demo_account())
 
         # 4) ขยับ TP ตาม TP Trailing (เริ่มเมื่อใกล้ TP เดิม <= TRAIL_TP_TRIGGER_PCT)
         desired_tp = m["desired_tp"]

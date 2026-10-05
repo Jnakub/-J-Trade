@@ -89,9 +89,18 @@ def notify_partial_close(symbol: str, ticket: int, close_vol: float,
     )
 
 
-def notify_sl_moved(symbol: str, ticket: int, new_sl: float, is_demo: bool = True) -> None:
+def notify_breakeven(symbol: str, direction: str, ticket: int, entry: float,
+                     new_sl: float, r_multiple: float | None, is_demo: bool = True) -> None:
+    """แจ้งตอน exit_monitor เลื่อน SL ไปจุด BE — 2026-10-05 ผู้ใช้ขอ (เดิมรู้แค่ตอนเปิด/ปิดไม้)
+    แทน notify_sl_moved เดิมที่ไม่เคยถูกเรียกเลยสักที่"""
     account_tag = "DEMO" if is_demo else "⚠️ REAL"
-    send(f"🔵 [{account_tag}] {symbol} #{ticket} ขยับ SL -> {new_sl:,.3f}")
+    r_txt = f"   ตอนนี้ {r_multiple:+.2f}R" if r_multiple is not None else ""
+    send(
+        f"🔵 <b>เลื่อน SL ไป BE</b> [{account_tag}]\n"
+        f"{symbol}  {direction}\n"
+        f"SL ใหม่: {new_sl:,.3f}   (Entry: {entry:,.3f}){r_txt}\n"
+        f"Ticket: #{ticket}"
+    )
 
 
 def notify_error(context: str, error: str) -> None:
