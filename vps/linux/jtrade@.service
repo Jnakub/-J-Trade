@@ -16,6 +16,9 @@ Environment=DISPLAY=:99 WINEPREFIX=/home/trader/.wine-mt5 WINEDEBUG=-all PYTHONU
 ExecStart=/usr/bin/wine /home/trader/.wine-mt5/drive_c/Python311/python.exe %i.py
 Restart=always
 RestartSec=60
+# python ใน wine ไม่ตอบ SIGTERM -> systemd รอเต็ม 90 วิ (default) ก่อนฆ่า · เจอจริง 2026-10-05 ตอน deploy
+# 15 วิพอ: บอทใช้เวลาเกือบทั้งหมดนอนรอรอบถัดไป ไม่มี state ค้างในหน่วยความจำ (เขียนลงไฟล์ทุกครั้ง)
+TimeoutStopSec=15
 
 [Install]
 WantedBy=multi-user.target
