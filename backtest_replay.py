@@ -134,6 +134,8 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  tag _beladderT-L · 99:0 = identity check
      --trail-tp-buffer=X / --trail-tp-trigger=X  ทับ exit_monitor.TRAIL_TP_ATR_BUFFER (0.5 · 0 = ปิด
                  TP trailing) / TRAIL_TP_TRIGGER_PCT (1.0) · tag _trailtpbufX / _trailtptrigX
+     --log-reasons  บันทึกเหตุผลที่ไม่เข้าไม้รายรอบสแกน (เวลา + regime + เหตุผล) -> replay_reasons_<sym><tag>.csv
+                 บันทึกอย่างเดียว ผลไม้ไม่เปลี่ยน
      --same-scan-reentry  ไม้ที่ broker ปิด (SL/BE/TP) คืนช่องในรอบสแกนนั้นเลย = ตรงกับ scheduler
                  ที่อ่าน positions_get ตอนสแกน (tag _samescan · ที่มาดูตรงที่ parse ธง)
 """
@@ -276,6 +278,11 @@ cut_log = []
 # ไว้ตอบคำถามที่ไม่มีเครื่องมือไหนตอบได้: **ค่าเสียโอกาสของการถือช่องไว้นาน** ซึ่งเป็น
 # เหตุผลเดียวที่กฎอย่าง slow trade มีอยู่ — เอาไฟล์ผลไปเดินต่อด้วย backtest_blocked_value.py
 log_blocked = "--log-blocked" in sys.argv
+# --log-reasons : บันทึกเหตุผลที่ไม่เข้าไม้ "รายรอบสแกน" พร้อมเวลาและ regime -> replay_reasons_<sym><tag>.csv
+# ตารางสรุปท้ายรอบ (`skips`) นับรวมทั้ง 2 ปี บอกไม่ได้ว่าเกิด "เมื่อไหร่" · เพิ่ม 2026-10-07 เพื่อตอบว่า
+# หลังไม้ถูกเพดานเวลาปิด แล้วราคาวิ่งต่อจนถึง TP เดิม ทำไมระบบไม่กลับเข้า · บันทึกอย่างเดียว ไม่แตะการตัดสินใจ
+log_reasons = "--log-reasons" in sys.argv
+reason_log = []
 # --log-rr-blocked : บันทึกทุกรอบสแกนที่ setup Reversal (ไม่ใช่ flip) ถูกด่าน R:R ปฏิเสธ พร้อม SL/TP/ATR
 # -> replay_rrblocked_<sym><tag>.csv · บันทึกอย่างเดียว ไม่แตะการตัดสินใจ (2026-09-26 ใช้ดูว่าไม้ที่ติด
 # R:R หน้าตาเป็นยังไง ก่อนคิดวิธีแก้ — ข้อมูลเดิมจากรอบ --limit-rr เห็นเฉพาะที่ตั้ง order ได้)
@@ -937,6 +944,8 @@ def df1d_at(t):
 
 def note(reason):
     skips[reason] = skips.get(reason, 0) + 1
+    if log_reasons:   # now / _rg เป็นตัวแปรของ loop หลัก (ระดับโมดูล) — note ถูกเรียกจากใน loop เท่านั้น
+        reason_log.append({"time": now, "regime": _rg, "reason": reason})
 
 
 def slot_of(strategy):
@@ -1757,6 +1766,9 @@ if log_cuts:
     (pd.DataFrame(cut_log) if cut_log else pd.DataFrame(columns=_cut_cols)).to_csv(
         f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
+if log_reasons:
+    pd.DataFrame(reason_log).to_csv(f"replay_reasons_{symbol}{_tag}.csv", index=False)
+    print(f"  เขียนเหตุผลที่ไม่เข้า {len(reason_log)} บรรทัดลง replay_reasons_{symbol}{_tag}.csv")
 if log_blocked:
     pd.DataFrame(blocked_log).to_csv(f"replay_blocked_{symbol}{_tag}.csv", index=False)
     print(f"  เขียนสัญญาณเงา {len(blocked_log)} รอบลง replay_blocked_{symbol}{_tag}.csv "

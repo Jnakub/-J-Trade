@@ -50,3 +50,4 @@ entry_structure.csv
 replay_limits_*.csv
 replay_rrblocked_*.csv
 replay_limitmissed_*.csv
+replay_reasons_*.csv
