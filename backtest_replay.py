@@ -134,6 +134,7 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  tag _beladderT-L · 99:0 = identity check
      --trail-tp-buffer=X / --trail-tp-trigger=X  ทับ exit_monitor.TRAIL_TP_ATR_BUFFER (0.5 · 0 = ปิด
                  TP trailing) / TRAIL_TP_TRIGGER_PCT (1.0) · tag _trailtpbufX / _trailtptrigX
+     --tag=NAME  ต่อท้ายชื่อไฟล์ผลด้วย _NAME — ใช้ทุกครั้งที่หน้าต่างต่างจาก base (ไม่งั้นทับไฟล์ base)
      --cap-reentry=W  ไม้ที่ถูกเพดานเวลาปิด กลับเข้าทิศเดิมได้ใน W วัน เมื่อราคาปิดเลยจุดสุดขั้วเดิม
                  (ข้ามด่าน regime/run-up/cooldown/min-turn · ยังผ่าน R:R/SL/TP) · ใช้คู่ --max-hold · tag _capreW
      --log-reasons  บันทึกเหตุผลที่ไม่เข้าไม้รายรอบสแกน (เวลา + regime + เหตุผล) -> replay_reasons_<sym><tag>.csv
@@ -1629,6 +1630,9 @@ if limit_rr:
 
 if t.empty:
     print(f"{'=' * 78}")
+    if log_reasons:   # ไม่มีไม้ปิดก็ยังมีเหตุผลรายรอบให้ดู (เคส GBPCHF หน้าต่าง 45 วัน) — tag เฉพาะ --tag
+        _ut = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tag=")), "")
+        pd.DataFrame(reason_log).to_csv(f"replay_reasons_{symbol}{'_' + _ut if _ut else ''}.csv", index=False)
     sys.exit(0)
 
 # นิยาม "ชนะ" — 2026-09-20 เปลี่ยนจาก `R > 0` เป็น `R > WIN_THRESHOLD_R` ตามคำสั่งผู้ใช้
@@ -1670,6 +1674,11 @@ for lbl, g in (("ครึ่งแรก", t[t["time"] < mid]), ("ครึ่�
 print(f"{'=' * 78}")
 # รอบที่สวนค่าระบบจริงเขียนคนละไฟล์ — ไม่งั้นทับผลรอบปกติที่เอาไว้เทียบ
 _tag = ""
+# --tag=NAME : ต่อท้ายชื่อไฟล์ผลเอง — รอบที่ค่าระบบเหมือน base แต่หน้าต่างต่าง (จำนวนวัน / --end) ไม่ติด tag
+# อัตโนมัติ จึงทับ replay_trades_<sym>.csv ของ base เงียบๆ (เพิ่ม 2026-10-07 ตอนรันช่วงสั้นเทียบกับ log ระบบจริง)
+_user_tag = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tag=")), "")
+if _user_tag:
+    _tag += f"_{_user_tag}"
 if _sr_arg:
     _tag += "_skip-" + "-".join(r.replace(" ", "") for r in _skip)
 if _rms_arg:
