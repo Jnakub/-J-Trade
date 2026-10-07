@@ -435,8 +435,17 @@ BREAKEVEN_LEVEL_R    = 0.0
 # 2026-09-25 เพิ่มเพื่อวัดไอเดียผู้ใช้ "1.5R -> ล็อก +0.2R · 3R -> ล็อก +0.4R"
 # ⚠️ ขั้นแรกของไอเดียนั้น (level +0.2 ที่ trigger 1.5) วัดแล้ว 2026-09-22 = −11.80R ชุดไม้เดียวกันเป๊ะ
 #    (ดู BREAKEVEN_LEVEL_R ด้านบน) — ขั้นที่ 3R ไม่เคยวัด
-# () = ไม่มีขั้นเพิ่ม = พฤติกรรมเดิมเป๊ะ · backtest: --be-ladder=3:0.4[,5:1.0]
-BREAKEVEN_LADDER     = ()
+# () = ไม่มีขั้นเพิ่ม = พฤติกรรมเดิมเป๊ะ · backtest: --be-ladder=3:0.4[,5:1.0] · 99:0 = identity
+# 🔻 สถานะปัจจุบัน: **((3.0, 1.5),) ตั้งแต่ 2026-10-07 (คำสั่งผู้ใช้)** — ถึง 3R -> ล็อก SL ที่ +1.5R
+# replay เต็ม 10 symbol (--end=2026-09-24T00:00 · --be-ladder=3:1.5) 435 -> 437 ไม้ +163.70 -> **+165.48R (+1.79R)**
+#   เปลี่ยนแค่ 3 ไม้: XAU 2026-08-11 BE -> +1.50 · UKOIL 2025-10-07 BE -> +1.48 · HK50 2025-08-04 เพดาน +3.39 -> +1.48
+#   + Sideway ใหม่ 2 ไม้ +0.70 (ช่อง HK50 ว่างเร็วขึ้น) · **ไม้ TP ที่โดนตัด 0** · |t| 0.32 = noise · ตัด 5 ไม้ใหญ่เหลือ 0
+#   => "ประกันราคาถูก" ไม่ใช่ตัวเพิ่มกำไร — ไม่ได้ดีขึ้นอย่างมีนัย แต่ก็ไม่แย่ลง (เกณฑ์ที่ล็อกไว้ก่อนรันผ่านครบ 3 ข้อ)
+# ทำไมต้องเริ่มที่ 3R (คัดกรองบนเส้นทาง 1H จริง 2026-10-07 · ชุดไม้คงที่ 247 ไม้):
+#   ล็อกที่ 2-2.5R ทุกระดับ −5.1 ถึง −13.4R · trailing ระยะ R −3.2 ถึง −16.9R — ไม้ที่เคยถึง 2R เป็น TP 44 vs BE 9
+#   และไม้ TP 1/4 ย่อจากจุดสูงสุดเกิน 1R ระหว่างทาง · ตัด TP ผิด 1 ไม้เสีย 2-3R ส่วนช่วย BE ได้ 0.5-1R
+#   ที่ 3R ขึ้นไปแทบไม่เหลือไม้ TP ที่ย่อลึกขนาดนั้น — ขั้นสูงกว่านี้/ต่ำกว่านี้อย่าเพิ่ม (ดู memory mfe-leak)
+BREAKEVEN_LADDER     = ((3.0, 1.5),)
 
 # ข้อความนำหน้าของ final_decision ตอนกฎ BE ยิง — **มีคนอ่านสตริงนี้จริง**
 # backtest_portfolio.py ใช้มันดูจากคอลัมน์ final ของ replay_cuts_*.csv ว่าไม้นั้นล็อกความเสี่ยง
@@ -1531,7 +1540,7 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
         "entry": entry, "sl": sl, "tp": tp, "lot": lot,
         "trail": trail, "initial_sl": initial_sl,
         "trailing_sl": trailing_sl, "desired_sl": desired_sl,
-        "be_lock": be_lock, "be_price": be_price,
+        "be_lock": be_lock, "be_price": be_price, "be_level": be_level,
         "sl_widen_capped": sl_widen_capped,
         "desired_tp": desired_tp,
         "entry_time": entry_time, "current_price": current_price,
@@ -1806,7 +1815,8 @@ def execute_decision(m: dict) -> None:
             # การขยับอื่น (เช่นขยาย SL รอบแรกหลังเปิดไม้) ไม่แจ้ง — ผู้ใช้ขอแค่ BE
             if m.get("be_lock") and not _price_moved(desired_sl, m["be_price"], _digits):
                 notify.notify_breakeven(symbol, m["direction"], ticket, entry, desired_sl,
-                                        m.get("r_multiple"), is_demo=is_demo_account())
+                                        m.get("r_multiple"), is_demo=is_demo_account(),
+                                        lock_r=m.get("be_level", 0.0))   # > 0 = ขั้น BREAKEVEN_LADDER
 
         # 4) ขยับ TP ตาม TP Trailing (เริ่มเมื่อใกล้ TP เดิม <= TRAIL_TP_TRIGGER_PCT)
         desired_tp = m["desired_tp"]
