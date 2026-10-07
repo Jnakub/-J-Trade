@@ -134,6 +134,11 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  tag _beladderT-L · 99:0 = identity check
      --trail-tp-buffer=X / --trail-tp-trigger=X  ทับ exit_monitor.TRAIL_TP_ATR_BUFFER (0.5 · 0 = ปิด
                  TP trailing) / TRAIL_TP_TRIGGER_PCT (1.0) · tag _trailtpbufX / _trailtptrigX
+     --tag=NAME  ต่อท้ายชื่อไฟล์ผลด้วย _NAME — ใช้ทุกครั้งที่หน้าต่างต่างจาก base (ไม่งั้นทับไฟล์ base)
+     --cap-reentry=W  ไม้ที่ถูกเพดานเวลาปิด กลับเข้าทิศเดิมได้ใน W วัน เมื่อราคาปิดเลยจุดสุดขั้วเดิม
+                 (ข้ามด่าน regime/run-up/cooldown/min-turn · ยังผ่าน R:R/SL/TP) · ใช้คู่ --max-hold · tag _capreW
+     --log-reasons  บันทึกเหตุผลที่ไม่เข้าไม้รายรอบสแกน (เวลา + regime + เหตุผล) -> replay_reasons_<sym><tag>.csv
+                 บันทึกอย่างเดียว ผลไม้ไม่เปลี่ยน
      --same-scan-reentry  ไม้ที่ broker ปิด (SL/BE/TP) คืนช่องในรอบสแกนนั้นเลย = ตรงกับ scheduler
                  ที่อ่าน positions_get ตอนสแกน (tag _samescan · ที่มาดูตรงที่ parse ธง)
 """
@@ -276,6 +281,23 @@ cut_log = []
 # ไว้ตอบคำถามที่ไม่มีเครื่องมือไหนตอบได้: **ค่าเสียโอกาสของการถือช่องไว้นาน** ซึ่งเป็น
 # เหตุผลเดียวที่กฎอย่าง slow trade มีอยู่ — เอาไฟล์ผลไปเดินต่อด้วย backtest_blocked_value.py
 log_blocked = "--log-blocked" in sys.argv
+# --log-reasons : บันทึกเหตุผลที่ไม่เข้าไม้ "รายรอบสแกน" พร้อมเวลาและ regime -> replay_reasons_<sym><tag>.csv
+# ตารางสรุปท้ายรอบ (`skips`) นับรวมทั้ง 2 ปี บอกไม่ได้ว่าเกิด "เมื่อไหร่" · เพิ่ม 2026-10-07 เพื่อตอบว่า
+# หลังไม้ถูกเพดานเวลาปิด แล้วราคาวิ่งต่อจนถึง TP เดิม ทำไมระบบไม่กลับเข้า · บันทึกอย่างเดียว ไม่แตะการตัดสินใจ
+log_reasons = "--log-reasons" in sys.argv
+reason_log = []
+# --cap-reentry=W : ไม้ที่ถูกเพดานเวลา (MAX_HOLD_DAYS) ปิด ได้ "สิทธิ์กลับเข้าทิศเดิม" W วัน เมื่อราคาปิดแท่ง
+# เลยจุดสุดขั้วที่ไม้นั้นเคยไปถึงก่อนถูกตัด — เข้าผ่านเส้นทาง Scoring แม้ regime จะเป็น CHOPPY/เขตเทา และข้าม
+# ด่านที่ขัดกับไอเดียโดยตรง (ราคาวิ่งมาแล้ว 24 ชม. · cooldown หลังถูกปฏิเสธ · เข้าตรงจุดสุดขั้ว) แต่ยังต้องผ่าน
+# ด่าน R:R / ระยะ SL / ระยะ TP ใน compute_entry ตามปกติ โดยใช้ **TP เดิมของไม้ที่ถูกตัด** (fib TP ใหม่ใกล้เกิน
+# จน R:R ไม่ผ่านทุกรอบ — ทดสอบ XAU 90 วัน 16/16 รอบ) · ไอเดียผู้ใช้ 2026-10-07 หลังพบว่าไม้ที่เพดาน 10 วันตัด
+# แล้วจะถึง TP 25/30 ไม้ระบบไม่กลับเข้าเลย (CHOPPY 60% ของช่วงนั้น) · ใช้คู่กับ --max-hold=N · ระบบจริงไม่มี
+_cr = next((a for a in sys.argv if a.startswith("--cap-reentry=")), None)
+cap_reentry_days = float(_cr.split("=", 1)[1]) if _cr else 0.0
+reentry_watch = None          # {"direction", "extreme", "expires"} ของไม้ล่าสุดที่ถูกเพดานปิด
+reentry_stats = {"ได้สิทธิ์ (ไม้ถูกเพดานปิด)": 0, "รอบที่ราคาเลยจุดเดิม (ช่องว่าง)": 0, "เข้าไม้จริง": 0,
+                 "สิทธิ์หมดอายุ": 0, "ยกเลิก: ไม้ Scoring ปกติเข้าแทน": 0}
+reentry_block = {}
 # --log-rr-blocked : บันทึกทุกรอบสแกนที่ setup Reversal (ไม่ใช่ flip) ถูกด่าน R:R ปฏิเสธ พร้อม SL/TP/ATR
 # -> replay_rrblocked_<sym><tag>.csv · บันทึกอย่างเดียว ไม่แตะการตัดสินใจ (2026-09-26 ใช้ดูว่าไม้ที่ติด
 # R:R หน้าตาเป็นยังไง ก่อนคิดวิธีแก้ — ข้อมูลเดิมจากรอบ --limit-rr เห็นเฉพาะที่ตั้ง order ได้)
@@ -937,6 +959,11 @@ def df1d_at(t):
 
 def note(reason):
     skips[reason] = skips.get(reason, 0) + 1
+    if cap_reentry_days and globals().get("_reentry"):
+        _k = re.sub(r"[-+]?\d[\d,.]*", "N", str(reason))[:60]
+        reentry_block[_k] = reentry_block.get(_k, 0) + 1
+    if log_reasons:   # now / _rg เป็นตัวแปรของ loop หลัก (ระดับโมดูล) — note ถูกเรียกจากใน loop เท่านั้น
+        reason_log.append({"time": now, "regime": _rg, "reason": reason})
 
 
 def slot_of(strategy):
@@ -966,6 +993,9 @@ def step_position(pos, key, t, bar, now):
     exit_monitor ตัวจริงทำงานที่ปลายชั่วโมง (now) ตรงกับ INTERVAL_SECONDS=3600 ของระบบจริง"""
     long_ = pos["direction"] == "Long"
     risk = abs(pos["entry"] - pos["sl0"])      # ระยะเสี่ยงตอนเข้า = ฐาน 1R ของบัญชี
+    if cap_reentry_days:                       # --cap-reentry: จุดสุดขั้วที่ไม้เคยไปถึง (ไว้เป็นเส้นกลับเข้า)
+        pos["hi"] = max(pos.get("hi", pos["entry"]), float(bar["high"]))
+        pos["lo"] = min(pos.get("lo", pos["entry"]), float(bar["low"]))
 
     # 1) broker: SL/TP ทำงานระหว่างแท่งเสมอ ไม่ต้องรอ monitor
     if (bar["low"] <= pos["sl"]) if long_ else (bar["high"] >= pos["sl"]):
@@ -1096,6 +1126,7 @@ for n, row in enumerate(clock.to_dict("records")):
     # แก้โดยเลื่อนเวลาตัดสินใจเป็น now = t + 1h ทั้งหมด (ราคาเข้ายังเป็น bar["close"] เหมือนเดิม
     # ซึ่งตอนนี้กลายเป็น "ราคา ณ วินาทีที่ตัดสินใจ" พอดี ตรงกับ scheduler ที่รันแล้วยิงราคาตลาด)
     now = t + timedelta(hours=1)
+    _reentry = False
 
     # นับ regime ของ "ทุกรอบสแกน" ก่อนด่านใดๆ — ตารางเหตุผลที่ไม่เข้าด้านล่างนับเฉพาะรอบที่
     # เดินมาถึงด่านนั้นๆ รอบที่ถือไม้อยู่จึงหายไปทั้งหมด ทำให้ตอบไม่ได้ว่า "REVERSAL-READY
@@ -1118,6 +1149,14 @@ for n, row in enumerate(clock.to_dict("records")):
         _rec = step_position(_p, _k, t, bar, now)
         if _rec:
             trades.append(_rec)
+            if (cap_reentry_days and _rec["how"] not in ("TP", "SL", "BE")
+                    and _rec["strategy"] != "Sideway"
+                    and (now - _rec["time"]) >= timedelta(days=MAX_HOLD_DAYS) - timedelta(hours=1)):
+                reentry_watch = {"direction": _rec["direction"], "tp": _rec["tp"],
+                                 "extreme": (_rec.get("hi", _rec["entry"]) if _rec["direction"] == "Long"
+                                             else _rec.get("lo", _rec["entry"])),
+                                 "expires": now + timedelta(days=cap_reentry_days)}
+                reentry_stats["ได้สิทธิ์ (ไม้ถูกเพดานปิด)"] += 1
             if same_scan_reentry and _rec["how"] in _BROKER_HOW:
                 _occupied.discard(_k)      # broker ปิดไปก่อนสแกน = live เห็นช่องว่างแล้ว
 
@@ -1149,14 +1188,26 @@ for n, row in enumerate(clock.to_dict("records")):
             limit_stats["ยกเลิก: แตะ TP ก่อน"] += 1
             pending["log"].update(status="ยกเลิก: แตะ TP", resolved=now); pending = None
 
+    # --cap-reentry: สิทธิ์กลับเข้าของไม้ที่ถูกเพดานปิด — ราคาปิดแท่งเลยจุดสุดขั้วเดิม + ช่อง Scoring ว่าง
+    if reentry_watch is not None:
+        if now >= reentry_watch["expires"]:
+            reentry_stats["สิทธิ์หมดอายุ"] += 1
+            reentry_watch = None
+        elif slot_of("Scoring") not in _occupied:
+            _px = float(bar["close"])
+            if (_px > reentry_watch["extreme"]) if reentry_watch["direction"] == "Long" \
+                    else (_px < reentry_watch["extreme"]):
+                _reentry = True
+                reentry_stats["รอบที่ราคาเลยจุดเดิม (ช่องว่าง)"] += 1
+
     # กลยุทธ์ที่ regime รอบนี้จะเปิด (ไม่มีทางเกิดพร้อมกัน — regime เป็นตัวเลือกให้ตัวเดียว)
     _sw = False
-    if sideway_enabled and _rg in REGIME_NO_TRADE:
+    if sideway_enabled and _rg in REGIME_NO_TRADE and not _reentry:
         try:
             _sw = regime_eff(now)["adx_now"] < regime_check.ADX_CHOPPY
         except Exception:
             _sw = False
-    _want = ("Sideway" if _sw else
+    _want = ("Scoring" if _reentry else "Sideway" if _sw else
              "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None))
     _shadow = False
     if _want is not None and slot_of(_want) in _occupied:
@@ -1192,7 +1243,7 @@ for n, row in enumerate(clock.to_dict("records")):
         note(f"regime error: {type(exc).__name__} {str(exc)[:40]}"); fate("regime error")
         continue
     regime = rinfo["regime"]
-    if regime in REGIME_NO_TRADE and not _sw:
+    if regime in REGIME_NO_TRADE and not _sw and not _reentry:
         note(f"regime = {regime}")
         continue
     if _sw:
@@ -1205,19 +1256,24 @@ for n, row in enumerate(clock.to_dict("records")):
             direction = sl_info["direction"]
             sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Sideway"
             exec_sl, atr_entry_ = sl_info["exec_sl"], None      # None = ไม่มี ATR trailing / TP_MAX_ATR
-        elif regime in REGIME_TREND:
+        elif regime in REGIME_TREND or _reentry:
             df_1d = df1d_at(now)
             direction, _ = get_trend_bias(symbol, df_1d)
+            if _reentry:                       # --cap-reentry: ทิศของไม้ที่ถูกตัด ไม่ใช่ bias ตอนนี้
+                direction = reentry_watch["direction"]
             if direction is None:
                 note("หา bias ไม่ได้")
                 continue
             _struct = rinfo["structure"]["trend"]
-            if scoring_struct_match and not _struct.startswith(direction):
+            if scoring_struct_match and not _reentry and not _struct.startswith(direction):
                 note(f"bias {direction} สวนโครงสร้าง 4H ({_struct})")
                 fate("bias สวนโครงสร้าง 4H")
                 continue
             sl_info = compute_entry(symbol, direction, entry, as_of=now, df_1d=df_1d,
-                                    min_rr=scoring_min_rr)   # --scoring-min-rr (None = ค่าระบบจริง)
+                                    min_rr=scoring_min_rr,   # --scoring-min-rr (None = ค่าระบบจริง)
+                                    # --cap-reentry: ไปต่อที่ TP เดิมของไม้ที่ถูกตัด (ผู้ใช้เลือก 2026-10-07)
+                                    # ทุกด่านใน compute_entry ตรวจกับ TP นี้ — fib TP ใหม่ใกล้เกินจน R:R ไม่ผ่านทุกรอบ
+                                    tp=reentry_watch["tp"] if _reentry else None)
             # exec_sl มาจาก compute_entry แล้ว (ด่าน R:R ใช้ตัวนี้ตรวจ) ไม่คำนวณซ้ำที่นี่
             sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Scoring"
             exec_sl, atr_entry_ = sl_info["exec_sl"], sl_info["atr_entry"]
@@ -1379,7 +1435,7 @@ for n, row in enumerate(clock.to_dict("records")):
     # --max-runup-24h : ข้ามไม้ที่ "ราคาวิ่งไปทางเรามาก่อนแล้ว" (เข้าตอนปลายทาง) — วัดเทียบเป็น R
     # ด้วยระยะเสี่ยงจริงของไม้นี้ ใช้ 24 แท่ง 1H ย้อนหลังในนาฬิกาเดียวกับ replay (fx/index ที่มี
     # วันหยุดจึงเท่ากับ 24 ชั่วโมง "ที่ตลาดเปิด" ไม่ใช่ 24 ชม.ตามปฏิทิน)
-    if max_runup is not None and strategy == "Scoring" and n >= 24:
+    if max_runup is not None and strategy == "Scoring" and n >= 24 and not _reentry:
         _risk = abs(entry - sl)
         _past = float(clock["close"].iloc[n - 24])
         _runup = ((entry - _past) if direction == "Long" else (_past - entry)) / _risk if _risk else 0.0
@@ -1393,14 +1449,14 @@ for n, row in enumerate(clock.to_dict("records")):
     # บล็อกจาก cooldown ที่ **Scoring** เป็นคนตั้ง ซึ่ง (ก) ไม่ตรงกับ scheduler.py ที่บล็อก 4d
     # ซ้อนอยู่ใต้เงื่อนไข Scoring อยู่แล้ว = live ต่างจาก backtest เงียบๆ และ (ข) ผิดเจตนา —
     # การที่ราคาอยู่ตรงจุดสุดขั้วคือ "เหตุผลที่ Reversal ควรเข้า" ไม่ใช่เหตุผลที่ควรห้าม
-    if reject_cd and strategy == "Scoring" \
+    if reject_cd and strategy == "Scoring" and not _reentry \
        and reject_until.get(direction) is not None and now < reject_until[direction]:
         note(f"cooldown หลังถูกด่านปฏิเสธ ({reject_cd} ชม.)")
         continue
 
     # --min-turn : ด่านฝาแฝดคนละด้าน — กันเข้าไม้ "ตรงจุดสุดขั้วพอดี" (ยังไม่เด้งให้เห็น)
     # ใช้หน้าต่าง 24 แท่งชุดเดียวกับ run-up guard ข้างบน (clock เดียวกัน = นาฬิกาตลาดเปิด)
-    if min_turn is not None and strategy == "Scoring" and n >= 24:
+    if min_turn is not None and strategy == "Scoring" and n >= 24 and not _reentry:
         _risk = abs(entry - sl)
         _w = clock.iloc[n - 24:n]
         _turn = ((entry - float(_w["low"].min())) if direction == "Long"
@@ -1514,6 +1570,14 @@ for n, row in enumerate(clock.to_dict("records")):
            # pinned_swing = SL โครงสร้าง (ถอย exec_sl กลับด้วยตัวคูณเดียวกับที่ขยับออกไป)
            "pinned_swing": _pin,
            "pinned_atr_entry": atr_entry}
+    if _reentry:
+        positions[slot_of(strategy)]["reentry"] = True
+        positions[slot_of(strategy)]["regime"] = f"REENTRY/{regime}"
+        reentry_stats["เข้าไม้จริง"] += 1
+        reentry_watch = None
+    elif reentry_watch is not None and strategy == "Scoring":
+        reentry_stats["ยกเลิก: ไม้ Scoring ปกติเข้าแทน"] += 1
+        reentry_watch = None
     if _limit_hit_sl:
         entry_limit_stats["เติมแล้วโดน SL แท่งเดียวกัน"] += 1
         trades.append(close_pos(positions[slot_of(strategy)], slot_of(strategy), now, -1.0, "SL"))
@@ -1532,6 +1596,16 @@ print(f"  {'-' * 74}")
 print("  เหตุผลที่ไม่เข้า (นับรอบสแกน):")
 for k, v in sorted(skips.items(), key=lambda x: -x[1])[:10]:
     print(f"    {v:>6}  {k}")
+
+if cap_reentry_days:
+    print(f"  {'-' * 74}")
+    print(f"  --cap-reentry={cap_reentry_days:g} วัน:")
+    for k, v in reentry_stats.items():
+        print(f"    {v:>6}  {k}")
+    if reentry_block:
+        print("    รอบที่ได้สิทธิ์แต่ถูกด่านอื่นปฏิเสธ:")
+        for k, v in sorted(reentry_block.items(), key=lambda x: -x[1])[:6]:
+            print(f"      {v:>5}  {k}")
 
 # regime ของทุกรอบสแกน (รวมรอบที่ถือไม้อยู่ ซึ่งตารางข้างบนมองไม่เห็น)
 print(f"  {'-' * 74}")
@@ -1556,6 +1630,9 @@ if limit_rr:
 
 if t.empty:
     print(f"{'=' * 78}")
+    if log_reasons:   # ไม่มีไม้ปิดก็ยังมีเหตุผลรายรอบให้ดู (เคส GBPCHF หน้าต่าง 45 วัน) — tag เฉพาะ --tag
+        _ut = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tag=")), "")
+        pd.DataFrame(reason_log).to_csv(f"replay_reasons_{symbol}{'_' + _ut if _ut else ''}.csv", index=False)
     sys.exit(0)
 
 # นิยาม "ชนะ" — 2026-09-20 เปลี่ยนจาก `R > 0` เป็น `R > WIN_THRESHOLD_R` ตามคำสั่งผู้ใช้
@@ -1597,6 +1674,11 @@ for lbl, g in (("ครึ่งแรก", t[t["time"] < mid]), ("ครึ่�
 print(f"{'=' * 78}")
 # รอบที่สวนค่าระบบจริงเขียนคนละไฟล์ — ไม่งั้นทับผลรอบปกติที่เอาไว้เทียบ
 _tag = ""
+# --tag=NAME : ต่อท้ายชื่อไฟล์ผลเอง — รอบที่ค่าระบบเหมือน base แต่หน้าต่างต่าง (จำนวนวัน / --end) ไม่ติด tag
+# อัตโนมัติ จึงทับ replay_trades_<sym>.csv ของ base เงียบๆ (เพิ่ม 2026-10-07 ตอนรันช่วงสั้นเทียบกับ log ระบบจริง)
+_user_tag = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tag=")), "")
+if _user_tag:
+    _tag += f"_{_user_tag}"
 if _sr_arg:
     _tag += "_skip-" + "-".join(r.replace(" ", "") for r in _skip)
 if _rms_arg:
@@ -1708,6 +1790,8 @@ if tp_cd != float(config.TP_COOLDOWN_HOURS or 0):   # ติด tag เฉพา
     _tag += f"_tpcd{tp_cd:g}"
 if _mh_arg:
     _tag += "_nomaxhold" if MAX_HOLD_DAYS >= 1e6 else f"_maxhold{MAX_HOLD_DAYS:g}"
+if cap_reentry_days:
+    _tag += f"_capre{cap_reentry_days:g}"
 if live_spread:      # ผลรอบนี้ขึ้นกับเวลาที่รัน — อย่าให้ทับไฟล์ base ที่เทียบข้ามรอบได้
     _tag += "_livespread"
 if no_breakeven:
@@ -1757,6 +1841,9 @@ if log_cuts:
     (pd.DataFrame(cut_log) if cut_log else pd.DataFrame(columns=_cut_cols)).to_csv(
         f"replay_cuts_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
+if log_reasons:
+    pd.DataFrame(reason_log).to_csv(f"replay_reasons_{symbol}{_tag}.csv", index=False)
+    print(f"  เขียนเหตุผลที่ไม่เข้า {len(reason_log)} บรรทัดลง replay_reasons_{symbol}{_tag}.csv")
 if log_blocked:
     pd.DataFrame(blocked_log).to_csv(f"replay_blocked_{symbol}{_tag}.csv", index=False)
     print(f"  เขียนสัญญาณเงา {len(blocked_log)} รอบลง replay_blocked_{symbol}{_tag}.csv "
