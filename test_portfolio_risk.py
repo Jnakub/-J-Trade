@@ -371,19 +371,21 @@ results += [
 # แทน notify ด้วยตัวจด — ไม่มีข้อความไป Telegram จริง
 _be_sent = []
 _saved_be = exit_monitor.notify.notify_breakeven
-exit_monitor.notify.notify_breakeven = lambda *a, **k: _be_sent.append(a)
+exit_monitor.notify.notify_breakeven = lambda *a, **k: _be_sent.append(k.get("lock_r", 0.0))
 
 
-def be_check(label, sl, desired_sl, be_lock, be_price, want_notify):
+def be_check(label, sl, desired_sl, be_lock, be_price, want_notify, be_level=0.0, want_lock=0.0):
     _sent.clear(); _be_sent.clear()
     m = {"ticket": 7, "symbol": "XAUUSDm", "direction": "Long", "lot": 0.2, "entry": 4000.0,
          "sl": sl, "tp": 4300.0, "recommended_keep_pct": 100, "desired_sl": desired_sl,
-         "desired_tp": None, "be_lock": be_lock, "be_price": be_price, "r_multiple": 1.52,
+         "desired_tp": None, "be_lock": be_lock, "be_price": be_price, "be_level": be_level,
+         "r_multiple": 1.52,
          "final_decision": ("ทดสอบ", "")}
     with contextlib.redirect_stdout(io.StringIO()):
         exit_monitor.execute_decision(m)
-    ok = (len(_be_sent) == 1) == want_notify
-    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {'แจ้ง' if _be_sent else 'ไม่แจ้ง'}")
+    ok = (len(_be_sent) == 1) == want_notify and (not _be_sent or abs(_be_sent[0] - want_lock) < 1e-9)
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> "
+          f"{('แจ้ง lock ' + format(_be_sent[0], '+g')) if _be_sent else 'ไม่แจ้ง'}")
     return ok
 
 
@@ -393,7 +395,14 @@ results += [
     be_check("รอบถัดไป SL อยู่ที่ BE แล้ว -> ไม่ส่ง ไม่แจ้งซ้ำ", 4000.0, 4000.0, True, 4000.0, False),
     be_check("ขยับ SL ที่ไม่ใช่ BE (ยังไม่ถึง 1.5R) -> ไม่แจ้ง", 3900.0, 3890.0, False, 4000.0, False),
     be_check("be_lock แต่ SL ไปที่อื่น ไม่ใช่ be_price -> ไม่แจ้ง", 3900.0, 3950.0, True, 4000.0, False),
+    # 2026-10-07 BREAKEVEN_LADDER ((3.0, 1.5),): ถึง 3R -> SL ไป +1.5R (entry 4000 · 1R = 100) -> แจ้ง "ล็อกกำไร"
+    be_check("ถึง 3R ขยับ SL entry -> +1.5R -> แจ้งล็อกกำไร +1.5", 4000.0, 4150.0, True, 4150.0, True,
+             be_level=1.5, want_lock=1.5),
 ]
+_ladder_ok = exit_monitor.BREAKEVEN_LADDER == ((3.0, 1.5),)
+print(f"  [{'ok  ' if _ladder_ok else 'FAIL'}] {'BREAKEVEN_LADDER = ((3.0, 1.5),) (ระบบจริง 2026-10-07)':52} "
+      f"-> {exit_monitor.BREAKEVEN_LADDER}")
+results.append(_ladder_ok)
 exit_monitor.notify.notify_breakeven = _saved_be
 for _k, _v in _saved_em.items():
     setattr(exit_monitor, _k, _v)

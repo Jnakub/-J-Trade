@@ -90,13 +90,16 @@ def notify_partial_close(symbol: str, ticket: int, close_vol: float,
 
 
 def notify_breakeven(symbol: str, direction: str, ticket: int, entry: float,
-                     new_sl: float, r_multiple: float | None, is_demo: bool = True) -> None:
+                     new_sl: float, r_multiple: float | None, is_demo: bool = True,
+                     lock_r: float = 0.0) -> None:
     """แจ้งตอน exit_monitor เลื่อน SL ไปจุด BE — 2026-10-05 ผู้ใช้ขอ (เดิมรู้แค่ตอนเปิด/ปิดไม้)
-    แทน notify_sl_moved เดิมที่ไม่เคยถูกเรียกเลยสักที่"""
+    แทน notify_sl_moved เดิมที่ไม่เคยถูกเรียกเลยสักที่
+    lock_r > 0 = ขั้นบันได BREAKEVEN_LADDER (เช่น ถึง 3R ล็อก +1.5R · 2026-10-07) แยกหัวข้อไม่ให้อ่านเป็น "BE" """
     account_tag = "DEMO" if is_demo else "⚠️ REAL"
     r_txt = f"   ตอนนี้ {r_multiple:+.2f}R" if r_multiple is not None else ""
+    title = f"🟣 <b>ล็อกกำไร {lock_r:+g}R</b>" if lock_r > 0 else "🔵 <b>เลื่อน SL ไป BE</b>"
     send(
-        f"🔵 <b>เลื่อน SL ไป BE</b> [{account_tag}]\n"
+        f"{title} [{account_tag}]\n"
         f"{symbol}  {direction}\n"
         f"SL ใหม่: {new_sl:,.3f}   (Entry: {entry:,.3f}){r_txt}\n"
         f"Ticket: #{ticket}"
