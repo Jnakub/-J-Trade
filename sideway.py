@@ -6,6 +6,7 @@
 
 กฎ (ทุกข้อตรงกับสคริปต์คัดกรองที่วัดไว้):
   1. ADX 4H < regime_check.ADX_CHOPPY ติดกัน ≥ SIDEWAY_MIN_RUN_BARS แท่ง (แท่ง 4H ที่ปิดแล้ว)
+     และ ADX แท่งปิดล่าสุด ≥ SIDEWAY_MIN_ENTRY_ADX (2026-10-08 · ตลาดนิ่งสนิทเกินไม่เข้า)
   2. กรอบ = high P90 / low P10 ของแท่ง 4H ทั้งช่วง sideway · กว้าง ≥ SIDEWAY_MIN_WIDTH_PCT % ของราคา
   3. Long: ราคาอยู่ใน SIDEWAY_ZONE ล่างของกรอบ + structure (slope regression ราคาปิด 4H ย้อน
      STRUCT_REG_N แท่ง) ขึ้น + แท่ง 1H ปิดล่าสุดเป็นแท่งเขียวและปิดสูงกว่าแท่งก่อน (Short กลับด้าน)
@@ -63,6 +64,10 @@ def compute_sideway_entry(symbol: str, entry: float, as_of=None) -> dict:
         raise ValueError(f"Sideway: ADX 4H < {rc.ADX_CHOPPY} ติดกันแค่ {run} แท่ง 4H (~{run * 4 / 24:.1f} วัน) "
                          f"ต้อง ≥ {_need} แท่ง (~{_need * 4 / 24:.1f} วัน) · อีก {_need - run} แท่ง "
                          f"(~{(_need - run) * 4 / 24:.1f} วัน) ถ้า ADX ยังต่ำต่อเนื่อง")
+    if adx[k] < config.SIDEWAY_MIN_ENTRY_ADX:
+        # ตลาดนิ่งสนิทเกิน — ไม่มีการไหลให้ราคากลับมาหาค่ากลาง (เหตุผล/ผลทดสอบที่ config.SIDEWAY_MIN_ENTRY_ADX)
+        raise ValueError(f"Sideway: ADX 4H {adx[k]:.1f} < {config.SIDEWAY_MIN_ENTRY_ADX:g} "
+                         f"(ตลาดนิ่งเกิน — กรอบแบบนี้แพ้มากสุดใน backtest)")
     k0 = k - run + 1
     hi, lo, cl = (d4[c].to_numpy(dtype=float) for c in ("high", "low", "close"))
     rh = float(np.percentile(hi[k0:k + 1], config.SIDEWAY_EDGE_PCTL))
