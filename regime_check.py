@@ -275,6 +275,18 @@ ADX_SWING_PROMINENCE  = 3.0
 
 SWING_LEFT_RIGHT = 4
 SWING_TOLERANCE  = 0.22   # 2026-07-24: เปลี่ยนจาก 0.25 — ยังไม่มี backtest ยืนยัน
+# DIV_SWING_RIGHT_* — (2026-10-10 · None = SWING_LEFT_RIGHT) จำนวนแท่ง 4H ฝั่งขวาที่ใช้ยืนยัน swing
+# **เฉพาะใน check_divergence** (Key Level / check_structure ยังใช้ SWING_LEFT_RIGHT) · ที่มา: Reversal เข้าช้า — ราคาเข้าห่าง
+# swing low B median 1.64 ATR4H (setup ที่ติด R:R 2.85) และไม้ที่เข้าใกล้ B ทำกำไรเกือบทั้งหมด · ต้องรอ 4 แท่ง = 16 ชม. หลังก้น
+# ใช้ backtest_replay --rev-swing-right=N (ตั้งคู่กับ reversal.SWING_RIGHT_LONG/SHORT ให้ SL/TP อ้างจุดเดียวกัน)
+# แยกสองฝั่ง (2026-10-10): highs = bearish divergence (Reversal Short + Breakout flip) · lows = bullish (Reversal Long)
+# 🔻 สถานะปัจจุบัน: **LOWS = 2 ตั้งแต่ 2026-10-10 (คำสั่งผู้ใช้ · คู่กับ reversal.SWING_RIGHT_LONG = 2)** · HIGHS คง 4
+#    replay เต็ม (+ไม่ให้ Reversal จุด TP->entry): base 376 ไม้ +180.91R -> 378 ไม้ +191.46R (ΔR +10.55) · Breakout ไม่ขยับสักไม้
+#    Reversal 30 +14.87 -> 32 +25.05 · **ตกเกณฑ์ 2/3**: churn |t| 1.15 · ตัด 5 รายการ −1.65 · ดีขึ้น 6/7 symbol ✓
+#    ค่า 2 เลือกหลังเห็น 4/3/2 · ยังไม่ได้เช็คที่ราบ (1/3) และยุค 2023-24 · ตารางเต็มที่ backtest_replay --rev-swing-right
+#    ทั้งสองฝั่ง = 2 (--rev-swing-right=2) Breakout −11.52R จากไม้ใหม่ 39 ไม้ −7.85 = เหตุผลที่ไม่แตะ HIGHS
+DIV_SWING_RIGHT_HIGHS = None
+DIV_SWING_RIGHT_LOWS  = 2
 
 # Key Level — โซนแนวรับ/แนวต้านใหญ่ (รวม Swing High+Low เป็นโซนเดียวกัน — support เก่ากลายเป็น resistance ใหม่ได้)
 # ค่าจาก backtest จริง (BTC/XAU, วัดว่าราคาที่แตะโซน 'เด้งจริง' กี่ % ใน 6 แท่งถัดไป):
@@ -976,10 +988,12 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     if not DIV_SWING_VOL_FILTER:          # โหมดทดลอง — ดู comment ที่ตัวแปรนั้น
         vol_multiplier, wick_ratio_min = 0.0, None
     rsi = calc_rsi(df["close"])
-    highs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
+    _right_h = DIV_SWING_RIGHT_HIGHS or SWING_LEFT_RIGHT    # ดูที่นิยาม DIV_SWING_RIGHT_*
+    _right_l = DIV_SWING_RIGHT_LOWS or SWING_LEFT_RIGHT
+    highs = find_swing_highs(df, left=SWING_LEFT_RIGHT, right=_right_h,
                              tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,
                              wick_ratio_min=wick_ratio_min)
-    lows  = find_swing_lows(df, left=SWING_LEFT_RIGHT, right=SWING_LEFT_RIGHT,
+    lows  = find_swing_lows(df, left=SWING_LEFT_RIGHT, right=_right_l,
                             tolerance_atr=SWING_TOLERANCE, vol_multiplier=vol_multiplier,
                             wick_ratio_min=wick_ratio_min)
     last_idx = len(df) - 1

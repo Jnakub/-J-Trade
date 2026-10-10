@@ -252,6 +252,11 @@ MAX_RR_HARD_BLOCK = 15.0  # 2026-08-02: R:R ที่สูงเกินจร
 # 🔻 สถานะปัจจุบัน: **1.2 คู่กับ REVERSAL_TP_FIB_RATIO = 2.0 ตั้งแต่ 2026-09-26 (คำสั่งผู้ใช้)** — ดูตาราง
 #    ที่ REVERSAL_TP_FIB_RATIO ข้างล่าง · ขั้นต่ำตัวนี้ตัวเดียวเป็นปุ่มแบน (0.3-1.2 เท่ากันใน noise) ที่เลือก 1.2
 #    เพราะคู่กับ TP 2 ได้ R เท่ากับ 1.0 ด้วยไม้น้อยกว่า (22 vs 25) · ก่อนหน้านี้วันเดียวกัน = 1.0 (base 173 ไม้)
+# 🔻 2026-10-10 ลองทางที่ไม่ใช่ลดค่านี้: setup ที่ติดด่านนี้ (72 setup · base 376 ไม้ · --log-rr-blocked) เข้าที่ตลาดชั่วโมงแรก
+#    ด้วย SL แคบ k × ATR1H แทน SL ที่ swing (เดิม median 7.6 ATR · R:R 0.61) — คัดกรอง 1H first-touch ไม่มีกฎ exit:
+#    setup ที่ base ไม่เคยเข้า 61 setup: swing +4.64R (+0.08/ไม้) · k2 +0.83 · k3 −10.78 · k4 −6.41 · k5 +1.24 = ศูนย์ทุกค่า
+#    setup ที่ base เข้าทีหลัง 11 setup: ไม้จริงที่รอ R:R ได้ +6.40 vs เข้าก่อนด้วย SL แคบ ≤ +2.62 → การรอดีกว่า
+#    👉 setup ที่มาช้าไม่มี edge ไม่ว่าจะวาง SL แบบไหน · ปัญหาไม่ใช่เรขาคณิต SL/TP (สคริปต์ scratchpad rr_rescue.py)
 MIN_RR_HARD_BLOCK_REVERSAL = 1.2
 
 # REVERSAL_TP_FIB_RATIO — อัตราส่วน Fibonacci extension ของไม้ Reversal แยกจาก TP_FIB_RATIO (Scoring ใช้)
@@ -715,6 +720,11 @@ SLOT_PER_STRATEGY = True
 # ทำงานครั้งเดียวตอนไม้ใหม่เปิด (scheduler._tp_to_entry_on_opposite) ไม่ย้อนกลับไปแตะคู่ที่เปิดก่อนวันนี้
 # TP trailing ของ exit_monitor ratchet เข้าอย่างเดียว (min/max กับ TP ปัจจุบัน) จึงไม่ดึง TP นี้กลับออกไป
 TP_TO_ENTRY_ON_OPPOSITE = True
+# ไม้ Reversal ใหม่จุดชนวนกฎข้างบนได้ไหม — 2026-10-10 ปิด (คำสั่งผู้ใช้ คู่กับ regime_check.DIV_SWING_RIGHT_LOWS = 2):
+# Reversal ที่เข้าเร็วขึ้นไปย้าย TP ไม้ Scoring BTC Short 2026-01-22 (+2.41R -> 0) ทั้งที่ไม้ Reversal นั้นเองแพ้ −1.00
+# บน base เดิมปิดอย่างเดียว = +0.37R (เปลี่ยน 2 ไม้) · ไม้ Scoring ใหม่ยังย้าย TP ไม้ Reversal เก่าได้ตามเดิม
+# scheduler + backtest_replay อ่านค่าเดียวกัน (replay --tp-entry-rev-trigger = เปิดกลับเพื่อเทียบ)
+TP_TO_ENTRY_REVERSAL_TRIGGERS = False
 
 
 def slot_of(strategy: str) -> str:

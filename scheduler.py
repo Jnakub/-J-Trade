@@ -24,7 +24,7 @@ from config import (
     SLOT_PER_STRATEGY, REVERSAL_SHORT_NEEDS_1D_TREND,
     MAX_PORTFOLIO_RISK_R, MAX_GROUP_RISK_R, CORRELATION_GROUPS,
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
-    BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE,
+    BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE, TP_TO_ENTRY_REVERSAL_TRIGGERS,
     BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
 )
 from mt5_connect import connect, get_account_balance
@@ -647,7 +647,8 @@ def scan_symbol(symbol: str) -> None:
                              strategy=strategy,
                              pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
-        if TP_TO_ENTRY_ON_OPPOSITE and ticket and strategy != "Sideway":
+        if TP_TO_ENTRY_ON_OPPOSITE and ticket and strategy != "Sideway" \
+                and (strategy != "Reversal" or TP_TO_ENTRY_REVERSAL_TRIGGERS):   # ดู config
             _tp_to_entry_on_opposite(symbol, direction, ticket)
 
     except ValueError as exc:
