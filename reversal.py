@@ -62,6 +62,9 @@ MIN_SL_OVERRIDE    = None
 TP_FROM_ENTRY      = False
 _MIN_RR_OVERRIDE   = None   # backtest_replay --rev-min-rr ตั้งให้ (None = ใช้ค่าจาก config)
 _TP_RATIO_OVERRIDE = None   # backtest_replay --rev-tp-ratio ตั้งให้ (None = config.REVERSAL_TP_FIB_RATIO)
+# แท่ง 4H ฝั่งขวาที่ยืนยัน swing ของ SL/TP แยกตามทิศไม้ — backtest_replay --rev-swing-right[-lows] ตั้งคู่กับ regime_check.DIV_SWING_RIGHT_*
+SWING_RIGHT_LONG   = 2      # 2026-10-10 คำสั่งผู้ใช้ (เดิม 4) — เหตุผล/ตัวเลขที่ regime_check.DIV_SWING_RIGHT_LOWS
+SWING_RIGHT_SHORT  = 4
 
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
@@ -91,6 +94,7 @@ def compute_reversal_entry(symbol: str, direction: str, entry: float,
     (2026-08-02, ตามแบบ scoring.compute_entry) ให้ backtest เรียกตัวนี้ตรงๆ ได้ ไม่ต้อง copy
     logic มาเขียนซ้ำ — มีผลเฉพาะตอนไม่ได้ส่ง df_4h มาเอง (จะ fetch ย้อนหลังแทนสด)"""
     is_long = direction.capitalize() == "Long"
+    _swing_right = SWING_RIGHT_LONG if is_long else SWING_RIGHT_SHORT
 
     if df_4h is None:
         df_4h = get_ohlcv_real(symbol, "4H", bars=210, as_of=as_of)
@@ -116,7 +120,7 @@ def compute_reversal_entry(symbol: str, direction: str, entry: float,
     sl_info = {}
     if sl is None:
         # ส่ง entry เป็น current_price ด้วยเหตุผลเดียวกับ scoring.py (ดู swing.py)
-        sl_info = find_sl_from_structure(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
+        sl_info = find_sl_from_structure(df_4h, direction, left=4, right=_swing_right, tolerance_atr=0.22,
                                          vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min,
                                          current_price=entry)
         if not sl_info.get("passed"):
@@ -150,7 +154,7 @@ def compute_reversal_entry(symbol: str, direction: str, entry: float,
     fib_info = {}
     if tp is None:
         _ratio = REVERSAL_TP_FIB_RATIO if _TP_RATIO_OVERRIDE is None else _TP_RATIO_OVERRIDE
-        fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=4, tolerance_atr=0.22,
+        fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=_swing_right, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min,
                                            ratio=_ratio)
         if fib_info.get("passed"):

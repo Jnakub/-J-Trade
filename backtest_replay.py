@@ -525,6 +525,21 @@ if "--rev-choch" in sys.argv:
 if "--no-rev-choch" in sys.argv:
     rev_choch = False
 
+# --rev-struct-opp : Reversal (ไม่ใช่ไม้ flip) ต้องมีโครงสร้าง 4H (rinfo["structure"] — regression เมื่อ
+# USE_STRUCT_REG) เป็นเทรนด์ฝั่งตรงข้ามไม้ = "มีเทรนด์ให้กลับตัว" วัดด้วยราคาแทน ADX peak
+# ที่มา 2026-10-09 (คำขอผู้ใช้ "หาวิธีแก้ 104 ไม้ที่ไม่ใช่ ADX"): คัดกรองไม้ Reversal 104 ไม้ของรอบปิด peak
+# ด้วย 4 เงื่อนไขที่ล็อกทิศไว้ก่อน ตัวนี้ดีสุด — เก็บ 83 ไม้ +26.23R (t 2.21) vs peak 28.5 เก็บ 30 ไม้ +14.87R
+# (t 2.14) · ไม้ที่ทิ้ง 21 ไม้ avg −0.45 · แต่ permutation (16 กฎ) p 0.189 = ยังไม่ผ่าน → ต้องดู replay เต็ม
+# ไม่ใช่ CHoCH (ข้างบน): CHoCH ถามว่าโครงสร้างเดิม "พังแล้วหรือยัง" ตัวนี้ถามว่า "เคยมีเทรนด์ไหม"
+# 🔴 replay เต็ม 2026-10-09 (--adx-min-peak=0 --rev-struct-opp · --end=2026-09-24T00:00) **ไม่เอา**:
+#    base 376 ไม้ +180.91R -> 429 ไม้ +179.25R (ΔR −1.66 · ตัด 5 รายการใหญ่ −15.14 · ดีขึ้น 3/10 symbol)
+#    Reversal 30 -> 91 ไม้ +5.00R (ไม้ใหม่ 63 ไม้ +3.92 = +0.06/ไม้ · คัดกรองทำนาย ~+10.3 = สูงเกิน 2.6 เท่า)
+#    ต้นทุนเดิมของการปิด peak ยังอยู่ครบ: Sideway −5.86 (แท่งกลายเป็น REVERSAL-READY) · Scoring −2.89 (TP->entry)
+#    ลองย้ายเงื่อนไขเดียวกันเข้าขั้นจัด regime ด้วย (ไม่ผ่าน = REVERSAL-WATCH ให้ Sideway เข้าได้ · ธงถูกลบแล้วพร้อมโค้ดใน
+#    regime_check) + --tp-entry-no-rev: 425 ไม้ +180.69R (ΔR −0.22) · Sideway ยัง −5.62 เพราะแท่งที่ผ่านโครงสร้างแต่ Reversal
+#    ติดด่านอื่นยังเป็น READY · ไม่เอา — ดูทางลำดับที่ --sideway-first ข้างล่าง
+rev_struct_opp = "--rev-struct-opp" in sys.argv
+
 # --scoring-struct-match / --no-scoring-struct-match : ทับ config.SCORING_NEEDS_STRUCTURE_MATCH
 # ทิศ Scoring (trend_flip 1D) ต้องตรงกับโครงสร้าง 4H ไหม — เหตุผล+ตัวเลขอยู่ที่ค่าคงที่นั้น
 scoring_struct_match = cfg.SCORING_NEEDS_STRUCTURE_MATCH
@@ -708,6 +723,60 @@ reverse_on_opposite = "--reverse-on-opposite" in sys.argv
 # 2026-09-30: เข้าระบบจริงแล้วที่ config.TP_TO_ENTRY_ON_OPPOSITE (= default ของที่นี่) · ปิดด้วย --no-tp-entry-on-opposite
 tp_entry_on_opposite = (config.TP_TO_ENTRY_ON_OPPOSITE or "--tp-entry-on-opposite" in sys.argv) \
     and "--no-tp-entry-on-opposite" not in sys.argv
+# --tp-entry-no-rev : ไม้ Reversal ใหม่ไม่จุดชนวนกฎข้างบน (แบบเดียวกับที่ยกเว้น Sideway) — ไม้ Scoring ใหม่ยังย้าย TP
+# ไม้ Reversal เก่าได้ตามเดิม · ที่มา 2026-10-09: ปิด peak แล้วไม้ Scoring ชนะ 2 ไม้ (BTC +4.40 · GBPCHF +1.90) เหลือ ~0
+# เพราะไม้ Reversal ใหม่ที่เปิดสวน (ซึ่งตัวเองก็แพ้/เสมอ) · base ปัจจุบันกฎนี้ยิง 8 ครั้ง ทุกครั้งเป็นคู่ Scoring–Reversal
+# 🔻 replay เต็ม 2026-10-09 บน base (peak 28.5): 376 ไม้ +181.28R (ΔR +0.37 · เปลี่ยน 2 ไม้: EUR −0.01 -> +0.38) = ไม่มีผล
+#    ใช้คู่กับการปิด peak เท่านั้นถึงมีความหมาย (กันไม้ Scoring ชนะ 2 ไม้นั้นได้จริง) — สายปิด peak ไม่เอา แต่เข้าระบบคู่กับ --rev-swing-right-lows (บรรทัดถัดไป)
+# 🔻 2026-10-10 เข้าระบบจริงแล้วที่ config.TP_TO_ENTRY_REVERSAL_TRIGGERS = False (= default ของที่นี่) · --tp-entry-rev-trigger = เปิดกลับ
+tp_entry_no_rev = ((not config.TP_TO_ENTRY_REVERSAL_TRIGGERS) or "--tp-entry-no-rev" in sys.argv) \
+    and "--tp-entry-rev-trigger" not in sys.argv
+
+# --sideway-first : แท่งที่ regime = REVERSAL-READY แต่อยู่ "เขต Sideway" (ADX 4H < ADX_CHOPPY ติดกัน ≥ SIDEWAY_MIN_RUN_BARS
+# แท่ง · นับแบบเดียวกับ sideway.compute_sideway_entry) ให้เป็นของ Sideway — Reversal/Breakout ไม่ได้ลองแท่งนั้น
+# ที่มา 2026-10-09 (ผู้ใช้ทัก "ลำดับไม่ถูก"): classify_regime เช็ค Reversal ก่อน CHOPPY · ระบบจริงตอนนี้ Reversal ไม่ชน
+# (peak ≥ 28.5 ใน 10 แท่ง กับ ADX < 20 ติด 22 แท่ง เกิดพร้อมกันไม่ได้ · 0/30 ไม้) แต่ **Breakout ข้าม peak อยู่แล้ว**
+# จึงชน: base Breakout 11/60 ไม้ (+5.82R) อยู่ในเขต Sideway · ปิด peak แล้ว Reversal 36/104 ไม้ (+2.60R) อยู่ในเขตนี้
+# 🔴 replay เต็ม 2026-10-09 (--end=2026-09-24T00:00) **ไม่เอาทั้งสองแบบ**:
+#    base + --sideway-first: 365 ไม้ +175.09R (ΔR −5.82) = Breakout 11 ไม้นั้นหาย · **Sideway ได้ไม้เพิ่ม 0** (แท่งพวกนั้น
+#    ไม่ผ่านด่าน Sideway เอง — Breakout เข้าตอนราคาออกจากกรอบ ไม่ใช่ที่ขอบกรอบ) = ในระบบจริงสองตัวนี้ไม่ได้แย่งไม้กันจริง
+#    + --adx-min-peak=0 --tp-entry-no-rev: 394 ไม้ +173.48R (ΔR −7.43) · Sideway คืนครบ (129 +52.75) แต่ Reversal ใหม่
+#    นอกเขต Sideway 37 ไม้ −1.81R · Breakout −5.04
+sideway_first = "--sideway-first" in sys.argv
+
+# --rev-swing-right=N : แท่ง 4H ฝั่งขวาที่ยืนยัน swing ใน check_divergence + SL/TP ของ Reversal (ปกติ 4 = 16 ชม. หลังก้น)
+# ที่มา 2026-10-10: วินิจฉัย Reversal แล้วประเด็นคือ "เข้าช้า" ไม่ใช่ SL แคบ/TP สั้น (ดู regime_check.DIV_SWING_RIGHT_*)
+# ⚠️ divergence ตัวเดียวกันป้อน Breakout ด้วย (flip ฝั่ง bearish) — ผลจะขยับทั้งสองกลยุทธ์ · Key Level ไม่แตะ
+# 🔻 replay เต็ม 2026-10-10 (--end=2026-09-24T00:00 · base 376 ไม้ +180.91R):
+#    right  รวม              Reversal                  Breakout                 Scoring
+#      4    376 +180.91      30 +14.87 (+0.50/ไม้)      60 +36.98 (+0.62/ไม้)    157 +76.32
+#      3    386 +178.23      31 +19.75 (+0.64)          69 +31.83 (+0.46)        157 +73.90
+#      2    399 +178.40      33 +26.29 (+0.80 · ตัด5 +13.68)  80 +25.46 (+0.32)  157 +73.90
+#    Reversal ดีขึ้นเรียงทิศเดียว (มาจาก Long: +14.02 -> +24.20) · Breakout แย่ลงเรียงทิศเดียว (ไม้ใหม่ 39 ไม้ −7.85)
+#    Scoring −2.41 คือไม้ BTC Short 2026-01-22 ที่ Reversal Long ใหม่ (−1.00) ไปย้าย TP มาที่ entry
+#    = ประโยชน์อยู่ฝั่ง swing low (bullish -> Reversal Long) ความเสียหายอยู่ฝั่ง swing high (bearish -> Breakout)
+_rsr_arg = next((a for a in sys.argv if a.startswith("--rev-swing-right=")), None)
+if _rsr_arg:                       # ทั้งสองฝั่ง (ผลในตารางข้างบน)
+    _n = int(_rsr_arg.split("=")[1])
+    regime_check.DIV_SWING_RIGHT_HIGHS = regime_check.DIV_SWING_RIGHT_LOWS = _n
+    reversal.SWING_RIGHT_LONG = reversal.SWING_RIGHT_SHORT = _n
+# --rev-swing-right-lows=N : เร่งเฉพาะ swing low (bullish divergence + SL/TP ของ Reversal Long) · swing high คง 4
+# = เก็บส่วนที่ช่วย Reversal Long ไว้ ไม่แตะ bearish ที่ป้อน Breakout (ดูตารางข้างบน)
+# 🔻 replay เต็ม 2026-10-10 (--rev-swing-right-lows=2 --tp-entry-no-rev · --end=2026-09-24T00:00):
+#    376 ไม้ +180.91R -> **378 ไม้ +191.46R (ΔR +10.55)** · Breakout 60 +36.98 ไม่ขยับสักไม้ · Scoring +0.37 (ไม้ BTC รอด)
+#    Reversal 30 +14.87 -> 32 +25.05 (+0.78/ไม้ · ชนะ 62% · ตัด 5 ไม้ใหญ่ยัง +12.75) · Long 26 +14.02 -> 28 +24.20 · Short ไม่ขยับ
+#    churn |t| 1.15 · ตัด 5 รายการที่ช่วยมากสุดของผลต่าง −1.65 · ดีขึ้น 6/7 symbol = ผ่าน 1/3 เกณฑ์ · ค่า 2 เลือกหลังเห็น 4/3/2 (in-sample)
+_rsl_arg = next((a for a in sys.argv if a.startswith("--rev-swing-right-lows=")), None)
+if _rsl_arg:
+    regime_check.DIV_SWING_RIGHT_LOWS = reversal.SWING_RIGHT_LONG = int(_rsl_arg.split("=")[1])
+
+
+def _in_sideway_zone(t):
+    """ADX 4H < ADX_CHOPPY ติดกันถึงเกณฑ์ของ Sideway ไหม ณ เวลา t (โค้ดเดียวกับ sideway.compute_sideway_entry)"""
+    d4 = regime_check.get_adx_bars(symbol, bars=_sideway_mod.SIDEWAY_4H_BARS, as_of=t)
+    d4 = d4[pd.to_datetime(d4["time"]) + timedelta(hours=4) <= t].reset_index(drop=True)
+    adx = regime_check.calc_adx(d4, regime_check.ADX_PERIOD).to_numpy()
+    return _sideway_mod.adx_run_below(adx, len(d4) - 1, regime_check.ADX_CHOPPY) >= config.SIDEWAY_MIN_RUN_BARS
 
 # --limit-rr=X --limit-hours=H : จำลอง limit order ให้ setup Reversal ที่ติดด่าน R:R (2026-09-25
 # ไอเดียผู้ใช้) — ระบบจริงส่งแต่ market order จึงไม่มีสิ่งนี้ ธงนี้ถามว่า "ถ้ามีจะได้ไม้เพิ่มกี่ไม้ กี่ R"
@@ -1212,6 +1281,11 @@ for n, row in enumerate(clock.to_dict("records")):
             _sw = regime_eff(now)["adx_now"] < regime_check.ADX_CHOPPY
         except Exception:
             _sw = False
+    elif sideway_first and sideway_enabled and _rg in REGIME_REVERSAL and not _reentry:   # --sideway-first
+        try:
+            _sw = regime_eff(now)["adx_now"] < regime_check.ADX_CHOPPY and _in_sideway_zone(now)
+        except Exception:
+            _sw = False
     _want = ("Scoring" if _reentry else "Sideway" if _sw else
              "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None))
     _shadow = False
@@ -1342,6 +1416,13 @@ for n, row in enumerate(clock.to_dict("records")):
                         fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
                         continue
             if not flipped:
+                if rev_struct_opp:                 # --rev-struct-opp (ดูที่จุด parse ธง)
+                    _opp = "Short" if direction == "Long" else "Long"
+                    _struct = rinfo["structure"]["trend"]
+                    if not _struct.startswith(_opp):
+                        note(f"Reversal ไม่มีเทรนด์ {_opp} ให้กลับ (โครงสร้าง {_struct})")
+                        fate("ไม่มีเทรนด์ฝั่งตรงข้ามให้กลับ")
+                        continue
                 # CHoCH — โครงสร้างฝั่งตรงข้ามต้องพังแล้ว (ดู config.REVERSAL_NEEDS_CHOCH)
                 # ไม้ flip ไม่ต้องผ่านด่านนี้: CHoCH ถามว่า "โครงสร้างเดิมพังหรือยัง" ซึ่งเป็น
                 # คำถามของการกลับตัว ส่วนไม้ flip เดิมพันว่าโครงสร้างเดิม **ไม่พัง** และไปต่อ
@@ -1468,7 +1549,9 @@ for n, row in enumerate(clock.to_dict("records")):
                  else (float(_w["high"].max()) - entry)) / _risk if _risk else 0.0
         if _turn < min_turn:
             note(f"เข้าตรงจุดสุดขั้ว 24 ชม. (เด้งมาแค่ {_turn:.2f}R < {min_turn:g}R)")
-            if reject_cd:
+            # 🔴 2026-10-08: ห้ามตั้งจากรอบเงาของ --log-blocked — scheduler ไม่เดินด่านนี้ตอนช่องไม่ว่าง
+            # เดิมรอบเงาตั้ง cooldown แล้วบล็อกไม้ Scoring จริงที่ตามมา (US500 2025-01-27 หาย = ไฟล์ไม่ตรง base)
+            if reject_cd and not _shadow:
                 reject_until[direction] = now + timedelta(hours=reject_cd)
             continue
 
@@ -1553,7 +1636,8 @@ for n, row in enumerate(clock.to_dict("records")):
                 _pl = _p["direction"] == "Long"
                 _r = ((entry - _p["entry"]) if _pl else (_p["entry"] - entry)) / abs(_p["entry"] - _p["sl0"])
                 trades.append(close_pos(_p, _k, now, _p["booked"] + _p["rem"] * _r, "REVERSE"))
-    if tp_entry_on_opposite and strategy != "Sideway":      # ไม่ใช้กับไม้ Sideway ทั้งสองทาง (ผู้ใช้ 2026-10-02)
+    if tp_entry_on_opposite and strategy != "Sideway" \
+            and not (tp_entry_no_rev and strategy == "Reversal"):   # ไม่ใช้กับไม้ Sideway ทั้งสองทาง (ผู้ใช้ 2026-10-02)
         for _k, _p in list(positions.items()):
             if _k != slot_of(strategy) and _p["direction"] != direction and _p["strategy"] != "Sideway":
                 _pl = _p["direction"] == "Long"
@@ -1835,6 +1919,16 @@ if scoring_struct_match != cfg.SCORING_NEEDS_STRUCTURE_MATCH:
     _tag += "_structmatch" if scoring_struct_match else "_nostructmatch"
 if rev_choch != cfg.REVERSAL_NEEDS_CHOCH:
     _tag += "_revchoch" if rev_choch else "_norevchoch"
+if rev_struct_opp:
+    _tag += "_revstructopp"
+if tp_entry_no_rev == config.TP_TO_ENTRY_REVERSAL_TRIGGERS:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_tpentrynorev" if tp_entry_no_rev else "_tpentryrevtrigger"
+if sideway_first:
+    _tag += "_swfirst"
+if _rsr_arg:
+    _tag += f"_revswingright{regime_check.DIV_SWING_RIGHT_HIGHS}"
+if _rsl_arg:
+    _tag += f"_revswinglows{regime_check.DIV_SWING_RIGHT_LOWS}"
 if _swr_arg:
     _tag += f"_swingrec{_swing_mod.SWING_RECENCY_TOL_ATR:g}"
 # เขียนเสมอเมื่อใส่ --log-cuts แม้ไม่มี cut เลย (ไฟล์มีแต่หัวตาราง) — เดิมเขียนเฉพาะตอนมี cut
