@@ -540,6 +540,15 @@ if "--no-rev-choch" in sys.argv:
 #    ติดด่านอื่นยังเป็น READY · ไม่เอา — ดูทางลำดับที่ --sideway-first ข้างล่าง
 rev_struct_opp = "--rev-struct-opp" in sys.argv
 
+# --scoring-dir-structure : ไม้ Scoring เอาทิศจาก Structure 4H (regression) แทน Bias 1D (trend_flip) และไม่ตรวจกับ Bias เลย
+# (ปิด scoring.ENFORCE_BIAS_MATCH) — ที่มา 2026-10-10 ผู้ใช้: "structure กับ bias คล้ายกัน ทดสอบ เปิดคู่ / อย่างใดอย่างหนึ่ง"
+# A = ระบบจริง (ทิศจาก Bias + ต้องตรง Structure) · B = --no-scoring-struct-match (Bias อย่างเดียว) · C = ธงนี้ (Structure อย่างเดียว)
+# Reversal Short / Breakout ยังใช้ Bias 1D เหมือนเดิม — เปลี่ยนเฉพาะ Scoring
+# 🔻 ผล 2026-10-10: A +191.46R (378 ไม้) · B +185.10R (438) · C +193.00R (430 · Scoring ใหม่ 59 ไม้ −0.36 = ศูนย์) → คง A
+scoring_dir_struct = "--scoring-dir-structure" in sys.argv
+if scoring_dir_struct:
+    scoring.ENFORCE_BIAS_MATCH = False
+
 # --scoring-struct-match / --no-scoring-struct-match : ทับ config.SCORING_NEEDS_STRUCTURE_MATCH
 # ทิศ Scoring (trend_flip 1D) ต้องตรงกับโครงสร้าง 4H ไหม — เหตุผล+ตัวเลขอยู่ที่ค่าคงที่นั้น
 scoring_struct_match = cfg.SCORING_NEEDS_STRUCTURE_MATCH
@@ -1340,6 +1349,9 @@ for n, row in enumerate(clock.to_dict("records")):
             direction, _ = get_trend_bias(symbol, df_1d)
             if _reentry:                       # --cap-reentry: ทิศของไม้ที่ถูกตัด ไม่ใช่ bias ตอนนี้
                 direction = reentry_watch["direction"]
+            elif scoring_dir_struct:           # --scoring-dir-structure: ทิศจาก Structure 4H แทน Bias 1D
+                _s = rinfo["structure"]["trend"]
+                direction = "Long" if _s.startswith("Long") else ("Short" if _s.startswith("Short") else None)
             if direction is None:
                 note("หา bias ไม่ได้")
                 continue
@@ -1921,6 +1933,8 @@ if rev_choch != cfg.REVERSAL_NEEDS_CHOCH:
     _tag += "_revchoch" if rev_choch else "_norevchoch"
 if rev_struct_opp:
     _tag += "_revstructopp"
+if scoring_dir_struct:
+    _tag += "_scoringdirstruct"
 if tp_entry_no_rev == config.TP_TO_ENTRY_REVERSAL_TRIGGERS:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_tpentrynorev" if tp_entry_no_rev else "_tpentryrevtrigger"
 if sideway_first:

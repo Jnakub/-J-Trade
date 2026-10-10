@@ -25,6 +25,10 @@ from bars import BAR_OFFSET_H, get_aligned_4h, get_bars
 # trailing แรกจะอยู่คนละจุด ตั้ง 0 = ไม่ขยับ (SL ที่ส่ง = SL โครงสร้าง แบบก่อน 2026-08-27)
 # ไว้ให้ backtest_replay.py --legacy-sl ใช้เทียบ
 EXEC_SL_ATR_MULT = 2.0
+# ENFORCE_BIAS_MATCH — compute_entry บังคับทิศไม้ให้ตรง Bias 1D (trend_flip) ไหม · True = พฤติกรรมระบบจริง
+# ปิดได้จาก backtest_replay --scoring-dir-structure เท่านั้น (ทดลอง 2026-10-10: ให้ Scoring ใช้ทิศจาก Structure 4H แทน Bias)
+# Breakout ใช้ฟังก์ชันนี้ด้วยแต่ทิศของมัน (Long) ตรง Bias เสมออยู่แล้ว จึงไม่ได้รับผล
+ENFORCE_BIAS_MATCH = True
 
 
 # k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
@@ -195,11 +199,11 @@ def compute_entry(symbol: str, direction: str, entry: float,
     df_4h = merge_real_volume(df_4h, symbol, "4H", as_of=as_of)   # swing filter ใช้ volume
 
     trend_bias, bias_source = get_trend_bias(symbol, df_1d)
-    if trend_bias is None:
+    if ENFORCE_BIAS_MATCH and trend_bias is None:
         reason = ("ไม่มีค่า k ใน TREND_FLIP_K" if bias_source == "no_trend_flip_k"
                   else "trend_flip ยัง bootstrap ไม่พร้อม")
         raise ValueError(f"หา Bias ไม่ได้ — {reason} ({bias_source}) — ข้ามรอบนี้")
-    if trend_bias != direction.capitalize():
+    if ENFORCE_BIAS_MATCH and trend_bias != direction.capitalize():
         bias_label = "Downtrend" if trend_bias == "Short" else "Uptrend"
         raise ValueError(
             f"Direction ไม่ตรง Bias — กราฟ 1D เป็น {bias_label} ({bias_source}) "
