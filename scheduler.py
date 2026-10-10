@@ -441,12 +441,12 @@ def scan_symbol(symbol: str) -> None:
                 print(f"  [{symbol}] SKIP — หา Bias ไม่ได้ ({bias_source})")
                 return
             # ทิศจาก trend_flip (1D) ต้องตรงกับโครงสร้าง 4H — ดู config ที่ค่านั้น
-            # structure["trend"] = "Long (HH/HL)" / "Short (LL/LH)" ตอน regime = TREND เสมอ
+            # structure["trend"] = "Long (reg)" / "Short (reg)" (USE_STRUCT_REG) ตอน regime = TREND เสมอ
             _struct = regime_info["structure"]["trend"]
             if SCORING_NEEDS_STRUCTURE_MATCH and not _struct.startswith(direction):
-                print(f"  [{symbol}] SKIP — Bias={direction} สวนโครงสร้าง 4H ({_struct})")
+                print(f"  [{symbol}] SKIP — Bias 1D={direction} สวน Structure 4H={_struct}")
                 return
-            print(f"  [{symbol}] เปิด Scoring — Bias={direction} ({bias_source})  Entry={entry:.5f}")
+            print(f"  [{symbol}] เปิด Scoring — Bias 1D={direction} ({bias_source}) · Structure 4H={_struct}  Entry={entry:.5f}")
             # ส่ง df_1d ที่ดึงไปแล้วข้างบน (สำหรับ get_trend_bias) ให้ compute_entry ใช้ซ้ำ
             sl_info = compute_entry(symbol, direction, entry, df_1d=df_1d)
             strategy = "Scoring"

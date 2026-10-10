@@ -1134,7 +1134,8 @@ def classify_regime(adx_now: float, direction: str, peak: dict, structure: dict,
     # TREND ปกติ — ADX >= ADX_GRAY_HIGH (22) + ทิศไม่ลง + structure intact
     # (comment เดิมเขียน ">= 25" ค้างมาจากก่อนปรับ ADX_GRAY_HIGH 25 -> 22 เมื่อ 2026-07-22)
     if direction in ("ขึ้น", "ทรง") and structure["intact"]:
-        return ("TREND", f"เปิด Scoring scorecard — เทรดตามทิศ {structure['trend']}", GREEN)
+        # 2026-10-10: เดิมเขียน "เทรดตามทิศ {structure}" ทั้งที่ทิศไม้มาจาก Bias 1D (scheduler พิมพ์ทั้งสองค่าในบรรทัดถัดไป)
+        return ("TREND", f"เปิด Scoring — Structure 4H = {structure['trend']} (ทิศไม้มาจาก Bias 1D)", GREEN)
 
     # เงื่อนไขไม่ครบ
     return ("เขตเทา", "เงื่อนไขไม่ครบ (ADX ลง หรือ structure ไม่ intact) — รอความชัดเจน", YELLOW)
