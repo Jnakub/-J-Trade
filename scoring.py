@@ -57,6 +57,14 @@ ENFORCE_BIAS_MATCH = True
 # 2026-08-17: เพิ่ม EURUSDm (k=0.20, FalseFlip=0/67=0%, เร็วกว่า EMA cross เฉลี่ย 5.2 แท่ง,
 # matched 18 คู่) และ GBPUSDm (k=0.20, FalseFlip=1/78=1.3%, เร็วกว่า EMA cross เฉลี่ย 4.6 แท่ง,
 # matched 21 คู่ — เหมือนเคส US500m ไม่ได้ 0% แต่ต่ำสุดในกลุ่มที่ทดสอบ 0.20-0.60) sweep 2999 แท่ง 4H
+# TREND_FLIP_WINDOW — fractal swing ของ trend_flip รอยืนยันกี่วัน (i−N..i+N) = ตัวกำหนดความหน่วงของ Bias 1D
+# 5 = พฤติกรรมระบบจริง (trend_flip.DEFAULT_WINDOW) · ทดลองด้วย backtest_replay --bias-window=N (2026-10-11)
+# คัดกรองรายวัน 3 ยุค (ผลตอบแทน 10 วัน × ทิศ Bias): window 7 ≥ 5 ทุกยุคแต่ต่างนิดเดียว (+0.161/+0.154 · −0.016/−0.030 · +0.122/+0.053)
+# 🔻 replay เต็ม 2026-10-11 window 7 (base 378 ไม้ +191.46R): 374 ไม้ +181.91R **ΔR −9.55 · ไม่เอา** · Scoring −4.82
+#    (หาย 20 ไม้ +8.75 · ใหม่ 13 +3.93) · Breakout −7.95 (ไม้ TP ใหญ่ XAU/US500 หาย 2 ไม้ +5.83) · ดีขึ้น 3/8 symbol
+#    = คัดกรองรายวันต่างกันนิดเดียวแล้ว replay ออกมาแย่ — Bias ต่างแค่ ~2-6% ของวันแต่ไปเปลี่ยนจังหวะเข้าไม้ใหญ่
+TREND_FLIP_WINDOW = 5
+
 TREND_FLIP_K = {
     "BTCUSDm": 0.20,
     "XAUUSDm": 0.40,
@@ -154,7 +162,7 @@ def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str | None, str]:
         return None, "no_trend_flip_k"
 
     closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
-    flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k)
+    flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k, window=TREND_FLIP_WINDOW)
     flip_regime = flip_df["regime"].iloc[-1]
     if flip_regime == "Bull":
         return "Long", "trend_flip"
