@@ -259,7 +259,35 @@ MAX_RR_HARD_BLOCK = 15.0  # 2026-08-02: R:R ที่สูงเกินจร
 #    👉 setup ที่มาช้าไม่มี edge ไม่ว่าจะวาง SL แบบไหน · ปัญหาไม่ใช่เรขาคณิต SL/TP (สคริปต์ scratchpad rr_rescue.py)
 MIN_RR_HARD_BLOCK_REVERSAL = 1.2
 
+# ---------------------------------------------------------------------------
+# 🔴 Reversal แบบใหม่ (REVERSAL_NEW · 2026-10-13 คำสั่งผู้ใช้ ทั้งที่ตกเกณฑ์ 3/3) — แทน Reversal เดิมทั้งใบ
+# ---------------------------------------------------------------------------
+# กฎเข้า (บ้านเดียว: reversal.new_reversal_direction · scheduler + backtest_replay เรียกตัวเดียวกัน):
+#   Bias 1D สวน Structure 4H (Bias Long + Structure Short -> Long · กลับกัน -> Short) = 4H กำลังย่อสวนเทรนด์ใหญ่
+#   + ADX 4H ทิศ "ขึ้น" หรือ "ทรง" (ระดับไหนก็ได้) + อยู่ที่ Key Level + divergence ทิศเดียวกับไม้
+#   เข้าได้ทุก regime · ช่อง Reversal เดิม (ร่วมกับ Breakout) · รอบที่สัญญาณครบ + ช่องว่าง มาก่อน Sideway/Scoring/Breakout
+#   SL/TP = compute_reversal_entry เดิม แต่ TP Fib × REVERSAL_NEW_TP_FIB_RATIO · TP สำรอง × REVERSAL_NEW_FALLBACK_RR
+#   · R:R ขั้นต่ำ MIN_RR_HARD_BLOCK_REVERSAL (1.2 เท่าเดิม)
+#   ด่านสุดท้าย (หลังทุกด่านผ่าน): ราคาต้องอยู่ ≥ REVERSAL_NEW_MIN_RANGE_POS ของกรอบ 24 แท่ง 1H ไม่งั้น "ไม้เงา"
+#   = จำ SL/TP ของไม้ที่ไม่ได้เข้า ห้ามเข้า Reversal ใหม่ใน symbol นั้นจนราคาแตะ SL/TP ของมัน (scheduler: revnew_ghost.json)
+# Reversal เดิม (ADX peak ≥ 28.5 โค้งลง + Key Level + div) ปิด — ทาง REVERSAL-READY เหลือแค่ flip เป็น Breakout
+# ผล replay เต็ม (--end=2026-09-24T00:00 · base 378 ไม้ +191.46R): **405 ไม้ +197.98R ΔR +6.52**
+#   Reversal 32 ไม้ +25.05 (+0.78/ไม้) -> 66 ไม้ +27.85 (+0.42/ไม้ · Long 24.52 / Short 3.33) · Sideway +2.06 · Breakout +1.65
+#   ❌ churn |t| 0.50 · ตัด 5 ใหญ่ −4.15 · ดีขึ้น 5/10 symbol = แยกจาก noise ไม่ได้ · Short ≈ 0
+#   ⚠️ ค่าทุกตัวเลือกหลังเห็นผล (in-sample): ADX/ตำแหน่ง 0.3/×3/1.5 — ประวัติการกวาดเต็มที่ธง --rev-new* ใน backtest_replay
+#   + memory reversal-entry-from-scratch-2026-10-11 · ผู้ใช้: "0.3 ติดไว้ก่อน จูนครั้งหน้า"
+# 👉 ต้องตามดู: ไม้ Reversal จริงหลัง 2026-10-13 (ต่อไม้ backtest +0.42 · ไม้ตาย 31%) และไม้เงาใน scheduler.log
+# ย้อนกลับ = REVERSAL_NEW = False (Reversal เดิม + TP ×2 + สำรอง 2R ครบ — ไฟล์ base เดิม = ผล --rev-old)
+REVERSAL_NEW = True
+REVERSAL_NEW_ADX_RULE = "nofall"   # ADX 4H ห้ามทิศ "ลง" · กวาดแล้ว: ไม่ดู +4.99 · nofall +6.52 · > 15 −3.35
+                                   # · > 20 −10.68 · หัวขึ้น −11.00 · โค้งลง −8.47 · ≥ 22 ขึ้น/ทรง −9.56 (ΔR ทั้งระบบ)
+REVERSAL_NEW_MIN_RANGE_POS = 0.3   # 0 = ปิด · ไม้ตาย 37% ของไม้ใหม่ · 17 ตัวแปรแยกไม่ได้ (p 0.70) ตัวนี้ดีสุดแบบเฉียด
+                                   # หน่วงเฉยๆ ได้ 0 (ไม้กลับมาใน 3 ชม.) · ล็อกถาวร −16.77 · ไม้เงา = ตัดตรงเป้า 17/17
+REVERSAL_NEW_TP_FIB_RATIO = 3.0    # ที่ราบ ×2.0/2.5/3.0/3.5 = ΔR −0.90/−2.10/+4.53/+5.63 (ยังไม่มีด่าน ADX)
+REVERSAL_NEW_FALLBACK_RR = 1.5     # TP สำรองตอนหา Fib ไม่ได้ · ใช้ 2/66 ไม้ · ผู้ใช้เลือก (เท่า Scoring/Breakout)
+
 # REVERSAL_TP_FIB_RATIO — อัตราส่วน Fibonacci extension ของไม้ Reversal แยกจาก TP_FIB_RATIO (Scoring ใช้)
+# ⚠️ ตั้งแต่ 2026-10-13 ใช้กับ Reversal เดิมเท่านั้น (REVERSAL_NEW = False) — Reversal ใหม่ใช้ REVERSAL_NEW_TP_FIB_RATIO
 # 2026-09-26 แยกออกมาเพื่อวัดคำขอผู้ใช้ "TP Reversal เป็น 2" โดยไม่ลาก Scoring ไปด้วย (Breakout มีของตัวเองแล้ว)
 # ⚠️ สูตรเดียวกับ Scoring: Long TP = B + (A − X) × ratio — X→A ของไม้ Reversal คือการเด้งในขาลงก่อนก้น
 #    ไม่ใช่ขาที่กำลังกลับตัว (19 ไม้ใน base: TP คืนขา A→B ได้ median 107% แต่กระจาย 24-270%)

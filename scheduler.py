@@ -26,14 +26,16 @@ from config import (
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
     BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE, TP_TO_ENTRY_REVERSAL_TRIGGERS,
     BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
+    REVERSAL_NEW, REVERSAL_NEW_ADX_RULE, REVERSAL_NEW_MIN_RANGE_POS,
+    REVERSAL_NEW_TP_FIB_RATIO, REVERSAL_NEW_FALLBACK_RR,
 )
-from mt5_connect import connect, get_account_balance
+from mt5_connect import connect, get_account_balance, mt5_now
 from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias
 from order import (calculate_lot_size, clamp_lot, place_order, position_risk_amount,
                    risk_pct_of, modify_sltp)
 import swing
 from exit_monitor import (
-    check_structure_break,
+    check_structure_break, MAX_HOLD_DAYS,
     analyze_position, print_report, execute_decision,
     check_upcoming_news, NEWS_IMMINENT_H, NEWS_IMPACT, NEWS_CURRENCY,
 )
@@ -94,6 +96,70 @@ def reject_cd_set(symbol: str, direction: str) -> None:
             json.dump(data, f)
     except Exception as exc:
         print(f"  ⚠️ เขียน {_REJECT_CD_FILE} ไม่ได้ ({exc}) — cooldown รอบนี้จะไม่ถูกจำ")
+
+
+# ---------------------------------------------------------------------------
+# ไม้เงาของ Reversal ใหม่ (config.REVERSAL_NEW_MIN_RANGE_POS · 2026-10-13)
+# ---------------------------------------------------------------------------
+# ด่านตำแหน่งในกรอบ 24 ชม. บล็อกไม้ Reversal ใหม่ -> จำ SL/TP ของไม้ที่ไม่ได้เข้า ("ไม้เงา") แล้วห้ามเข้า
+# Reversal ใหม่ใน symbol นั้นจนกว่าราคาแตะ SL หรือ TP ของมัน (หรือครบ MAX_HOLD_DAYS)
+# ไม่มีไม้เงา = สัญญาณเดิมยังค้าง ไม้ที่ถูกบล็อกกลับมาเข้าใน median 3 ชม. ผลเท่าเดิม (replay 2026-10-12: ด่านได้ 0)
+# ตรงกับ backtest_replay._rn_ghost: เช็คแท่ง 1H ที่ปิดแล้วตั้งแต่แท่งที่เปิดตอนสร้างไม้เงา (replay เช็คจากแท่งถัดไป
+# = แท่งที่เปิดตรง "now" ของรอบที่บล็อก) · เก็บลงไฟล์เหตุผลเดียวกับ reject_cooldown.json (รีสตาร์ทแล้วต้องไม่หาย)
+_REVNEW_GHOST_FILE = os.path.join(os.path.dirname(__file__), "revnew_ghost.json")
+
+
+def _ghost_load() -> dict:
+    try:
+        with open(_REVNEW_GHOST_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _ghost_save(data: dict) -> None:
+    try:
+        with open(_REVNEW_GHOST_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as exc:
+        print(f"  ⚠️ เขียน {_REVNEW_GHOST_FILE} ไม่ได้ ({exc}) — ไม้เงารอบนี้จะไม่ถูกจำ")
+
+
+def revnew_ghost_set(symbol: str, direction: str, sl: float, tp: float) -> None:
+    """เริ่มไม้เงาของ symbol นี้ (ทับของเดิม) — เรียกตอนด่านตำแหน่งบล็อกเท่านั้น · เวลาเป็นนาฬิกา MT5 (UTC)"""
+    now = mt5_now()
+    data = _ghost_load()
+    data[symbol] = {"direction": direction, "sl": float(sl), "tp": float(tp),
+                    "since": now.replace(minute=0, second=0, microsecond=0).isoformat(),
+                    "until": (now + timedelta(days=MAX_HOLD_DAYS)).isoformat()}
+    _ghost_save(data)
+
+
+def revnew_ghost_active(symbol: str):
+    """ไม้เงาที่ยังไม่จบของ symbol นี้ (dict) หรือ None — ถ้าราคาแตะ SL/TP แล้วหรือครบเพดาน จะลบทิ้งให้เลย
+    ดึงแท่ง 1H ไม่ได้ = ถือว่ายังไม่จบ (ไม่เปิด Reversal ใหม่ดีกว่าเปิดไม้ที่ด่านตั้งใจกันไว้)"""
+    data = _ghost_load()
+    g = data.get(symbol)
+    if not g:
+        return None
+    since, until, now = _parse_iso(g.get("since")), _parse_iso(g.get("until")), mt5_now()
+    done = since is None or until is None or now >= until
+    if not done:
+        bars = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=int((now - since).total_seconds() // 3600) + 3)
+        if bars is None or len(bars) < 2:
+            return g
+        seg = bars.iloc[:-1]                       # แท่งสุดท้าย = แท่งที่ยังไม่ปิด
+        seg = seg[seg["time"] >= since]
+        if g["direction"] == "Long":
+            done = bool(((seg["low"] <= g["sl"]) | (seg["high"] >= g["tp"])).any())
+        else:
+            done = bool(((seg["high"] >= g["sl"]) | (seg["low"] <= g["tp"])).any())
+    if done:
+        data.pop(symbol, None)
+        _ghost_save(data)
+        print(f"  [{symbol}] ไม้เงา Reversal {g.get('direction')} จบแล้ว (แตะ SL/TP หรือครบเพดาน) — ปลดล็อก")
+        return None
+    return g
 
 
 def _parse_iso(raw: str):
@@ -399,11 +465,27 @@ def scan_symbol(symbol: str) -> None:
                       f"{regime_check.ADX_MIN_PEAK_REVERSAL:g}) — ถือเป็น REVERSAL-READY เพื่อเข้าทาง Breakout")
                 regime = "REVERSAL-READY"
 
+        # 4a-2. Reversal ใหม่ (config.REVERSAL_NEW) — ทุก regime · สัญญาณครบ + ช่อง Reversal ว่าง = มาก่อนทุกกลยุทธ์
+        #       ไม่ครบ = เดินทางเดิมทุกอย่าง (Sideway/Scoring ไม่เสียรอบ) · ตรงกับ backtest_replay.revnew_candidate
+        #       ที่ประเมินเฉพาะตอนช่องว่าง · กฎเข้าบ้านเดียวที่ reversal.new_reversal_direction
+        rev_new_dir = None
+        if REVERSAL_NEW and slot_of("Reversal") not in occupied:
+            _ghost = revnew_ghost_active(symbol)
+            if _ghost:
+                print(f"  [{symbol}] Reversal ใหม่: ไม้เงา {_ghost['direction']} ยังไม่จบ "
+                      f"(SL {_ghost['sl']:.5f} / TP {_ghost['tp']:.5f}) — ยังไม่เข้า Reversal ใหม่")
+            else:
+                _bias_rn, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
+                rev_new_dir, _rn_why = reversal.new_reversal_direction(
+                    regime_info, _bias_rn, adx_rule=REVERSAL_NEW_ADX_RULE)
+                if rev_new_dir:
+                    print(f"  [{symbol}] Reversal ใหม่ {rev_new_dir} — {_rn_why}")
+
         # Sideway (config.SIDEWAY_*): เข้าได้เฉพาะรอบที่ regime ห้ามเทรดและ ADX 4H < ADX_CHOPPY
-        #   = Reversal (REVERSAL-READY ไม่อยู่ใน NO_TRADE) มาก่อนเสมอตามคำสั่งผู้ใช้ 2026-10-02
-        sideway_mode = (regime in REGIME_NO_TRADE and SIDEWAY_ENABLED
+        #   = Reversal (REVERSAL-READY ไม่อยู่ใน NO_TRADE · Reversal ใหม่ข้างบน) มาก่อนเสมอตามคำสั่งผู้ใช้ 2026-10-02
+        sideway_mode = (not rev_new_dir and regime in REGIME_NO_TRADE and SIDEWAY_ENABLED
                         and regime_info.get("adx_now", 99) < regime_check.ADX_CHOPPY)
-        if regime in REGIME_NO_TRADE and not sideway_mode:
+        if regime in REGIME_NO_TRADE and not sideway_mode and not rev_new_dir:
             print(f"  [{symbol}] SKIP — regime ยังไม่พร้อมเปิด scorecard ใดๆ")
             return
 
@@ -411,7 +493,7 @@ def scan_symbol(symbol: str) -> None:
         #     (Mutual Exclusivity ตามข้อ 4) จึงรู้ได้ตั้งแต่ตรงนี้โดยไม่ต้องคำนวณสกอร์การ์ดก่อน
         #     occupied อ่านไว้ตั้งแต่ข้อ 1 ก่อนรัน Exit Monitor — ตรงลำดับกับ backtest_replay
         #     (ถ้า SLOT_PER_STRATEGY=False ข้อ 1 return ไปตั้งแต่มีไม้ใดๆ แล้ว มาไม่ถึงตรงนี้)
-        want = (slot_of("Sideway") if sideway_mode
+        want = ("Reversal" if rev_new_dir else slot_of("Sideway") if sideway_mode
                 else "Scoring" if regime in REGIME_TREND else "Reversal")
         if want in occupied:
             print(f"  [{symbol}] SKIP — ช่อง {want} มีไม้เปิดอยู่แล้ว")
@@ -423,7 +505,15 @@ def scan_symbol(symbol: str) -> None:
             return
         entry = tick.bid
 
-        if sideway_mode:
+        if rev_new_dir:
+            # ── เปิด Reversal ใหม่ — ทิศ = Bias 1D · SL/TP ทาง compute_reversal_entry แต่ TP Fib ×3 / สำรอง 1.5R
+            #    (config.REVERSAL_NEW_*) · R:R ขั้นต่ำ MIN_RR_HARD_BLOCK_REVERSAL เท่าเดิม · ด่านตำแหน่งอยู่ข้อ 4e
+            direction, strategy = rev_new_dir, "Reversal"
+            sl_info = reversal.compute_reversal_entry(
+                symbol, direction, entry, df_4h=regime_info["df_4h"],
+                tp_ratio=REVERSAL_NEW_TP_FIB_RATIO, fallback_rr=REVERSAL_NEW_FALLBACK_RR)
+            print(f"  [{symbol}] เปิด Reversal ใหม่ {direction}  Entry={entry:.5f}")
+        elif sideway_mode:
             # ── เปิด Sideway — ทิศมาจากตำแหน่งราคาในกรอบ (กฎทั้งหมดที่ sideway.compute_sideway_entry) ──
             sl_info = sideway.compute_sideway_entry(symbol, entry)   # ไม่ผ่าน = ValueError -> BLOCKED
             direction, strategy = sl_info["direction"], "Sideway"
@@ -487,6 +577,11 @@ def scan_symbol(symbol: str) -> None:
                         return
                 else:
                     print(f"  [{symbol}] Reversal Short — เทรนด์ 1D = Short ({bias_src}) ผ่านด่าน")
+            # Reversal เดิมปิดตั้งแต่ 2026-10-13 (config.REVERSAL_NEW) — ทาง REVERSAL-READY เหลือแค่ flip เป็น Breakout
+            if REVERSAL_NEW and not breakout_flip:
+                print(f"  [{symbol}] SKIP — Reversal เดิมปิดแล้ว (config.REVERSAL_NEW) · "
+                      f"READY {div_polarity} ไม่ใช่ทาง Breakout")
+                return
             # CHoCH — โครงสร้างเดิม (ฝั่งตรงข้ามกับที่จะเข้า) ต้องพังแล้ว ดู config ที่ค่านั้น
             # ไม้ Breakout ข้ามด่านนี้: CHoCH ถามว่า "โครงสร้างเดิมพังหรือยัง" ซึ่งเป็นคำถามของ
             # การกลับตัว ส่วน Breakout เดิมพันว่าโครงสร้างเดิม **ไม่พัง** แล้วไปต่อ (ตรงกับ
@@ -577,6 +672,23 @@ def scan_symbol(symbol: str) -> None:
                               f"(เด้งมาแค่ {_turn:.2f}R < {MIN_TURN_FROM_EXTREME_R:g}R)")
                         reject_cd_set(symbol, direction)
                         return
+
+        # 4e. Reversal ใหม่ — ด่านสุดท้าย: ราคาต้องอยู่ ≥ REVERSAL_NEW_MIN_RANGE_POS ของกรอบ 24 แท่ง 1H ที่ปิดแล้ว
+        #     (รวมแท่งปิดล่าสุด = clock.iloc[n-23:n+1] ของ replay) ไม่งั้นเริ่ม "ไม้เงา" ด้วย SL ที่ส่ง broker + TP หลังเพดาน
+        #     ต้องอยู่หลังทุกด่าน — ถ้าบล็อกรอบที่ไม้จะติดด่านอื่นอยู่แล้ว ไม้เงาจะกันไม้ดีที่มาทีหลังไปด้วย (replay --rev-new-lock −16.77R)
+        if rev_new_dir and REVERSAL_NEW_MIN_RANGE_POS:
+            _h1p = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=27)
+            if _h1p is None or len(_h1p) < 26:
+                print(f"  [{symbol}] SKIP — Reversal ใหม่: ดึงแท่ง 1H ไม่พอคิดตำแหน่งในกรอบ 24 ชม.")
+                return
+            _rpos = reversal.range_position(_h1p.iloc[-25:-1], entry, direction)
+            if _rpos < REVERSAL_NEW_MIN_RANGE_POS:
+                revnew_ghost_set(symbol, direction, sl_info.get("exec_sl") or sl, tp)
+                print(f"  [{symbol}] NO ENTRY — Reversal ใหม่: ราคาอยู่ {_rpos:.2f} ของกรอบ 24 ชม. "
+                      f"(< {REVERSAL_NEW_MIN_RANGE_POS:g}) -> เริ่มไม้เงา {direction} "
+                      f"SL {sl_info.get('exec_sl') or sl:.5f} / TP {tp:.5f}")
+                log.info(f"[{symbol}] revnew ghost {direction} pos={_rpos:.2f}")
+                return
 
         # 5. Execute
         # ── ฐานตรึงของ ATR Trailing SL — คำนวณก่อนส่ง order เพื่อส่งเข้า place_order() รวดเดียว

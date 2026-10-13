@@ -1,6 +1,9 @@
 """
 reversal.py — แผนเข้าไม้ทาง Reversal: เทรด "สวน" ทิศเทรนด์เดิม (คู่กับ scoring.py ที่เทรด "ตาม" เทรนด์)
 
+🔴 2026-10-13: ระบบจริงใช้ "Reversal แบบใหม่" (config.REVERSAL_NEW) — กฎเข้าที่ new_reversal_direction()
+ข้างล่าง (Bias 1D สวน Structure 4H + ADX ไม่ลง + Key Level + divergence ทิศไม้ · ทิศ = Bias ไม่ใช่สวนเทรนด์ 1D)
+Reversal เดิม (ข้อความถัดไป) ใช้เฉพาะ REVERSAL_NEW = False:
 ใช้ได้ต่อเมื่อ regime_check.py บอกว่า REVERSAL-READY เท่านั้น (ADX peak โค้งลงจริง
 + อยู่ที่ Key Level + มี Divergence) — ทิศมาจากขั้ว divergence ที่ทำให้ regime ยิง
 
@@ -72,13 +75,60 @@ GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
 
 
 # ---------------------------------------------------------------------------
+# Reversal แบบใหม่ (config.REVERSAL_NEW · 2026-10-13) — บ้านเดียวของ scheduler + backtest_replay
+# ---------------------------------------------------------------------------
+
+def new_reversal_direction(regime_info: dict, bias: str | None,
+                           adx_rule: str = "nofall", adx_min: float = 0.0) -> tuple[str | None, str]:
+    """ทิศไม้ Reversal ใหม่ หรือ (None, เหตุผล) — กฎเต็มที่ config.REVERSAL_NEW
+    regime_info = get_regime() · bias = get_trend_bias() (Bias 1D)
+    adx_rule: "nofall" (ระบบจริง · ห้าม ADX ลง) / "any" / "rising" / "declining" (peak แล้วโค้งลง) — ตัวอื่นมีไว้ให้ replay
+    ใช้ .get ทุกคีย์โดยตั้งใจ: regime ที่ข้อมูลไม่ครบ = ไม่เข้า (เทสต์ scan_symbol ส่ง dict ไม่ครบมา)"""
+    if bias not in ("Long", "Short"):
+        return None, "หา Bias 1D ไม่ได้"
+    struct = (regime_info.get("structure") or {}).get("trend") or ""
+    if not (struct.startswith("Long") or struct.startswith("Short")):
+        return None, "Structure 4H ไม่ชัด"
+    if struct.startswith(bias):
+        return None, f"Bias {bias} ตรง Structure (ทาง Scoring)"
+    adx_now, adx_dir = regime_info.get("adx_now"), regime_info.get("adx_direction")
+    if adx_now is None or adx_dir is None:
+        return None, "ไม่มีข้อมูล ADX"
+    if not adx_now > adx_min:
+        return None, f"ADX 4H {adx_now:.1f} ≤ {adx_min:g}"
+    if adx_rule == "nofall" and adx_dir == "ลง":
+        return None, "ADX 4H กำลังลง"
+    if adx_rule == "rising" and adx_dir != "ขึ้น":
+        return None, f"ADX 4H ไม่ได้ขึ้น ({adx_dir})"
+    if adx_rule == "declining" and not (regime_info.get("peak") or {}).get("declining"):
+        return None, "ADX 4H ไม่ได้โค้งลงจาก peak"
+    if not (regime_info.get("key_level") or {}).get("at_key_level"):
+        return None, "ไม่อยู่ที่ Key Level"
+    need = "bullish" if bias == "Long" else "bearish"
+    got = (regime_info.get("divergence") or {}).get("divergence")
+    if got != need:
+        return None, f"ไม่มี divergence {need} (เจอ {got})"
+    return bias, f"Bias 1D {bias} สวน Structure 4H {struct} + Key Level + {need} divergence"
+
+
+def range_position(bars: pd.DataFrame, price: float, direction: str) -> float:
+    """ตำแหน่งราคาในกรอบ high/low ของ bars (scheduler: 24 แท่ง 1H ที่ปิดแล้ว รวมแท่งล่าสุด)
+    Long: 0 = ก้นกรอบ (ยังไม่เด้ง) · 1 = ยอด · Short กลับด้าน · กรอบแบน = 0.5"""
+    hi, lo = float(bars["high"].max()), float(bars["low"].min())
+    if hi <= lo:
+        return 0.5
+    return (price - lo) / (hi - lo) if direction == "Long" else (hi - price) / (hi - lo)
+
+
+# ---------------------------------------------------------------------------
 # แผนเข้าไม้ Reversal (MT5 must already be initialized by caller)
 # ---------------------------------------------------------------------------
 
 def compute_reversal_entry(symbol: str, direction: str, entry: float,
                            sl: float = None, tp: float = None,
                            force: bool = False,
-                           df_4h: pd.DataFrame = None, as_of: datetime = None) -> dict:
+                           df_4h: pd.DataFrame = None, as_of: datetime = None,
+                           tp_ratio: float = None, fallback_rr: float = None) -> dict:
     """คืน info dict ของไม้ Reversal หรือ raise ValueError ถ้าติดด่าน (= ห้ามเข้าไม้นี้)
     ถ้าไม่ส่ง sl/tp จะหาจาก swing structure/Fibonacci อัตโนมัติ (เกณฑ์เดียวกับ scoring.py)
     คีย์: sl (SL โครงสร้าง = pinned_swing) · exec_sl (ส่ง broker) · atr_entry · tp · rr (จาก
@@ -92,7 +142,10 @@ def compute_reversal_entry(symbol: str, direction: str, entry: float,
 
     as_of=None (ปกติ) = เช็คสด ณ ตอนนี้ — as_of=datetime = จำลองเช็ค ณ เวลานั้นในอดีต
     (2026-08-02, ตามแบบ scoring.compute_entry) ให้ backtest เรียกตัวนี้ตรงๆ ได้ ไม่ต้อง copy
-    logic มาเขียนซ้ำ — มีผลเฉพาะตอนไม่ได้ส่ง df_4h มาเอง (จะ fetch ย้อนหลังแทนสด)"""
+    logic มาเขียนซ้ำ — มีผลเฉพาะตอนไม่ได้ส่ง df_4h มาเอง (จะ fetch ย้อนหลังแทนสด)
+
+    tp_ratio / fallback_rr (2026-10-13): Reversal ใหม่ส่ง config.REVERSAL_NEW_TP_FIB_RATIO / _FALLBACK_RR มา
+    None = ค่าของ Reversal เดิม (config.REVERSAL_TP_FIB_RATIO / MIN_RR_REVERSAL) · _TP_RATIO_OVERRIDE ชนะทุกค่า"""
     is_long = direction.capitalize() == "Long"
     _swing_right = SWING_RIGHT_LONG if is_long else SWING_RIGHT_SHORT
 
@@ -153,7 +206,8 @@ def compute_reversal_entry(symbol: str, direction: str, entry: float,
     # หา TP อัตโนมัติจาก Fibonacci (4H) ถ้าไม่ได้กรอกมา
     fib_info = {}
     if tp is None:
-        _ratio = REVERSAL_TP_FIB_RATIO if _TP_RATIO_OVERRIDE is None else _TP_RATIO_OVERRIDE
+        _ratio = (_TP_RATIO_OVERRIDE if _TP_RATIO_OVERRIDE is not None
+                  else tp_ratio if tp_ratio is not None else REVERSAL_TP_FIB_RATIO)
         fib_info  = find_tp_from_fibonacci(df_4h, direction, left=4, right=_swing_right, tolerance_atr=0.22,
                                            vol_multiplier=vol_multiplier, wick_ratio_min=wick_ratio_min,
                                            ratio=_ratio)
@@ -165,8 +219,9 @@ def compute_reversal_entry(symbol: str, direction: str, entry: float,
         else:
             # อิง exec_sl (ระยะเสี่ยงจริง) เหมือน scoring.py — ไม่งั้น TP ที่ตั้งจากสูตร fallback
             # จะให้ R:R จริงต่ำกว่าที่ตั้งใจไว้
-            tp = (entry + abs(entry - exec_sl) * MIN_RR_REVERSAL) if is_long else \
-                 (entry - abs(entry - exec_sl) * MIN_RR_REVERSAL)
+            _fb = MIN_RR_REVERSAL if fallback_rr is None else fallback_rr
+            tp = (entry + abs(entry - exec_sl) * _fb) if is_long else \
+                 (entry - abs(entry - exec_sl) * _fb)
 
     # R:R วัดจาก exec_sl = ระยะเสี่ยงจริงที่จะส่ง broker (ดู comment ที่คำนวณ exec_sl ด้านบน)
     rr = calc_rr(entry, exec_sl, tp, direction)

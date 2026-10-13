@@ -1,7 +1,7 @@
 # -J-Trade
 
 บอทเทรด MT5 (Exness) — สแกนทุก 1 ชม. เปิดไม้ตาม **4 กลยุทธ์** (Scoring = ตามเทรนด์,
-Reversal = กลับตัว, Breakout = เบรกแนว — เพิ่ม 2026-09-21 · **Sideway = เทรดกรอบตอน ADX ต่ำ — เพิ่ม 2026-10-02**) แล้วจัดการไม้ด้วย `exit_monitor`
+Reversal = เข้าตามเทรนด์ 1D ตอน 4H ย่อจบ (**แบบใหม่ 2026-10-13**), Breakout = เบรกแนว — เพิ่ม 2026-09-21 · **Sideway = เทรดกรอบตอน ADX ต่ำ — เพิ่ม 2026-10-02**) แล้วจัดการไม้ด้วย `exit_monitor`
 เป็นรอบทุกชั่วโมง
 
 **ของจริงอยู่ที่ `scheduler.py`** (loop หลัก) + `exit_monitor.py` (กฎออก) ที่เหลือคือเครื่องมือวัด
@@ -44,6 +44,20 @@ Telegram แจ้ง "🟣 ล็อกกำไร +1.5R" แยกจาก "
 (MT5 1H ย้อนได้แค่ ~ปลาย 2023 · BTC/ETH ไม่มี) ไม่ต่าง +0.43 vs +0.47 (n 12) = ไม่ผ่านเกณฑ์ที่ล็อกไว้ · replay เต็ม Δ **+15.43R**
 (Sideway 190 -> 129 ไม้ · ไม้ใหม่แทน 7 ไม้ +0.13 · XAU +11.19 กระจุก · ตัด 5 ไม้ใหญ่เหลือ +8.48 · |t| 1.16) = **ผล in-sample**
 👉 **ต้องตามดู:** ไม้จริงที่ถูกปัดด้วยเหตุผล "Sideway: ADX 4H … < 12.5" ใน scheduler.log — ถ้าถ้าเข้าไปจะไม่ติดลบ = ตัวกรองทิ้งกำไร เอาออก (0 = ปิด)
+
+🔴 **2026-10-13 Reversal แบบใหม่แทนของเดิมทั้งใบ (`config.REVERSAL_NEW` · คำสั่งผู้ใช้ · ตกเกณฑ์ 3/3)**
+กฎเข้าบ้านเดียว `reversal.new_reversal_direction` (scheduler + replay): **Bias 1D สวน Structure 4H** (เข้าทิศ Bias)
++ ADX 4H ทิศขึ้น/ทรง (ระดับไหนก็ได้) + Key Level + divergence ทิศไม้ · ทุก regime · ช่อง Reversal (ร่วม Breakout) มาก่อน Sideway
+SL/TP `compute_reversal_entry` เดิมแต่ **TP Fib ×3 · TP สำรอง 1.5R** · R:R ≥ 1.2 · ด่านสุดท้าย: ราคา ≥ 0.3 ของกรอบ 24 แท่ง 1H
+ไม่งั้น **"ไม้เงา"** (`revnew_ghost.json` บน VPS = จำ SL/TP ของไม้ที่ไม่ได้เข้า ห้ามเข้า Reversal ใหม่จนราคาแตะ) ·
+Reversal เดิม (ADX peak 28.5 โค้งลง) ปิด · ทาง REVERSAL-READY เหลือแค่ flip เป็น Breakout
+replay เต็ม: 378 ไม้ +191.46R -> **405 ไม้ +197.98R (ΔR +6.52)** · Reversal 32 +25.05 (+0.78/ไม้) -> 66 +27.85 (+0.42/ไม้)
+churn \|t\| 0.50 ✗ · ตัด 5 ใหญ่ −4.15 ✗ · ดีขึ้น 5/10 ✗ · **Short ≈ 0** (+3.33R) · ทุกค่า (ADX/0.3/×3/1.5) เลือกหลังเห็นผล
+การกวาดทั้งหมด (~20 replay) ที่ธง `--rev-new*` ใน backtest_replay + memory `reversal-entry-from-scratch-2026-10-11`
+replay ใช้แบบใหม่เป็นค่าเริ่มต้นแล้ว · `--rev-old` = Reversal เดิม · ย้อนระบบจริง = `REVERSAL_NEW = False`
+👉 **ต้องตามดู:** ไม้ Reversal จริงหลัง 2026-10-13 (backtest ต่อไม้ +0.42 · ไม้ตาย ~31%) + บรรทัด "ไม้เงา" ใน scheduler.log
+· ผู้ใช้: "เส้น 0.3 ติดไว้ก่อน จูนครั้งหน้า"
+⚠️ บล็อก 2026-10-10 ข้างล่างยังมีผล: swing low 2 แท่ง (divergence + SL/TP Long) ใช้กับแบบใหม่ด้วย
 
 🔴 **2026-10-10 Reversal Long ยืนยัน swing low ที่ 2 แท่ง 4H (เดิม 4) + ไม้ Reversal ใหม่ไม่ย้าย TP ไม้อื่น (คำสั่งผู้ใช้ · ตกเกณฑ์ 2/3)**
 `regime_check.DIV_SWING_RIGHT_LOWS = 2` (bullish divergence) · `reversal.SWING_RIGHT_LONG = 2` (SL/TP ของ Long) · swing high คง 4
@@ -111,7 +125,7 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 
 🔴 **ห้ามรัน scheduler/exit_monitor บน Mac อีก** — สองเครื่องพร้อมกัน = เปิดไม้ซ้ำ + แย่งกันขยับ SL/TP
 Mac ใช้ทำ backtest (`run_wine.sh`) เท่านั้น
-🔴 **`trades_log.csv` / `reject_cooldown.json` / `daily_summary_state.json` / `cuts_log.csv` ฉบับจริงอยู่บน VPS**
+🔴 **`trades_log.csv` / `reject_cooldown.json` / `daily_summary_state.json` / `cuts_log.csv` / `revnew_ghost.json` (2026-10-13) ฉบับจริงอยู่บน VPS**
 ของบน Mac/ใน git ล้าหลังตั้งแต่วันย้าย · **ห้าม commit `trades_log.csv` จาก Mac** (`git pull` บน VPS จะชน)
 อยากวิเคราะห์ไม้จริงบน Mac: `scp root@<IP>:/home/trader/-J-Trade/trades_log.csv /tmp/` แล้วอ่านจากนั้น
 
@@ -169,8 +183,9 @@ Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay
 เช็คด้วย `./run_wine.sh -c "import scoring; print(scoring.__file__)"` · ทางแก้ = ตัวเรียกที่ทำ
 `sys.path.insert(0, os.getcwd())` แล้ว `runpy.run_path(สคริปต์, run_name="__main__")`
 
-เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (72 เคส ณ 2026-10-10 —
-รวมช่องถือไม้ของ Breakout ใน `scan_symbol` และเกณฑ์ส่งคำสั่งขยับ SL/TP ของ `execute_decision` ตั้งแต่ 2026-09-28)
+เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (101 เคส ณ 2026-10-13 —
+รวมช่องถือไม้ของ Breakout ใน `scan_symbol` และเกณฑ์ส่งคำสั่งขยับ SL/TP ของ `execute_decision` ตั้งแต่ 2026-09-28
+· Reversal ใหม่: กฎเข้า · ทางของ scan_symbol · ไม้เงาบนไฟล์ temp · ด่าน 4e ถึงจุดส่ง order ปลอม ตั้งแต่ 2026-10-13)
 ⚠️ ถ้าจะรันเทสต์กับโค้ดรุ่นเก่า (ตัวเรียก runpy) **ห้าม import scheduler/exit_monitor ก่อนรันไฟล์เทสต์**
 — logger จะติด file handler ก่อนที่เทสต์กันไว้ แล้วข้อความจากไม้ปลอมไปปน `logs/*.log` ของบอทจริง
 (เกิดแล้ว 2026-09-28 09:36:17: scheduler.log 22 บรรทัด · exit_monitor.log 2 บรรทัด — เคส "ไม่แตะ log จริง" ฟ้อง FAIL)
@@ -427,7 +442,11 @@ vs ตรงกัน 137 ไม้ (+0.174R) · ผลต่าง 0.064R/ไ�
 \|t\| 1.60 · ตัด 5 ไม้ใหญ่ −2.56R = อ่านไม่ได้ · base รวม 10 ตัว **215 ไม้ +111.85R** · cap 6R บล็อก 6 ไม้ ΔR −2.01
 เหตุผลเต็มที่บล็อก `config.SYMBOLS`
 
-🔴 **base ปัจจุบัน 2026-10-10 (+Reversal swing low 2 แท่ง · +Reversal ไม่จุด TP->entry): 378 ไม้ +191.46R** · t 6.29 · sd/ไม้ 1.565 · WR 56.6% ·
+🔴 **base ปัจจุบัน 2026-10-13 (+Reversal แบบใหม่): 405 ไม้ +197.98R** · t 6.22 · sd/ไม้ 1.583 · WR 55.3% ·
+Scoring 157 +76.69 · Breakout 55 +38.63 · Reversal 66 +27.85 · Sideway 127 +54.81 · `--end=2026-09-24T00:00` · ไฟล์ base = ผล `_now1013`
+(identity: replay ไม่ใส่ธง = รอบทดลองที่ผู้ใช้เลือกทุกไม้ · `--rev-old` = base 378 ไม้ข้างล่างทุกไม้ · base เดิมสำรองที่ scratchpad
+ของ session 2026-10-13 `base_pre_revnew/`)
+· ก่อนหน้านี้ 🔴 **base 2026-10-10 (+Reversal swing low 2 แท่ง · +Reversal ไม่จุด TP->entry): 378 ไม้ +191.46R** · t 6.29 · sd/ไม้ 1.565 · WR 56.6% ·
 Scoring 157 +76.69 · Breakout 60 +36.98 · Reversal 32 +25.05 · Sideway 129 +52.75 · `--end=2026-09-24T00:00` · ไฟล์ base = ผล `_now1008_tpentrynorev_revswinglows2`
 (base ก่อนหน้าสำรองที่ scratchpad ของ session 2026-10-10 `base_pre_swinglows/`)
 · ก่อนหน้านี้ 🔴 **base 2026-10-08 (+ล็อก +1.5R ที่ 3R · +Sideway ADX ≥ 12.5): 376 ไม้ +180.91R** · t 5.98 · sd/ไม้ 1.559 · WR 56.1% ·

@@ -209,8 +209,11 @@ import exit_monitor  # noqa: E402
 SLOT_SKIP = "ช่อง Reversal มีไม้เปิดอยู่แล้ว"
 
 
-def scan_output(on_book: list[str], regime: str, regime_extra: dict = None, bias_1d: str = None) -> str:
-    """รัน scan_symbol("XAUUSDm") ตอนที่มีไม้กลยุทธ์ on_book เปิดอยู่ แล้วคืนข้อความที่พิมพ์"""
+def scan_output(on_book: list[str], regime: str, regime_extra: dict = None, bias_1d: str = None,
+                ohlcv=None, tick=None, extra_patches: dict = None) -> str:
+    """รัน scan_symbol("XAUUSDm") ตอนที่มีไม้กลยุทธ์ on_book เปิดอยู่ แล้วคืนข้อความที่พิมพ์
+    ohlcv / tick / extra_patches (2026-10-13 · Reversal ใหม่): แทน get_ohlcv · symbol_info_tick · อื่นๆ ได้
+    ไม่ส่ง = ของเดิม (แท่ง None · tick None = scan หยุดที่ "ดึงราคาไม่ได้" ไม่มีทางส่ง order)"""
     global _positions
     _positions = []
     for i in range(len(on_book)):
@@ -230,8 +233,9 @@ def scan_output(on_book: list[str], regime: str, regime_extra: dict = None, bias
         (scheduler, "check_upcoming_news"): lambda hours_ahead=None: (False, "", None),
         (scheduler, "get_regime"): lambda s: {"regime": regime, "action": "ทดสอบ", **(regime_extra or {})},
         (scheduler, "get_trend_bias"): lambda s, df: (bias_1d, "ทดสอบ"),
-        (scheduler, "get_ohlcv"): lambda *a, **k: None,
-        (scheduler.mt5, "symbol_info_tick"): lambda s: None,
+        (scheduler, "get_ohlcv"): ohlcv or (lambda *a, **k: None),
+        (scheduler.mt5, "symbol_info_tick"): lambda s: tick,
+        **(extra_patches or {}),
     }
     saved = {k: getattr(*k) for k in patches}
     for (obj, name), fn in patches.items():
@@ -502,6 +506,184 @@ _saved_gs = journal.get_trade_strategy
 journal.get_trade_strategy = lambda t: "Sideway"
 results.append(tpe_check("ไม้เก่าเป็น Sideway ขาดทุน + ไม้ใหม่สวน -> ไม่แตะ", _hk(_B, 24503.4), "Short", []))
 journal.get_trade_strategy = _saved_gs
+
+# ── Reversal ใหม่ (2026-10-13 · config.REVERSAL_NEW) ─────────────────────────────────────────────────
+# กฎเข้า (reversal.new_reversal_direction) · ตำแหน่งในกรอบ · ทางของ scan_symbol · ไม้เงา (ไฟล์ state ชี้ไป temp)
+# replay ตรวจกฎเดียวกันได้ (เรียกฟังก์ชันเดียวกัน) แต่ไม่เดินโค้ด scheduler ข้อ 4a-2 / 4e / ไม้เงาบนไฟล์ — เทสต์นี้แทน
+import tempfile           # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+import pandas as pd       # noqa: E402
+import reversal           # noqa: E402
+
+_RI = {"structure": {"trend": "Short (reg)"}, "adx_now": 18.0, "adx_direction": "ทรง",
+       "key_level": {"at_key_level": True}, "divergence": {"divergence": "bullish"},
+       "peak": {"declining": False}}
+
+
+def rn_check(label, over, bias, want, rule="nofall"):
+    got, why = reversal.new_reversal_direction({**_RI, **over}, bias, adx_rule=rule)
+    ok = got == want
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {got} ({why})")
+    return ok
+
+
+print("\nReversal ใหม่ — กฎเข้า (reversal.new_reversal_direction):")
+results += [
+    rn_check("Bias Long + Structure Short + ADX ทรง + KL + bullish", {}, "Long", "Long"),
+    rn_check("ADX ขึ้น -> เข้า", {"adx_direction": "ขึ้น"}, "Long", "Long"),
+    rn_check("ADX ลง -> ไม่เข้า", {"adx_direction": "ลง"}, "Long", None),
+    rn_check("ADX ลง แต่กฎ any -> เข้า (ไว้ให้ replay)", {"adx_direction": "ลง"}, "Long", "Long", rule="any"),
+    rn_check("Bias ตรง Structure -> ทาง Scoring", {"structure": {"trend": "Long (reg)"}}, "Long", None),
+    rn_check("Bias Short + Structure Long + bearish -> Short",
+             {"structure": {"trend": "Long (reg)"}, "divergence": {"divergence": "bearish"}}, "Short", "Short"),
+    rn_check("divergence สวนทิศ -> ไม่เข้า", {"divergence": {"divergence": "bearish"}}, "Long", None),
+    rn_check("ไม่อยู่ที่ Key Level -> ไม่เข้า", {"key_level": {"at_key_level": False}}, "Long", None),
+    rn_check("Structure ไม่ชัด -> ไม่เข้า", {"structure": {"trend": "ไม่ชัด / กำลังพัง"}}, "Long", None),
+    rn_check("หา Bias ไม่ได้ -> ไม่เข้า", {}, None, None),
+]
+_got = reversal.new_reversal_direction({"regime": "TREND"}, "Long")[0]
+print(f"  [{'ok  ' if _got is None else 'FAIL'}] {'regime_info ไม่ครบคีย์ -> ไม่เข้า (ไม่ crash)':52} -> {_got}")
+results.append(_got is None)
+
+_bars = pd.DataFrame({"high": [110.0, 108.0], "low": [100.0, 104.0]})
+for _lbl, _args, _want in (("Long ราคา 103 ในกรอบ 100-110 -> 0.3", (_bars, 103.0, "Long"), 0.3),
+                           ("Short ราคา 107 ในกรอบ 100-110 -> 0.3", (_bars, 107.0, "Short"), 0.3),
+                           ("กรอบแบน -> 0.5", (pd.DataFrame({"high": [5.0], "low": [5.0]}), 5.0, "Long"), 0.5)):
+    _v = reversal.range_position(*_args)
+    _ok = abs(_v - _want) < 1e-9
+    print(f"  [{'ok  ' if _ok else 'FAIL'}] {_lbl:52} -> {_v:.2f}")
+    results.append(_ok)
+
+# ไม้เงา — ไฟล์ state ชี้ไป temp · นาฬิกา MT5 ตรึง · แท่ง 1H ปลอม (แท่งสุดท้าย = ยังไม่ปิด)
+_ghost_tmp = os.path.join(tempfile.mkdtemp(), "revnew_ghost.json")
+_saved_rn = (scheduler._REVNEW_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.REVERSAL_NEW)
+scheduler._REVNEW_GHOST_FILE, scheduler.REVERSAL_NEW = _ghost_tmp, True
+_T0 = pd.Timestamp("2026-10-13 10:05").to_pydatetime()
+
+
+def _h1(rows):
+    """rows = [(เวลา, high, low)] — ต่อท้ายแท่งที่ยังไม่ปิดให้เอง (แตะ SL/TP ได้แต่ต้องไม่ถูกนับ)"""
+    df = pd.DataFrame(rows, columns=["time", "high", "low"])
+    df["time"] = pd.to_datetime(df["time"])
+    return pd.concat([df, pd.DataFrame({"time": [df["time"].iloc[-1] + pd.Timedelta(hours=1)],
+                                        "high": [9e9], "low": [-9e9]})], ignore_index=True)
+
+
+def ghost_check(label, direction, now, bars, want_active):
+    with contextlib.redirect_stdout(io.StringIO()):
+        scheduler.mt5_now = lambda: _T0
+        scheduler.revnew_ghost_set("XAUUSDm", direction, 4000.0 if direction == "Long" else 4300.0,
+                                   4300.0 if direction == "Long" else 4000.0)
+        scheduler.mt5_now = lambda: now
+        scheduler.get_ohlcv = lambda *a, **k: bars
+        g = scheduler.revnew_ghost_active("XAUUSDm")
+    active = g is not None
+    kept = "XAUUSDm" in scheduler._ghost_load()
+    ok = active == want_active and kept == want_active
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {'ยังไม่จบ' if active else 'จบ (ลบจากไฟล์)' if not kept else 'จบแต่ไฟล์ค้าง'}")
+    return ok
+
+
+_T5 = _T0 + pd.Timedelta(hours=5)
+print("\nReversal ใหม่ — ไม้เงา (scheduler.revnew_ghost_*):")
+results += [
+    ghost_check("Long ยังไม่แตะ SL/TP -> ยังไม่จบ", "Long", _T5,
+                _h1([("2026-10-13 10:00", 4100, 4050), ("2026-10-13 11:00", 4120, 4060)]), True),
+    ghost_check("Long แท่งปิดแล้วแตะ SL -> จบ", "Long", _T5,
+                _h1([("2026-10-13 10:00", 4100, 4050), ("2026-10-13 11:00", 4080, 3999)]), False),
+    ghost_check("Long แตะ TP -> จบ", "Long", _T5,
+                _h1([("2026-10-13 10:00", 4300, 4050), ("2026-10-13 11:00", 4120, 4060)]), False),
+    ghost_check("แตะ SL ก่อนแท่งที่สร้างไม้เงา -> ไม่นับ", "Long", _T5,
+                _h1([("2026-10-13 09:00", 4100, 3990), ("2026-10-13 10:00", 4100, 4050)]), True),
+    ghost_check("แท่งที่ยังไม่ปิดแตะ -> ไม่นับ", "Long", _T5,
+                _h1([("2026-10-13 10:00", 4100, 4050)]), True),
+    ghost_check("Short แตะ SL (high ≥ SL) -> จบ", "Short", _T5,
+                _h1([("2026-10-13 10:00", 4301, 4150)]), False),
+    ghost_check("ครบ MAX_HOLD_DAYS -> จบ", "Long", _T0 + pd.Timedelta(days=31),
+                _h1([("2026-10-13 10:00", 4100, 4050)]), False),
+    ghost_check("ดึงแท่ง 1H ไม่ได้ -> ถือว่ายังไม่จบ", "Long", _T5, None, True),
+]
+
+
+def rn_scan(on_book, bias, ghost):
+    """scan_symbol ที่ regime CHOPPY + สัญญาณ Reversal ใหม่ครบ (ADX 15 = เขต Sideway ด้วย)"""
+    if ghost:
+        scheduler.mt5_now = lambda: _T0
+        scheduler.revnew_ghost_set("XAUUSDm", "Long", 4000.0, 4300.0)
+    else:
+        scheduler._ghost_save({})
+    scheduler.mt5_now = lambda: _T5
+    return scan_output(on_book, "CHOPPY", regime_extra={**_RI, "adx_now": 15.0}, bias_1d=bias)
+
+
+def route_check(label, on_book, bias, ghost, want):
+    out = rn_scan(on_book, bias, ghost)
+    got = ("Reversal ใหม่" if "Reversal ใหม่ Long —" in out else
+           "ไม้เงาบล็อก" if "ไม้เงา Long ยังไม่จบ" in out else
+           "ช่อง Scoring เต็ม" if "ช่อง Scoring มีไม้เปิดอยู่แล้ว" in out else
+           "Sideway/อื่น" if "ดึงราคาไม่ได้" in out else "ไม่เข้า")
+    ok = got == want
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {got}")
+    return ok
+
+
+print("\nReversal ใหม่ — ทางของ scan_symbol:")
+results += [
+    route_check("ช่องว่าง + สัญญาณครบ -> Reversal ใหม่ (ก่อน Sideway)", [], "Long", False, "Reversal ใหม่"),
+    route_check("ถือ Scoring อยู่ -> ช่อง Reversal ว่าง -> Reversal ใหม่", ["Scoring"], "Long", False, "Reversal ใหม่"),
+    route_check("ถือ Breakout (ช่อง Reversal) -> ไม่ดู -> Sideway", ["Breakout"], "Long", False, "Sideway/อื่น"),
+    route_check("ไม้เงายังไม่จบ -> ไม่เข้า Reversal ใหม่", [], "Long", True, "ไม้เงาบล็อก"),
+    route_check("Bias ตรง Structure -> ไม่ใช่ Reversal ใหม่", [], "Short", False, "Sideway/อื่น"),
+]
+
+
+def gate_scan(close_pos):
+    """เดิน scan_symbol จนถึงด่าน 4e — tick/SL/TP/แท่ง 1H/lot/order ปลอมทั้งหมด (ไม่มีคำสั่งไป broker)
+    กรอบ 24 แท่ง 1H = 100-110 · ราคาเข้า = 100 + 10 × close_pos · คืน (ข้อความ, สิ่งที่ถูกเรียก, ไม้เงาในไฟล์)"""
+    scheduler._ghost_save({})
+    scheduler.mt5_now = lambda: _T5
+    calls = []
+    h1 = pd.DataFrame({"time": pd.date_range("2026-10-12 08:00", periods=27, freq="h"),
+                       "high": [110.0] * 27, "low": [100.0] * 27})
+    px = 100.0 + 10.0 * close_pos
+
+    def fake_entry(*a, **k):
+        calls.append(("compute", k.get("tp_ratio"), k.get("fallback_rr")))
+        return {"sl": 97.0, "exec_sl": 95.0, "tp": 120.0, "rr": 1.6, "atr_entry": 2.0}
+
+    def fake_order(*a, **k):
+        calls.append(("order", k.get("strategy")))
+        return 999
+
+    out = scan_output(
+        [], "CHOPPY", regime_extra={**_RI, "adx_now": 15.0, "df_4h": None}, bias_1d="Long",
+        ohlcv=lambda s, tf=None, bars=None, **k: h1 if tf == _config.MT5_TIMEFRAMES["1H"] else None,
+        tick=SimpleNamespace(bid=px, ask=px),
+        extra_patches={(reversal, "compute_reversal_entry"): fake_entry,
+                       (scheduler, "calculate_lot_size"): lambda *a, **k: (0.1, None),
+                       (scheduler, "clamp_lot"): lambda s, l: l,
+                       (scheduler, "risk_pct_of"): lambda *a, **k: 2.0,
+                       (scheduler, "place_order"): fake_order})
+    return out, calls, scheduler._ghost_load().get("XAUUSDm")
+
+
+print("\nReversal ใหม่ — ด่านสุดท้าย 4e (ตำแหน่งในกรอบ 24 ชม.):")
+_want_compute = [("compute", _config.REVERSAL_NEW_TP_FIB_RATIO, _config.REVERSAL_NEW_FALLBACK_RR)]
+_out, _calls, _g = gate_scan(0.2)
+_orders = [c for c in _calls if c[0] == "order"]
+_ok = (not _orders and _g is not None and (_g["direction"], _g["sl"], _g["tp"]) == ("Long", 95.0, 120.0)
+       and "เริ่มไม้เงา" in _out)
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ตำแหน่ง 0.2 -> ไม่ส่ง order · ไม้เงา SL=exec_sl TP=tp':52} -> "
+      f"{'ส่ง order' if _orders else 'ไม่ส่ง'} · ไม้เงา {_g}")
+results.append(_ok)
+_out, _calls, _g = gate_scan(0.5)
+_orders = [c for c in _calls if c[0] == "order"]
+_comp = [c for c in _calls if c[0] == "compute"]
+_ok = _orders == [("order", "Reversal")] and _g is None and _comp == _want_compute
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ตำแหน่ง 0.5 -> ส่ง order Reversal · TP/สำรองค่าใหม่':52} -> "
+      f"{_orders or 'ไม่ส่ง'} · {_comp}")
+results.append(_ok)
+scheduler._REVNEW_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.REVERSAL_NEW = _saved_rn
 
 # เคสข้างบนยิง WARNING "ไม่มี SL" จริง 2 บรรทัด — ต้องไม่มี handler ตัวไหนเขียนลงไฟล์ในโฟลเดอร์ logs/
 # (ถ้า get_logger เปลี่ยนวิธีเช็ค handler ซ้ำเมื่อไหร่ เคสนี้จะพังก่อนที่ log จริงจะถูกปนอีก)
