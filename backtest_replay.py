@@ -313,6 +313,16 @@ scoring_min_rr = float(_smr_arg.split("=")[1]) if _smr_arg else None
 _rtr_arg = next((a for a in sys.argv if a.startswith("--rev-tp-ratio=")), None)
 if _rtr_arg:
     reversal._TP_RATIO_OVERRIDE = float(_rtr_arg.split("=")[1])
+# --rev-fallback-rr=X : ทับ reversal.MIN_RR_REVERSAL (TP สำรองตอนหา Fibonacci ไม่ได้ = entry ± risk × X · ปกติ 2.0) · tag _revfbX
+#   ใช้คู่ --rev-new = มีผลกับ Reversal ใหม่อย่างเดียว (Reversal เดิมปิด · Breakout ใช้ TP สำรองของ Scoring 1.5R)
+#   ผู้ใช้เลือก 1.5 2026-10-12 (เท่า Scoring/Breakout) — ชุด ×3 มีไม้ใช้ TP สำรองแค่ 2/82: BTC 2024-10-04 MFE 1.89R
+#   จบ BE -> จะชน TP 1.5R (+1.5) · AUDNZD MFE 0.30 SL เท่าเดิม = ผลจากไม้เดียว · กับ Reversal เดิม 1.5R จะเสีย ~0.9R (3 ไม้)
+#   🔻 replay 2026-10-12 (แบบผู้ใช้ ×3 + ไม้เงา): สำรอง 2R ΔR +4.53 -> สำรอง 1.5R **+4.99** (83 ไม้ · Reversal +29.91)
+#      + --rev-min-rr=1.5 (ผู้ใช้ลอง): +3.30 · ตัด 14 ไม้ที่ R:R 1.2-1.5 (+0.31 ตามคัดกรอง) แต่ 5 ไม้กลับมาทีหลัง −1.55
+#      = ด่าน R:R เป็นตัวรอราคาเหมือนเดิม · ปุ่มแบน · คง 1.2
+_rfb_arg = next((a for a in sys.argv if a.startswith("--rev-fallback-rr=")), None)
+if _rfb_arg:
+    reversal.MIN_RR_REVERSAL = float(_rfb_arg.split("=")[1])
 _rmr_arg = next((a for a in sys.argv if a.startswith("--rev-min-rr=")), None)
 if _rmr_arg:
     reversal._MIN_RR_OVERRIDE = float(_rmr_arg.split("=")[1])
@@ -540,12 +550,158 @@ if "--no-rev-choch" in sys.argv:
 #    ติดด่านอื่นยังเป็น READY · ไม่เอา — ดูทางลำดับที่ --sideway-first ข้างล่าง
 rev_struct_opp = "--rev-struct-opp" in sys.argv
 
+# --rev-short-struct : ด่านของ Reversal Short ใช้ Structure 4H = Short แทน Bias 1D = Short
+# ที่มา 2026-10-11 ผู้ใช้: "ถ้าเปลี่ยนไปใช้ Structure แทน Bias เคยวัดยัง" — ยังไม่เคย (--rev-struct-opp ถามกลับทิศ: Short ต้องมี Structure Long)
+# เปลี่ยนเฉพาะ Reversal: ทาง Breakout ยังตัดสินด้วย Bias เหมือนเดิมทุกอย่าง (Bias Long + Structure Long -> Breakout)
+#   ผลต่างจาก base มีแค่ 2 กลุ่ม: Bias Long/None + Structure Short = ไม้ Reversal Short ใหม่ · Bias Short + Structure Long = ไม้ Short ที่หาย
+# แท่งที่เป็น READY เพราะ --breakout-no-min-peak (ไม่ผ่าน peak ADX) ยังใช้ Bias — ไม่งั้นได้ Reversal Short ที่ไม่ผ่าน peak
+# คาดก่อนรัน: divergence ขาลง = ราคาเพิ่งทำยอดสูงขึ้น ความชัน 1-3 สัปดาห์มักเป็นขาขึ้น -> ไม้ Short น่าจะน้อยลง
+# 🔻 replay เต็ม 2026-10-11 (--end=2026-09-24T00:00 · ไฟล์ _now1011_revshortstruct): 378 ไม้ +191.46R -> 376 ไม้ +189.53R **ΔR −1.93 · คง Bias**
+#    Reversal Short 4 -> 2 ไม้ · ไม้ใหม่ 0 · หาย 2 (XAU TP +1.95 · GBPCHF BE −0.02 = Bias Short แต่ Structure Long) · |t| 0.87
+#    กลยุทธ์อื่นตรง base ทุกไม้ (Breakout 60 +36.98 ไม่ขยับ = แยกทาง Breakout ได้สะอาด)
+#    ฝั่ง Long (คัดกรอง ไม่ได้ replay): Reversal Long 28/28 ไม้มี Structure 4H = Short ตอนเข้า -> ด่าน "Long ต้องมี Structure Long"
+#    = ตัด Reversal Long ทิ้งทั้งหมด (+24.20R) แบบเดียวกับ CHoCH · ไม่ต้องรัน
+rev_short_struct = "--rev-short-struct" in sys.argv
+
+# --rev-new : Reversal แบบใหม่ทั้งใบ (ผู้ใช้ 2026-10-11 "Reversal มีปัญหา อยากแก้ใหม่หมด")
+#   เข้าเมื่อ regime = TREND (ADX 4H ≥ 22 · ทิศ ขึ้น/ทรง · structure intact · ไม่ใช่ TREND แรงจัด = เงื่อนไขเดียวกับ Scoring)
+#   + Bias 1D สวน Structure 4H (Bias Long + Structure Short -> Long · Bias Short + Structure Long -> Short)
+#   + อยู่ที่ Key Level + divergence ทิศเดียวกับไม้ (Long = bullish · Short = bearish)
+#   SL/TP = compute_reversal_entry เดิม (R:R ≥ MIN_RR_HARD_BLOCK_REVERSAL 1.2) · ครองช่อง Reversal เดิม
+#   = รอบที่ Scoring ปัดทิ้งเพราะ "Bias สวนโครงสร้าง 4H" แล้วมีการย่อที่หมดแรงให้เห็น
+#   Reversal เดิม (REVERSAL-READY: ADX peak ≥ 28.5 โค้งลง) ปิด — เหลือแค่ทาง Breakout (ผู้ใช้เลือกเก็บ Breakout ไว้)
+#   ไม่ซ้อนกับ Scoring: Scoring ต้อง Bias ตรง Structure · แบบนี้ต้องสวน
+#   หลักฐานก่อนรัน: --no-scoring-struct-match 2026-10-10 ให้ Scoring เข้ากลุ่ม Bias สวน Structure ได้ 73 ไม้ −3.12R (ชนะ 30%)
+#   = กลุ่มตั้งต้นก่อนกรองด้วย Key Level + divergence · คัดกรอง 4H 2014-26 (memory reversal-entry-from-scratch) "ตามเทรนด์ใหญ่
+#   + divergence" ≈ สุ่ม แต่ไม่มี Key Level / ADX ≥ 22 และใช้ TP 2R คงที่ — ชุดนี้ยังไม่เคยวัดตรงๆ
+# 🔻 replay เต็ม 2026-10-11 (--end=2026-09-24T00:00 · ไฟล์ _now1011_revnew): 378 ไม้ +191.46R -> 368 ไม้ +178.43R **ΔR −13.03**
+#    Reversal 32 ไม้ +25.05 (ต่อไม้ +0.78 · ชนะ 72%) -> 24 ไม้ +12.27 (+0.51 · ชนะ 54% · t 1.63 · Long 22 +10.57 / Short 2 +1.70)
+#    Breakout −2 ไม้ (−0.26 · ช่อง Reversal ถูกไม้ใหม่ครอง) · Scoring/Sideway ไม่ขยับ · direct 0 = churn ล้วน |t| 1.08
+#    ตัด 5 รายการใหญ่เหลือ −15.42 · ดีขึ้น 4/8 symbol · ไม้ Reversal เดิมหายครบ 32 ไม้ ไม่ซ้อนกับไม้ใหม่เลย (เดิมเข้าตอน ADX โค้งลง)
+#    funnel รอบ TREND ที่ Bias สวน Structure ~6,950 ชม.: ไม่มี divergence ทิศไม้ 4,566 · ไม่อยู่ Key Level 892 · ช่องไม่ว่าง 557 · hard block 743
+# 🔴 2026-10-13: Reversal ใหม่เข้าระบบจริงแล้ว (config.REVERSAL_NEW) — replay ใช้แบบใหม่เป็นค่าเริ่มต้น (= scheduler)
+#   --rev-old = Reversal เดิม (เทียบ base ก่อน 2026-10-13) · --rev-new = บังคับแบบใหม่ตอน config ปิด
+#   --rev-new-trend = รอบแรก 2026-10-11 (เฉพาะ regime TREND · Key Level/div ตรวจใน branch) — ธง --rev-new เดิมหมายถึงแบบนี้
+#   ธงด้านล่างทั้งหมดทับค่าระบบจริงเพื่อทดลอง · tag ติดเฉพาะค่าที่ต่างจาก config
+#   ⚠️ ไฟล์ผลรอบก่อน 2026-10-13 ที่ติด _revnew* ใช้ความหมายธงเดิม (ตอนนั้นค่าเริ่มต้นคือ Reversal เดิม)
+rev_new = (config.REVERSAL_NEW or "--rev-new" in sys.argv) and "--rev-old" not in sys.argv
+rev_new_trend_only = "--rev-new-trend" in sys.argv
+# --rev-old-too : Reversal เดิม (REVERSAL-READY) เปิดคู่กับแบบใหม่ — config.REVERSAL_OLD_ALSO (ปิดอยู่ · ยังไม่เคยวัด)
+rev_old_too = config.REVERSAL_OLD_ALSO or "--rev-old-too" in sys.argv
+# --rev-new-adx=X : --rev-new แต่ไม่ต้องรอ regime TREND — แค่ ADX 4H > X (ทิศไหนก็ได้ · 0 = ไม่ดู ADX) + Bias สวน
+#   Structure + Key Level + divergence ทิศไม้ (ผู้ใช้ 2026-10-12 "ไม่ดู ADX กับ ADX > 12.5")
+#   ที่มา: คัดกรองแท่ง 4H 2 ปี 10 symbol — Bias สวน Structure 10,389 แท่ง แต่ 66% อยู่ที่ ADX < 20 · ADX ≥ 22 ขึ้น/ทรง แค่ 18%
+#   จังหวะเข้า (ก่อนด่าน SL/R:R/ช่อง): TREND 73 · ไม่ดู ADX 161 · ตัด Key Level 76 (Key Level ผ่าน 87-90% = แทบไม่กรอง)
+#   ลำดับ: รอบที่สัญญาณครบ **และช่อง Reversal ว่าง** ไป Reversal ก่อน Sideway (เหมือนลำดับ Reversal เดิม 2026-10-02)
+#   รอบอื่นเดินทางเดิมทุกอย่าง — Sideway/Scoring ไม่เสียรอบให้สัญญาณที่ไม่ครบ
+# 🔻 replay เต็ม 2026-10-12 (base 378 ไม้ +191.46R · ไฟล์ _now1011_revnew_adx{X}) — **แพ้ base ทุกค่า · ไม่เอา**
+#    X      ทั้งระบบ  ΔR      Reversal ไม้/R/ต่อไม้   Long        Short       |t| churn  ตัด 5 ใหญ่  symbol ดีขึ้น
+#    0      +182.18  −9.29   81 +14.60 +0.18        42 +14.17   39 +0.43    0.56       −17.45      5/10
+#    10     +180.87  −10.59  79 +13.30 +0.17        42 +14.17   37 −0.88    0.64       −18.75      5/10
+#    12.5   +177.17  −14.29  71  +9.60 +0.14        39  +9.15   32 +0.45    0.90       −17.04      5/10
+#    15     +177.28  −14.18  63 +11.62 +0.18        37  +8.65   26 +2.98    0.94       −16.93      5/10
+#    17.5   +172.96  −18.50  51  +7.31 +0.14        33  +8.08   18 −0.77    1.32       −21.25      4/10
+#    20     +178.72  −12.74  40 +11.52 +0.29        30  +8.95   10 +2.57    0.99       −15.99      4/10
+#    (--rev-new ADX ≥ 22 ขึ้น/ทรง: −13.03 · 24 ไม้ +0.51 · Reversal เดิม 32 ไม้ +25.05 +0.78/ไม้)
+#    = ได้ไม้เพิ่มจริงแต่ต่อไม้ตกเหลือ +0.14..+0.29 · Short ≈ 0 ทุกค่า · Breakout/Sideway แทบไม่ขยับ (+0.78 / +0.37..−1.54)
+#    ไม่มีค่าไหนเข้าใกล้ Reversal เดิม — การคลาย ADX ไม่ได้แก้ปัญหา ตัวเลือก Bias สวน Structure + Key Level + div เองที่อ่อน
+_rna_arg = next((a for a in sys.argv if a.startswith("--rev-new-adx=")), None)
+rev_new_adx_min = float(_rna_arg.split("=")[1]) if _rna_arg else 0.0
+# --rev-new-adx-declining : ต้องเป็นรอบที่ ADX ทำ peak แล้วโค้งลงติดกัน ADX_DECLINE_BARS แท่ง (ไม่มีเกณฑ์ความสูง peak)
+#   ที่มา 2026-10-12: ไม้ Reversal ใหม่ 95 ไม้ — เข้าตอน ADX โค้งลง ตาย 27% (33 ไม้ +10.77) vs ไม่โค้ง 42% (62 ไม้ +4.58)
+#   z ≈ 1.5 ไม่ผ่าน · = เงื่อนไข ADX ของ Reversal เดิม (ไม่มี peak ≥ 28.5) · ใช้คู่ --rev-new-adx (ไม่ใส่ = 0)
+rev_new_adx_declining = "--rev-new-adx-declining" in sys.argv
+# --rev-new-adx-rising : ADX ระดับไหนก็ได้ แต่ทิศต้อง "ขึ้น" (regime_check.adx_direction: ADX ตอนนี้ − 5 แท่งก่อน ≥ 1.0
+#   · "ทรง" ไม่ผ่าน) — ผู้ใช้ 2026-10-13 "adx เท่าไรก็ได้แต่ขอหัวขึ้น" · ใช้คู่ --rev-new-adx (ไม่ใส่ = 0)
+rev_new_adx_rising = "--rev-new-adx-rising" in sys.argv
+# --rev-new-adx-nofall : ADX ระดับไหนก็ได้ ทิศ "ขึ้น" หรือ "ทรง" (ห้าม "ลง") — ผู้ใช้ 2026-10-13 "ทั้งขึ้นและทรง"
+rev_new_adx_nofall = "--rev-new-adx-nofall" in sys.argv
+# 🔻 กวาด ADX บนแบบผู้ใช้ครบชุด 2026-10-12/13 (pos 0.3 + ไม้เงา + TP ×3 + สำรอง 1.5R · ΔR ทั้งระบบ vs base · Reversal ไม้/R/ต่อไม้):
+#    ไม่ดู ADX       +4.99 · 83 +29.91 +0.36 | ขึ้น/ทรง ทุกระดับ (nofall) **+6.52** · 66 +27.85 +0.42 (Sideway +3.59)
+#    > 15            −3.35 · 66 +21.59 +0.33 | > 20 −10.68 · 41 +12.72 +0.31 | หัวขึ้น −11.00 · 37 +12.84 +0.35
+#    โค้งลง (decl)   −8.47 · 58 +17.31 +0.30 | ≥ 22 ขึ้น/ทรง (TREND) −9.56 · 23 +15.91 +0.69
+#    = ด่านระดับ ADX ตัดไม้โดยไม่ได้คัด (ต่อไม้ ~0.3 ทุกค่า) · ตัดแค่ช่วง ADX "ลง" ได้ไม้น้อยลง 17 ไม้ R เท่าเดิม
+#    ทุกค่า |t| ≤ 0.79 · ตัด 5 ใหญ่ติดลบทุกค่า · nofall vs ไม่ดู ADX ต่าง +1.53 = noise
+# กฎ ADX ที่ส่งให้ reversal.new_reversal_direction — ไม่ใส่ธงเลย = ค่าระบบจริง · --rev-new-adx=X อย่างเดียว = "any" (แค่ > X)
+rev_new_adx_rule = ("declining" if rev_new_adx_declining else "rising" if rev_new_adx_rising
+                    else "nofall" if rev_new_adx_nofall else "any" if _rna_arg else config.REVERSAL_NEW_ADX_RULE)
+
+# --rev-new-pos=X : (ใช้คู่ --rev-new / --rev-new-adx) ไม่เข้าถ้าราคาอยู่ต่ำกว่า X ของกรอบ 24 แท่ง 1H ล่าสุด
+#   (Long: (ราคา − ต่ำสุด) / (สูงสุด − ต่ำสุด) · Short กลับด้าน · 0 = ก้นกรอบ = ยังไม่เด้ง · รวมแท่งปิดล่าสุด)
+#   ที่มา 2026-10-12: ไม้ Reversal ใหม่ 95 ไม้ ตาย (MFE < 0.5R) 37% · 17 ตัวแปรแยกไม่ได้ (permutation p 0.70) ตัวนี้ดีสุดแบบเฉียด
+#   (AUC 0.377 · bootstrap ชนะ 45%) · ชุดไม้คงที่ < 0.3 ตัด 18 ไม้ (ตาย 9 ดี 6) +9.45R · เส้น 0.3 เลือกหลังเห็นผล
+#   ⚠️ เป็นตัวหน่วง (ราคาเด้งแล้วด่านปลดเอง — แบบ MIN_TURN_FROM_EXTREME_R: คัดกรอง +9.77 -> replay +1.74)
+# 🔻 replay เต็ม 2026-10-12 — **ตัวหน่วงจริง ได้ 0 · ไม่เอา**
+#    ไม่ดู ADX + 0.3 (_revnew_adx0_pos0.3): Reversal 81 +14.60 -> 73 +13.60 (คัดกรองบอก +8.39 ได้จริง −1.00) · ทั้งระบบ ΔR −11.33
+#      ด่านตัด 17 ไม้ −8.39 ตามคาด แต่ 9 ไม้กลับมาเข้าทิศเดิม median 3 ชม. ผลเท่าเดิม (−9.42 -> −9.39)
+#    ADX ≥ 22 + 0.3 (_revnew_pos0.3): 24 +12.27 -> 22 +12.13 (คัดกรองบอก +2.99) · ตัด 5 กลับมา 3 median 3 ชม. · ΔR −13.17
+_rnp_arg = next((a for a in sys.argv if a.startswith("--rev-new-pos=")), None)
+rev_new_pos = float(_rnp_arg.split("=")[1]) if _rnp_arg else config.REVERSAL_NEW_MIN_RANGE_POS
+rev_new_pos = rev_new_pos or None          # 0 = ปิดด่าน
+
+# --rev-new-lock : (ใช้คู่ --rev-new-pos) ด่านตำแหน่งบล็อก divergence ตัวไหน -> divergence ตัวนั้นใช้ไม่ได้อีก
+#   ต้องรอ swing ใหม่ (จุดที่ 2 ของ divergence เปลี่ยน) ถึงเข้าได้ — แก้ปัญหา --rev-new-pos เป็นตัวหน่วง (ไม้กลับมาใน 3 ชม.)
+#   (ผู้ใช้ 2026-10-12) · ล็อกเฉพาะรอบที่ช่อง Reversal ว่าง (ระบบจริงไม่ประเมินสัญญาณตอนช่องเต็ม)
+#   คาดก่อนรัน: ล็อกได้สนิท = ตัดไม้ 17 ไม้ของคัดกรอง -> Reversal ไม่ดู ADX ≈ +22.99 (ยังต่ำกว่า Reversal เดิม +25.05) · in-sample
+# 🔻 replay เต็ม 2026-10-12 (ไม่ดู ADX + pos 0.3 + lock · _revnew_adx0_pos0.3_lock): **แย่ลง · ไม่เอา**
+#    Reversal 81 +14.60 (ไม่มีด่าน) -> 53 +8.17 · ทั้งระบบ ΔR −16.77 · ดีขึ้น 2/10 symbol
+#    ล็อกตัดไม้ที่ตั้งใจได้ครบ (17 ไม้ −8.39 ตาย 9) แต่ตัดไม้ที่เข้าตำแหน่ง ≥ 0.3 ไปด้วย 17 ไม้ **+8.44** (ชน TP 7)
+#    = ไม้รอบหลังบน divergence ตัวเดียวกัน (ไม้แรกโดน SL แล้วเข้าใหม่) · + ไม้ใหม่ 6 ไม้ −6.38 จากช่องว่าง
+#    => setup ที่ไม้แรกตาย ไม้หลังของมันกลับดี — ล็อกทั้ง setup ทิ้งของดีไปพร้อมกัน
+rev_new_lock = "--rev-new-lock" in sys.argv
+_revnew_locked = set()   # {(ขั้ว divergence, เวลา swing จุดที่ 2)}
+
+# --rev-new-shadow : แก้ 2 รูของ --rev-new-lock (ผู้ใช้ 2026-10-12 "แก้ยังไงให้ไม่ไปตัดไม้ดี")
+#   1) ด่านตำแหน่งตรวจ **หลังสุด** (หลัง SL/R:R/TP ผ่านแล้ว) — เดิมตรวจก่อน จึงล็อก divergence ที่ชั่วโมงนั้นติด R:R
+#      อยู่แล้ว แล้วไม้ดีที่ผ่านทีหลังบน divergence เดียวกันโดนล็อกไปด้วย (เช่น XAU 2025-05-15 ไม่มีไม้นำหน้าเลย)
+#   2) ไม่ล็อกถาวร — ถือ "ไม้เงา" (SL/TP ของไม้ที่ถูกบล็อก) แล้วห้ามเข้า Reversal ใหม่จนกว่าราคาแตะ SL/TP ของมัน
+#      (หรือครบ MAX_HOLD_DAYS) = กันไม้ที่กลับมาใน 1-20 ชม. แต่ปล่อยไม้รอบหลังที่มาหลังไม้แรกปิด 2-61 ชม.
+#   ไม้เงาไม่ครองช่อง Breakout · ไม่จำลอง BE (ไม้ตายไม่เคยถึง +0.5R อยู่แล้ว)
+#   คาดก่อนรัน: ≈ ไม่มีด่านลบไม้ 17 ไม้ที่ตำแหน่ง < 0.3 = Reversal ≈ +22.99 (Reversal เดิม +25.05) · เส้น 0.3 in-sample
+# 🔻 replay เต็ม 2026-10-12 (ไม่ดู ADX · _revnew_adx0_pos0.3_shadow): **กลไกแม่นเป๊ะ แต่ผลแค่เท่า base · ไม่เอา**
+#    เทียบไม่มีด่าน: ตัดตรงไม้ 17 ไม้ที่ตำแหน่ง < 0.3 ครบ (−8.39 · ตาย 9) · ไม้อื่นไม่หายสักไม้ · ไม้ใหม่ 0
+#    Reversal 64 ไม้ +22.99 (= ตัวเลขคัดกรองเป๊ะ · Long 32 +19.83 / Short 32 +3.16) vs Reversal เดิม 32 ไม้ +25.05
+#    ทั้งระบบ 401 ไม้ +190.56 **ΔR −0.90** |t| 0.06 · ตัด 5 ใหญ่ −9.06 · ดีขึ้น 5/10 · เส้น 0.3 + ตัวแปรเลือกหลังเห็นผล (p 0.70)
+#    ✅ บทเรียนที่ใช้ซ้ำได้: "ไม้เงา" เปลี่ยนด่านที่เป็นตัวหน่วงให้เป็นตัวกรองจริงได้โดยไม่ตัดไม้รอบหลัง (ต่างจาก cooldown/ล็อกถาวร)
+# 🔻 + --rev-tp-ratio=3 (Fibonacci TP ×3 แทน ×2 · ผู้ใช้เลือก 2026-10-12 · _revtp3_revnew_adx0_pos0.3_shadow):
+#    **ตัวแรกที่ชนะ base แต่ตกเกณฑ์ 3/3** — ทั้งระบบ 420 ไม้ +195.99 ΔR **+4.53** (churn |t| 0.41 · ตัด 5 ใหญ่ −6.14 · ดีขึ้น 5/10)
+#    Reversal 82 ไม้ +29.45 (เดิม 32 +25.05) · Long 36 +25.68 / Short 46 +3.77 · Breakout +1.65 · Sideway −1.52
+#    เทียบ ×2 (ไม้เข้าเหมือนกัน 55 ไม้): R เปลี่ยน 22 ไม้ Δ +5.19 (SE 5.50) · ชนะเฉลี่ย 1.69 -> 1.93R · ชนะ 48 -> 44%
+#    TP แผน median 2.01 -> 2.37R (ไม่ถึง 3R เพราะ Fib อิงขนาดคลื่น) · ด่าน R:R ปล่อยไม้เพิ่ม +27/−9 ไม้
+#    คัดกรอง TP 3R คงที่บอก +38.86 บนไม้ชุดเดิม — ได้จริงน้อยกว่ามาก
+#    ที่ราบ 2026-10-12 (ΔR ทั้งระบบ · Reversal ไม้/R · ชนะเฉลี่ย · ตัด 5 ใหญ่ · ทุกค่า |t| ≤ 0.44 · ดีขึ้น 5/10):
+#      ×2.0 −0.90 · 64 +22.99 · 1.69 · −9.06   |  ×2.5 −2.10 · 74 +25.00 · 1.93 · −12.16 (Sideway −2.84)
+#      ×3.0 +4.53 · 82 +29.45 · 1.93 · −6.14   |  ×3.5 +5.63 · 88 +30.55 · 2.05 · −6.62
+#    = 3 ไม่ใช่ยอดแหลม (3.5 ใกล้กัน) · Reversal R โตตามตัวคูณเพราะไม้มากขึ้น ต่อไม้คงที่ ~+0.35 · Short ≈ 0 ทุกค่า
+# 2026-10-13: ไม้เงาเป็นค่าระบบจริงแล้ว — --rev-new-noshadow = ด่านตำแหน่งแบบหน่วงเฉยๆ (รอบ 2026-10-12) · --rev-new-lock = ล็อกถาวร
+rev_new_shadow = (rev_new and rev_new_pos is not None and not rev_new_lock
+                  and "--rev-new-noshadow" not in sys.argv)
+# TP ของ Reversal ใหม่ (config.REVERSAL_NEW_*) · --rev-tp-ratio ทับผ่าน reversal._TP_RATIO_OVERRIDE · --rev-fallback-rr ทับสำรอง
+rev_new_tp_ratio = config.REVERSAL_NEW_TP_FIB_RATIO
+rev_new_fallback = float(_rfb_arg.split("=")[1]) if _rfb_arg else config.REVERSAL_NEW_FALLBACK_RR
+_rn_ghost = None         # {"direction", "sl", "tp", "until"}
+
 # --scoring-dir-structure : ไม้ Scoring เอาทิศจาก Structure 4H (regression) แทน Bias 1D (trend_flip) และไม่ตรวจกับ Bias เลย
 # (ปิด scoring.ENFORCE_BIAS_MATCH) — ที่มา 2026-10-10 ผู้ใช้: "structure กับ bias คล้ายกัน ทดสอบ เปิดคู่ / อย่างใดอย่างหนึ่ง"
 # A = ระบบจริง (ทิศจาก Bias + ต้องตรง Structure) · B = --no-scoring-struct-match (Bias อย่างเดียว) · C = ธงนี้ (Structure อย่างเดียว)
 # Reversal Short / Breakout ยังใช้ Bias 1D เหมือนเดิม — เปลี่ยนเฉพาะ Scoring
 # 🔻 ผล 2026-10-10: A +191.46R (378 ไม้) · B +185.10R (438) · C +193.00R (430 · Scoring ใหม่ 59 ไม้ −0.36 = ศูนย์) → คง A
 scoring_dir_struct = "--scoring-dir-structure" in sys.argv
+
+# --rev-min-adx=X : ไม้ Reversal (ไม่ใช่ flip) ต้องมี ADX 4H ตอนเข้า ≥ X — ด่านหลัง regime ใช้กับ Reversal เท่านั้น
+# ที่มา 2026-10-10 ผู้ใช้: base Reversal 32 ไม้ ADX ตอนเข้า < 26 มี 2 ไม้แพ้ทั้งคู่ (−2.10R · เส้น 26 แบ่งหลังเห็นผล)
+# ต่างจาก regime_check.REVERSAL_USES_ADX_FLOOR (พื้น 22 ที่กิ่ง regime — กระทบ Breakout ด้วย)
+# 🔻 replay เต็ม 2026-10-10 (--rev-min-adx=26 · base 378 ไม้ +191.46R): 376 ไม้ +193.56R (ΔR +2.10) — ตัดแค่ 2 ไม้ ETH
+#    (2025-02-15 Short −1.04 = ไม้ที่เข้ามาตอนเอาพื้น 22 ออก 10-01 · 2026-05-25 Long −1.06) ไม่มีไม้ใหม่เข้าแทน · กลยุทธ์อื่นไม่ขยับ
+#    = ตัวกรองสะอาด แต่ n 2 ไม้ symbol เดียว เส้น 26 เลือกหลังเห็นผล → ไม่เอาเข้าระบบ (รอไม้จริง)
+_rma_arg = next((a for a in sys.argv if a.startswith("--rev-min-adx=")), None)
+rev_min_adx = float(_rma_arg.split("=")[1]) if _rma_arg else None
+
+# --bias-window=N : ทับ scoring.TREND_FLIP_WINDOW (ปกติ 5) — Bias 1D หน่วงมาก/น้อยลง · กระทบ Scoring (ทิศ) ·
+# Breakout (flip เมื่อ Bias Long) · Reversal Short (ต้อง Bias Short) — ดูผลคัดกรองที่ค่าคงที่นั้น
+_bw_arg = next((a for a in sys.argv if a.startswith("--bias-window=")), None)
+if _bw_arg:
+    scoring.TREND_FLIP_WINDOW = int(_bw_arg.split("=")[1])
 if scoring_dir_struct:
     scoring.ENFORCE_BIAS_MATCH = False
 
@@ -1040,6 +1196,65 @@ def df1d_at(t):
     return _df1d_cache[key]
 
 
+_bias_cache = {}
+
+
+def bias_at(t):
+    """Bias 1D ณ เวลา t — cache ต่อวันได้เพราะ df1d_at ก็ cache ต่อวัน (ใช้กับ --rev-new เท่านั้น)"""
+    key = t.date()
+    if key not in _bias_cache:
+        _bias_cache.clear()
+        _bias_cache[key] = get_trend_bias(symbol, df1d_at(t))[0]
+    return _bias_cache[key]
+
+
+def revnew_pos(i, direction):
+    """--rev-new-pos: ตำแหน่งราคาปิดแท่ง i ในกรอบ 24 แท่ง 1H (รวมแท่ง i) · 0 = ก้น (Long) / ยอด (Short)"""
+    return reversal.range_position(clock.iloc[max(0, i - 23):i + 1], float(clock["close"].iloc[i]), direction)
+
+
+def revnew_pos_gate(div, i, direction):
+    """--rev-new-pos (+ --rev-new-lock) — คืนเหตุผลที่บล็อก หรือ None ถ้าผ่าน · ล็อก divergence ตัวที่ถูกบล็อก"""
+    if rev_new_pos is None:
+        return None
+    _pts = (div or {}).get("points") or []
+    _did = ((div or {}).get("divergence"), _pts[-1][0] if _pts else None)
+    if rev_new_lock and _did in _revnew_locked:
+        return "divergence ตัวนี้ถูกล็อกแล้ว (รอ swing ใหม่)"
+    if revnew_pos(i, direction) < rev_new_pos:
+        if rev_new_lock:
+            _revnew_locked.add(_did)
+        return f"ตำแหน่งในกรอบ 24 ชม. < {rev_new_pos:g}"
+    return None
+
+
+def revnew_candidate(t, check_signal=False, i=None):
+    """Reversal ใหม่: ทิศไม้ (= Bias) หรือ None
+    check_signal (ระบบจริง): กฎเข้าครบจาก reversal.new_reversal_direction (บ้านเดียวกับ scheduler) + ไม้เงา
+      รอบที่ไม่ผ่านจึงเดินทางเดิม (Sideway/Scoring) ไม่เสียรอบ
+    ไม่ check_signal (--rev-new-trend · รอบ TREND): แค่ Bias สวน Structure — Key Level/div ตรวจใน branch"""
+    _r = regime_eff(t)
+    _b = bias_at(t)
+    if not check_signal:
+        _s = _r["structure"]["trend"]
+        if _b is None or not (_s.startswith("Long") or _s.startswith("Short")) or _s.startswith(_b):
+            return None
+        return _b
+    _d, _ = reversal.new_reversal_direction(_r, _b, adx_rule=rev_new_adx_rule, adx_min=rev_new_adx_min)
+    if _d is None:
+        return None
+    if rev_new_shadow:                     # ด่านตำแหน่งอยู่หลังสุด (ก่อนเปิดไม้) — ตรงนี้ดูแค่ไม้เงา
+        if _rn_ghost is not None:
+            note("Reversal ใหม่: ไม้เงายังไม่จบ")
+            return None
+        return _d
+    _why = revnew_pos_gate(_r["divergence"], i, _d)   # --rev-new-noshadow / --rev-new-lock
+    if _why:
+        note(f"Reversal ใหม่: {_why}")
+        return None
+    return _d
+
+
 def note(reason):
     skips[reason] = skips.get(reason, 0) + 1
     if cap_reentry_days and globals().get("_reentry"):
@@ -1242,6 +1457,12 @@ for n, row in enumerate(clock.to_dict("records")):
                 reentry_stats["ได้สิทธิ์ (ไม้ถูกเพดานปิด)"] += 1
             if same_scan_reentry and _rec["how"] in _BROKER_HOW:
                 _occupied.discard(_k)      # broker ปิดไปก่อนสแกน = live เห็นช่องว่างแล้ว
+    if _rn_ghost is not None:              # --rev-new-shadow: ไม้เงาจบเมื่อราคาแตะ SL/TP ของมัน หรือครบเพดานถือ
+        _gl = _rn_ghost["direction"] == "Long"
+        if ((bar["low"] <= _rn_ghost["sl"] or bar["high"] >= _rn_ghost["tp"]) if _gl
+                else (bar["high"] >= _rn_ghost["sl"] or bar["low"] <= _rn_ghost["tp"])) \
+                or now >= _rn_ghost["until"]:
+            _rn_ghost = None
 
     # --limit-rr : limit ที่ค้างอยู่ — โบรกเติมกลางแท่ง (t, now] ก่อนรอบสแกนนี้จะเห็น
     # เติมที่ L เสมอ ไม่นับ gap ที่ได้ราคาดีกว่า (lot ถูกคิดไว้ที่ L = R ต้องวัดจาก L)
@@ -1295,8 +1516,22 @@ for n, row in enumerate(clock.to_dict("records")):
             _sw = regime_eff(now)["adx_now"] < regime_check.ADX_CHOPPY and _in_sideway_zone(now)
         except Exception:
             _sw = False
-    _want = ("Scoring" if _reentry else "Sideway" if _sw else
-             "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rev else None))
+    # --rev-new: รอบ TREND ที่ Bias สวน Structure ไปช่อง Reversal (ไม่ใช่ Scoring) · ตาราง fate นับเฉพาะรอบพวกนี้
+    # --rev-new-adx: ทุก regime แต่ต้องสัญญาณครบ + ช่อง Reversal ว่าง (ไม่งั้นเดินทางเดิม) และมาก่อน Sideway
+    _revnew_dir = None
+    # --rev-new-adx: ช่อง Reversal ไม่ว่าง = ไม่ประเมินเลย (ด่านตำแหน่ง/ล็อกต้องไม่ทำงานตอนช่องเต็ม — ระบบจริงไม่ดู)
+    if rev_new and not _reentry and (_rg in REGIME_TREND or not rev_new_trend_only) \
+            and not (not rev_new_trend_only and slot_of("Reversal") in _occupied):
+        try:
+            _revnew_dir = revnew_candidate(now, check_signal=not rev_new_trend_only, i=n)
+        except Exception:
+            _revnew_dir = None
+    if rev_new:
+        _rev = _revnew_dir is not None
+    if _revnew_dir:
+        _sw = False
+    _want = ("Scoring" if _reentry else "Reversal" if _revnew_dir else "Sideway" if _sw else
+             "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rg in REGIME_REVERSAL else None))
     _shadow = False
     if _want is not None and slot_of(_want) in _occupied:
         note("ถือไม้อยู่แล้ว (ช่องไม่ว่าง)"); fate("ถือไม้อื่นอยู่")
@@ -1331,7 +1566,7 @@ for n, row in enumerate(clock.to_dict("records")):
         note(f"regime error: {type(exc).__name__} {str(exc)[:40]}"); fate("regime error")
         continue
     regime = rinfo["regime"]
-    if regime in REGIME_NO_TRADE and not _sw and not _reentry:
+    if regime in REGIME_NO_TRADE and not _sw and not _reentry and not _revnew_dir:
         note(f"regime = {regime}")
         continue
     if _sw:
@@ -1344,6 +1579,30 @@ for n, row in enumerate(clock.to_dict("records")):
             direction = sl_info["direction"]
             sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Sideway"
             exec_sl, atr_entry_ = sl_info["exec_sl"], None      # None = ไม่มี ATR trailing / TP_MAX_ATR
+        elif _revnew_dir and not _reentry:     # --rev-new (ดูที่จุด parse ธง)
+            direction = _revnew_dir
+            if not (rinfo["key_level"] or {}).get("at_key_level"):
+                note("Reversal ใหม่: ไม่อยู่ที่ Key Level"); fate("ไม่อยู่ที่ Key Level")
+                continue
+            _need = "bullish" if direction == "Long" else "bearish"
+            _dv = (rinfo["divergence"] or {}).get("divergence")
+            if _dv != _need:
+                note(f"Reversal ใหม่ {direction}: divergence = {_dv} (ต้อง {_need})")
+                fate("ไม่มี divergence ทิศเดียวกับไม้" if _dv is None else "divergence สวนทิศไม้")
+                continue
+            if rev_new_shadow:                 # --rev-new-shadow (ด่านตำแหน่งอยู่หลังสุด)
+                _why = "ไม้เงายังไม่จบ" if _rn_ghost is not None else None
+            else:
+                _why = revnew_pos_gate(rinfo["divergence"], n, direction)   # --rev-new-pos / --rev-new-lock
+            if _why:
+                note(f"Reversal ใหม่: {_why}"); fate(_why)
+                continue
+            note(f"Reversal ใหม่ {direction}: Bias สวน Structure {rinfo['structure']['trend']} + Key Level + {_dv}")
+            inf = reversal.compute_reversal_entry(
+                symbol, direction, entry, df_4h=rinfo["df_4h"], as_of=now,
+                tp_ratio=rev_new_tp_ratio, fallback_rr=rev_new_fallback)
+            sl, tp, strategy = inf["sl"], inf["tp"], "Reversal"
+            exec_sl, atr_entry_ = inf["exec_sl"], inf["atr_entry"]
         elif regime in REGIME_TREND or _reentry:
             df_1d = df1d_at(now)
             direction, _ = get_trend_bias(symbol, df_1d)
@@ -1386,7 +1645,11 @@ for n, row in enumerate(clock.to_dict("records")):
                     continue
                 _df1d_rev = df1d_at(now)
                 bias_1d, _ = get_trend_bias(symbol, _df1d_rev)
-                if bias_1d != "Short":
+                if rev_short_struct and not rinfo.get("breakout_nopeak"):   # --rev-short-struct
+                    _short_ok = rinfo["structure"]["trend"].startswith("Short")
+                else:
+                    _short_ok = bias_1d == "Short"
+                if not _short_ok:
                     # ── --breakout : กลับข้างแทนที่จะทิ้ง (สมมติฐานผู้ใช้ 2026-09-20) ──
                     # ไอเดีย: ไม้ Reversal Short ที่ด่านนี้กักไว้ ส่วนใหญ่ไม่ใช่ "จุดกลับตัวที่
                     # ทำไม่สำเร็จ" แต่เป็นจุดที่ราคา**ทะลุไปต่อ** (breakout) ถ้าจริง การเข้า Long
@@ -1423,11 +1686,22 @@ for n, row in enumerate(clock.to_dict("records")):
                         exec_sl, atr_entry_ = sl_info["exec_sl"], sl_info["atr_entry"]
                         note("Reversal Short -> กลับเป็น Long (เทรนด์ 1D = Long)")
                         flipped = True
+                    elif rev_short_struct and not rinfo.get("breakout_nopeak"):
+                        note(f"Reversal Short แต่ Structure 4H = {rinfo['structure']['trend']} (Bias {bias_1d})")
+                        fate("Reversal Short ไม่มี Structure 4H หนุน")
+                        continue
                     else:
                         note(f"Reversal Short แต่เทรนด์ 1D = {bias_1d}")
                         fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
                         continue
             if not flipped:
+                if rev_new and not rev_old_too:    # Reversal เดิมปิด เหลือแค่ทาง Breakout (--rev-old-too = เปิดคู่)
+                    note("Reversal เดิมปิด (--rev-new)")
+                    continue
+                if rev_min_adx is not None and rinfo["adx_now"] < rev_min_adx:   # --rev-min-adx
+                    note(f"Reversal: ADX 4H {rinfo['adx_now']:.1f} < {rev_min_adx:g}")
+                    fate(f"ADX ตอนเข้า < {rev_min_adx:g}")
+                    continue
                 if rev_struct_opp:                 # --rev-struct-opp (ดูที่จุด parse ธง)
                     _opp = "Short" if direction == "Long" else "Long"
                     _struct = rinfo["structure"]["trend"]
@@ -1578,6 +1852,13 @@ for n, row in enumerate(clock.to_dict("records")):
                             "pinned_atr_entry": atr_entry,
                             "ช่องที่ไม่ว่าง": slot_of(strategy),
                             "ไม้ที่ครองช่องอยู่": _blocker_time})
+        continue
+
+    # --rev-new-shadow: ด่านตำแหน่งในกรอบ 24 ชม. เป็นด่านสุดท้าย (ไม้ผ่านทุกด่านแล้ว) — บล็อก = เริ่มไม้เงา
+    if rev_new_shadow and _revnew_dir and strategy == "Reversal" and revnew_pos(n, direction) < rev_new_pos:
+        _rn_ghost = {"direction": direction, "sl": sl, "tp": tp, "until": now + timedelta(days=MAX_HOLD_DAYS)}
+        note(f"Reversal ใหม่: ตำแหน่งในกรอบ 24 ชม. < {rev_new_pos:g} -> ไม้เงา")
+        fate("ด่านตำแหน่ง -> ไม้เงา")
         continue
 
     _limit_hit_sl = False
@@ -1790,6 +2071,8 @@ if scoring_min_rr is not None:
     _tag += f"_scoringminrr{scoring_min_rr:g}"
 if _rtr_arg:
     _tag += f"_revtp{reversal._TP_RATIO_OVERRIDE:g}"
+if _rfb_arg:
+    _tag += f"_revfb{reversal.MIN_RR_REVERSAL:g}"
 for _flag, _attr, _short in (("--adx-period=",    "ADX_PERIOD",       "adxp"),
                              ("--adx-choppy=",    "ADX_CHOPPY",       "adxchop"),
                              ("--adx-gray-high=", "ADX_GRAY_HIGH",    "adxgray"),
@@ -1935,6 +2218,25 @@ if rev_struct_opp:
     _tag += "_revstructopp"
 if scoring_dir_struct:
     _tag += "_scoringdirstruct"
+if rev_min_adx is not None:
+    _tag += f"_revminadx{rev_min_adx:g}"
+if _bw_arg:
+    _tag += f"_biaswin{scoring.TREND_FLIP_WINDOW}"
+if rev_short_struct:
+    _tag += "_revshortstruct"
+# Reversal ใหม่ = ค่าระบบจริงตั้งแต่ 2026-10-13 — ติด tag เฉพาะที่ต่างจาก config (ไฟล์ base ไม่มี tag)
+if rev_new != config.REVERSAL_NEW:
+    _tag += "_revnew" if rev_new else "_revold"
+if rev_new and rev_old_too != config.REVERSAL_OLD_ALSO:
+    _tag += "_revoldtoo" if rev_old_too else "_noold"
+if rev_new:
+    _tag += "_revnewtrend" if rev_new_trend_only else ""
+    if (rev_new_adx_rule, rev_new_adx_min) != (config.REVERSAL_NEW_ADX_RULE, 0.0):
+        _tag += f"_rnadx{rev_new_adx_rule}{rev_new_adx_min:g}"
+    if rev_new_pos != (config.REVERSAL_NEW_MIN_RANGE_POS or None):
+        _tag += f"_pos{rev_new_pos or 0:g}"
+    _tag += "_lock" if rev_new_lock else ""
+    _tag += "_noshadow" if (rev_new_pos and not rev_new_shadow and not rev_new_lock) else ""
 if tp_entry_no_rev == config.TP_TO_ENTRY_REVERSAL_TRIGGERS:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_tpentrynorev" if tp_entry_no_rev else "_tpentryrevtrigger"
 if sideway_first:
