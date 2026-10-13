@@ -212,7 +212,7 @@ SLOT_SKIP = "ช่อง Reversal มีไม้เปิดอยู่แล
 def scan_output(on_book: list[str], regime: str, regime_extra: dict = None, bias_1d: str = None,
                 ohlcv=None, tick=None, extra_patches: dict = None) -> str:
     """รัน scan_symbol("XAUUSDm") ตอนที่มีไม้กลยุทธ์ on_book เปิดอยู่ แล้วคืนข้อความที่พิมพ์
-    ohlcv / tick / extra_patches (2026-10-13 · Reversal ใหม่): แทน get_ohlcv · symbol_info_tick · อื่นๆ ได้
+    ohlcv / tick / extra_patches (2026-10-13 · Pullback): แทน get_ohlcv · symbol_info_tick · อื่นๆ ได้
     ไม่ส่ง = ของเดิม (แท่ง None · tick None = scan หยุดที่ "ดึงราคาไม่ได้" ไม่มีทางส่ง order)"""
     global _positions
     _positions = []
@@ -507,13 +507,14 @@ journal.get_trade_strategy = lambda t: "Sideway"
 results.append(tpe_check("ไม้เก่าเป็น Sideway ขาดทุน + ไม้ใหม่สวน -> ไม่แตะ", _hk(_B, 24503.4), "Short", []))
 journal.get_trade_strategy = _saved_gs
 
-# ── Reversal ใหม่ (2026-10-13 · config.REVERSAL_NEW) ─────────────────────────────────────────────────
-# กฎเข้า (reversal.new_reversal_direction) · ตำแหน่งในกรอบ · ทางของ scan_symbol · ไม้เงา (ไฟล์ state ชี้ไป temp)
+# ── Pullback (2026-10-13 · config.PULLBACK_ENABLED · เดิมชื่อ Reversal ใหม่) ─────────────────────────────────────────────────
+# กฎเข้า (pullback.pullback_direction) · ตำแหน่งในกรอบ · ทางของ scan_symbol · ไม้เงา (ไฟล์ state ชี้ไป temp)
 # replay ตรวจกฎเดียวกันได้ (เรียกฟังก์ชันเดียวกัน) แต่ไม่เดินโค้ด scheduler ข้อ 4a-2 / 4e / ไม้เงาบนไฟล์ — เทสต์นี้แทน
 import tempfile           # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 import pandas as pd       # noqa: E402
 import reversal           # noqa: E402
+import pullback           # noqa: E402
 
 _RI = {"structure": {"trend": "Short (reg)"}, "adx_now": 18.0, "adx_direction": "ทรง",
        "key_level": {"at_key_level": True}, "divergence": {"divergence": "bullish"},
@@ -521,13 +522,16 @@ _RI = {"structure": {"trend": "Short (reg)"}, "adx_now": 18.0, "adx_direction": 
 
 
 def rn_check(label, over, bias, want, rule="nofall"):
-    got, why = reversal.new_reversal_direction({**_RI, **over}, bias, adx_rule=rule)
+    got, why = pullback.pullback_direction({**_RI, **over}, bias, adx_rule=rule)
     ok = got == want
     print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {got} ({why})")
     return ok
 
 
-print("\nReversal ใหม่ — กฎเข้า (reversal.new_reversal_direction):")
+_ok = _config.slot_of("Pullback") == "Reversal"
+print(f"\n  [{'ok  ' if _ok else 'FAIL'}] {'config.slot_of(Pullback) == Reversal (ช่องร่วม Breakout)':52} -> {_config.slot_of('Pullback')}")
+results.append(_ok)
+print("\nPullback — กฎเข้า (pullback.pullback_direction):")
 results += [
     rn_check("Bias Long + Structure Short + ADX ทรง + KL + bullish", {}, "Long", "Long"),
     rn_check("ADX ขึ้น -> เข้า", {"adx_direction": "ขึ้น"}, "Long", "Long"),
@@ -541,7 +545,7 @@ results += [
     rn_check("Structure ไม่ชัด -> ไม่เข้า", {"structure": {"trend": "ไม่ชัด / กำลังพัง"}}, "Long", None),
     rn_check("หา Bias ไม่ได้ -> ไม่เข้า", {}, None, None),
 ]
-_got = reversal.new_reversal_direction({"regime": "TREND"}, "Long")[0]
+_got = pullback.pullback_direction({"regime": "TREND"}, "Long")[0]
 print(f"  [{'ok  ' if _got is None else 'FAIL'}] {'regime_info ไม่ครบคีย์ -> ไม่เข้า (ไม่ crash)':52} -> {_got}")
 results.append(_got is None)
 
@@ -549,15 +553,15 @@ _bars = pd.DataFrame({"high": [110.0, 108.0], "low": [100.0, 104.0]})
 for _lbl, _args, _want in (("Long ราคา 103 ในกรอบ 100-110 -> 0.3", (_bars, 103.0, "Long"), 0.3),
                            ("Short ราคา 107 ในกรอบ 100-110 -> 0.3", (_bars, 107.0, "Short"), 0.3),
                            ("กรอบแบน -> 0.5", (pd.DataFrame({"high": [5.0], "low": [5.0]}), 5.0, "Long"), 0.5)):
-    _v = reversal.range_position(*_args)
+    _v = pullback.range_position(*_args)
     _ok = abs(_v - _want) < 1e-9
     print(f"  [{'ok  ' if _ok else 'FAIL'}] {_lbl:52} -> {_v:.2f}")
     results.append(_ok)
 
 # ไม้เงา — ไฟล์ state ชี้ไป temp · นาฬิกา MT5 ตรึง · แท่ง 1H ปลอม (แท่งสุดท้าย = ยังไม่ปิด)
-_ghost_tmp = os.path.join(tempfile.mkdtemp(), "revnew_ghost.json")
-_saved_rn = (scheduler._REVNEW_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.REVERSAL_NEW)
-scheduler._REVNEW_GHOST_FILE, scheduler.REVERSAL_NEW = _ghost_tmp, True
+_ghost_tmp = os.path.join(tempfile.mkdtemp(), "pullback_ghost.json")
+_saved_rn = (scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED)
+scheduler._PULLBACK_GHOST_FILE, scheduler.PULLBACK_ENABLED = _ghost_tmp, True
 _T0 = pd.Timestamp("2026-10-13 10:05").to_pydatetime()
 
 
@@ -572,11 +576,11 @@ def _h1(rows):
 def ghost_check(label, direction, now, bars, want_active):
     with contextlib.redirect_stdout(io.StringIO()):
         scheduler.mt5_now = lambda: _T0
-        scheduler.revnew_ghost_set("XAUUSDm", direction, 4000.0 if direction == "Long" else 4300.0,
+        scheduler.pullback_ghost_set("XAUUSDm", direction, 4000.0 if direction == "Long" else 4300.0,
                                    4300.0 if direction == "Long" else 4000.0)
         scheduler.mt5_now = lambda: now
         scheduler.get_ohlcv = lambda *a, **k: bars
-        g = scheduler.revnew_ghost_active("XAUUSDm")
+        g = scheduler.pullback_ghost_active("XAUUSDm")
     active = g is not None
     kept = "XAUUSDm" in scheduler._ghost_load()
     ok = active == want_active and kept == want_active
@@ -585,7 +589,7 @@ def ghost_check(label, direction, now, bars, want_active):
 
 
 _T5 = _T0 + pd.Timedelta(hours=5)
-print("\nReversal ใหม่ — ไม้เงา (scheduler.revnew_ghost_*):")
+print("\nPullback — ไม้เงา (scheduler.pullback_ghost_*):")
 results += [
     ghost_check("Long ยังไม่แตะ SL/TP -> ยังไม่จบ", "Long", _T5,
                 _h1([("2026-10-13 10:00", 4100, 4050), ("2026-10-13 11:00", 4120, 4060)]), True),
@@ -606,10 +610,10 @@ results += [
 
 
 def rn_scan(on_book, bias, ghost):
-    """scan_symbol ที่ regime CHOPPY + สัญญาณ Reversal ใหม่ครบ (ADX 15 = เขต Sideway ด้วย)"""
+    """scan_symbol ที่ regime CHOPPY + สัญญาณ Pullbackครบ (ADX 15 = เขต Sideway ด้วย)"""
     if ghost:
         scheduler.mt5_now = lambda: _T0
-        scheduler.revnew_ghost_set("XAUUSDm", "Long", 4000.0, 4300.0)
+        scheduler.pullback_ghost_set("XAUUSDm", "Long", 4000.0, 4300.0)
     else:
         scheduler._ghost_save({})
     scheduler.mt5_now = lambda: _T5
@@ -618,7 +622,7 @@ def rn_scan(on_book, bias, ghost):
 
 def route_check(label, on_book, bias, ghost, want):
     out = rn_scan(on_book, bias, ghost)
-    got = ("Reversal ใหม่" if "Reversal ใหม่ Long —" in out else
+    got = ("Pullback" if "Pullback Long —" in out else
            "ไม้เงาบล็อก" if "ไม้เงา Long ยังไม่จบ" in out else
            "ช่อง Scoring เต็ม" if "ช่อง Scoring มีไม้เปิดอยู่แล้ว" in out else
            "Sideway/อื่น" if "ดึงราคาไม่ได้" in out else "ไม่เข้า")
@@ -627,13 +631,13 @@ def route_check(label, on_book, bias, ghost, want):
     return ok
 
 
-print("\nReversal ใหม่ — ทางของ scan_symbol:")
+print("\nPullback — ทางของ scan_symbol:")
 results += [
-    route_check("ช่องว่าง + สัญญาณครบ -> Reversal ใหม่ (ก่อน Sideway)", [], "Long", False, "Reversal ใหม่"),
-    route_check("ถือ Scoring อยู่ -> ช่อง Reversal ว่าง -> Reversal ใหม่", ["Scoring"], "Long", False, "Reversal ใหม่"),
+    route_check("ช่องว่าง + สัญญาณครบ -> Pullback (ก่อน Sideway)", [], "Long", False, "Pullback"),
+    route_check("ถือ Scoring อยู่ -> ช่อง Reversal ว่าง -> Pullback", ["Scoring"], "Long", False, "Pullback"),
     route_check("ถือ Breakout (ช่อง Reversal) -> ไม่ดู -> Sideway", ["Breakout"], "Long", False, "Sideway/อื่น"),
-    route_check("ไม้เงายังไม่จบ -> ไม่เข้า Reversal ใหม่", [], "Long", True, "ไม้เงาบล็อก"),
-    route_check("Bias ตรง Structure -> ไม่ใช่ Reversal ใหม่", [], "Short", False, "Sideway/อื่น"),
+    route_check("ไม้เงายังไม่จบ -> ไม่เข้า Pullback", [], "Long", True, "ไม้เงาบล็อก"),
+    route_check("Bias ตรง Structure -> ไม่ใช่ Pullback", [], "Short", False, "Sideway/อื่น"),
 ]
 
 
@@ -648,7 +652,7 @@ def gate_scan(close_pos):
     px = 100.0 + 10.0 * close_pos
 
     def fake_entry(*a, **k):
-        calls.append(("compute", k.get("tp_ratio"), k.get("fallback_rr")))
+        calls.append(("compute", k.get("tp_ratio"), k.get("fallback_rr"), k.get("min_rr")))
         return {"sl": 97.0, "exec_sl": 95.0, "tp": 120.0, "rr": 1.6, "atr_entry": 2.0}
 
     def fake_order(*a, **k):
@@ -667,8 +671,9 @@ def gate_scan(close_pos):
     return out, calls, scheduler._ghost_load().get("XAUUSDm")
 
 
-print("\nReversal ใหม่ — ด่านสุดท้าย 4e (ตำแหน่งในกรอบ 24 ชม.):")
-_want_compute = [("compute", _config.REVERSAL_NEW_TP_FIB_RATIO, _config.REVERSAL_NEW_FALLBACK_RR)]
+print("\nPullback — ด่านสุดท้าย 4e (ตำแหน่งในกรอบ 24 ชม.):")
+_want_compute = [("compute", _config.PULLBACK_TP_FIB_RATIO, _config.PULLBACK_FALLBACK_RR,
+                  _config.PULLBACK_MIN_RR)]
 _out, _calls, _g = gate_scan(0.2)
 _orders = [c for c in _calls if c[0] == "order"]
 _ok = (not _orders and _g is not None and (_g["direction"], _g["sl"], _g["tp"]) == ("Long", 95.0, 120.0)
@@ -679,11 +684,11 @@ results.append(_ok)
 _out, _calls, _g = gate_scan(0.5)
 _orders = [c for c in _calls if c[0] == "order"]
 _comp = [c for c in _calls if c[0] == "compute"]
-_ok = _orders == [("order", "Reversal")] and _g is None and _comp == _want_compute
-print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ตำแหน่ง 0.5 -> ส่ง order Reversal · TP/สำรองค่าใหม่':52} -> "
+_ok = _orders == [("order", "Pullback")] and _g is None and _comp == _want_compute
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ตำแหน่ง 0.5 -> ส่ง order Pullback · TP/สำรองค่าใหม่':52} -> "
       f"{_orders or 'ไม่ส่ง'} · {_comp}")
 results.append(_ok)
-scheduler._REVNEW_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.REVERSAL_NEW = _saved_rn
+scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED = _saved_rn
 
 # เคสข้างบนยิง WARNING "ไม่มี SL" จริง 2 บรรทัด — ต้องไม่มี handler ตัวไหนเขียนลงไฟล์ในโฟลเดอร์ logs/
 # (ถ้า get_logger เปลี่ยนวิธีเช็ค handler ซ้ำเมื่อไหร่ เคสนี้จะพังก่อนที่ log จริงจะถูกปนอีก)

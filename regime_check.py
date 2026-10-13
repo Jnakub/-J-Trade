@@ -295,6 +295,15 @@ DIV_SWING_RIGHT_LOWS  = 2
 KEY_LEVEL_BARS         = 400
 KEY_LEVEL_PROXIMITY    = 0.01   # ±1% รอบศูนย์กลางโซน = ถือว่า "อยู่ที่ Key Level"
 KEY_LEVEL_MIN_TOUCHES  = 2      # ต้องโดนแตะอย่างน้อย 2 ครั้งถึงนับเป็นโซนสำคัญ
+# KEY_LEVEL_REQUIRED — False = ถือว่า "อยู่ที่ Key Level" เสมอ (REVERSAL-READY/Breakout + Pullback) · ทดลองด้วย
+#   backtest_replay --no-key-level (2026-10-13 ผู้ใช้: "เอา Key level ออกเลยดีไหม") · ที่มา: ±1% คงที่ผ่าน 79% ของแท่ง 4H
+#   (FX 93-97%) และระยะถึงแนว (เป็น ATR) แยกไม้ดี/แย่ไม่ได้ (153 ไม้ · ใกล้ ≤0.5 ATR +0.51 vs ไกล +0.70)
+# 🔻 replay เต็ม 2026-10-13 (Pullback R:R 1.5 · _now1013pb_nokl vs _now1013pb): 399 ไม้ +193.15 -> 406 ไม้ +194.74 ΔR +1.58
+#    |t| 0.18 · ตัด 5 ใหญ่ −2.14 · ดีขึ้น 3/10 · Breakout 56 -> 64 ไม้ +3.93 · Pullback −3.38 · Sideway +1.03 · Scoring ไม่ขยับ
+#    = ไม่มีผลชัดทั้งทางดีและทางเสีย (ตรงกับที่ KL ผ่าน 79% ของเวลา)
+# 🔴 สถานะปัจจุบัน: **False ตั้งแต่ 2026-10-13 (คำสั่งผู้ใช้ "ตัด Key Level ออก")** — ยังคำนวณโซนและพิมพ์ใน log เหมือนเดิม
+#    แค่ไม่ใช้ตัดสิน · เปิดกลับ = True (replay --key-level)
+KEY_LEVEL_REQUIRED = False
 
 # Divergence (RSI) — ราคาทำ new extreme แต่ RSI ไม่ทำตาม (เทียบ swing ราคา 2 จุดล่าสุด)
 # ⚠️ 2026-09-01: comment เดิมตรงนี้เขียนว่า swing ของ divergence "ปิด volume filter" ซึ่ง
@@ -1076,14 +1085,18 @@ def _reversal_regime(peak: dict, key_level: dict, divergence: dict, min_peak="co
     # min_peak="config" = ใช้ ADX_MIN_PEAK_REVERSAL · None = ไม่มีเกณฑ์ peak (ใช้กับ reversal_nopeak ด้านล่าง)
     _mp = ADX_MIN_PEAK_REVERSAL if min_peak == "config" else min_peak
     if peak["declining"] and (not _mp or peak["peak"] >= _mp):
-        at_key  = bool(key_level and key_level.get("at_key_level"))
+        at_key  = (not KEY_LEVEL_REQUIRED) or bool(key_level and key_level.get("at_key_level"))
         has_div = bool(divergence and divergence.get("divergence"))
 
         # ครบ 3 เงื่อนไข (peak โค้งลง + อยู่ที่ Key Level + มี Divergence) -> พร้อมเปิด Reversal จริง
         if at_key and has_div:
+            # KEY_LEVEL_REQUIRED = False -> อาจไม่มีโซนเลย (nearest None) · เดิม format ตรงๆ จะ crash ทั้ง get_regime
+            _kl_txt = (f"Key Level {key_level['nearest']:,.2f}" if (key_level or {}).get("nearest") is not None
+                       else "ไม่มีโซน Key Level")
+            _kl_txt = _kl_txt if KEY_LEVEL_REQUIRED else f"({_kl_txt} · ไม่บังคับแล้ว)"
             return ("REVERSAL-READY",
-                    f"ครบ 3 เงื่อนไข: ADX peak {peak['peak']:.1f} โค้งลง {peak['bars_since_peak']} แท่ง "
-                    f"+ อยู่ที่ Key Level {key_level['nearest']:,.2f} "
+                    f"ครบเงื่อนไข: ADX peak {peak['peak']:.1f} โค้งลง {peak['bars_since_peak']} แท่ง "
+                    f"+ {_kl_txt} "
                     f"+ Divergence ({divergence['divergence']}) -> เปิด Reversal scorecard ได้", CYAN)
 
         # peak โค้งลงแล้ว แต่เงื่อนไขยืนยันยังไม่ครบ -> เฝ้าดู

@@ -37,8 +37,8 @@ news_paths.csv
 
 # state ของ cooldown หลังถูกด่านปฏิเสธ (scheduler สร้างเอง ดู config.REJECT_COOLDOWN_HOURS)
 reject_cooldown.json
-# ไม้เงาของ Reversal ใหม่ (scheduler สร้างเอง ดู config.REVERSAL_NEW_MIN_RANGE_POS)
-revnew_ghost.json
+# ไม้เงาของ Pullback (scheduler สร้างเอง ดู config.PULLBACK_MIN_RANGE_POS)
+pullback_ghost.json
 # สรุปรายวันส่งไปแล้วถึงวันไหน (scheduler สร้างเอง ดู scheduler.send_daily_summary_if_due)
 daily_summary_state.json
 

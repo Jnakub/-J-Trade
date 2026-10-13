@@ -165,6 +165,7 @@ from bars import BAR_OFFSET_H
 from regime_check import get_regime
 import exit_monitor as em
 import reversal
+import pullback
 
 # อ่านจาก config ที่เดียว (2026-09-15) — เดิมเป็นสำเนา literal พร้อม comment "ตรงกับ scheduler.py"
 from config import REGIME_NO_TRADE, REGIME_TREND, REGIME_REVERSAL
@@ -579,15 +580,25 @@ rev_short_struct = "--rev-short-struct" in sys.argv
 #    Breakout −2 ไม้ (−0.26 · ช่อง Reversal ถูกไม้ใหม่ครอง) · Scoring/Sideway ไม่ขยับ · direct 0 = churn ล้วน |t| 1.08
 #    ตัด 5 รายการใหญ่เหลือ −15.42 · ดีขึ้น 4/8 symbol · ไม้ Reversal เดิมหายครบ 32 ไม้ ไม่ซ้อนกับไม้ใหม่เลย (เดิมเข้าตอน ADX โค้งลง)
 #    funnel รอบ TREND ที่ Bias สวน Structure ~6,950 ชม.: ไม่มี divergence ทิศไม้ 4,566 · ไม่อยู่ Key Level 892 · ช่องไม่ว่าง 557 · hard block 743
-# 🔴 2026-10-13: Reversal ใหม่เข้าระบบจริงแล้ว (config.REVERSAL_NEW) — replay ใช้แบบใหม่เป็นค่าเริ่มต้น (= scheduler)
+# 🔴 2026-10-13: Reversal ใหม่เข้าระบบจริงแล้ว และเปลี่ยนชื่อเป็น **Pullback** (config.PULLBACK_ENABLED · ไม้บันทึก strategy
+#   "Pullback") — replay ใช้ Pullback เป็นค่าเริ่มต้น (= scheduler) · ชื่อตัวแปร/ธงในไฟล์นี้ยังเป็น rev_new / --rev-new*
+#   เพราะผลทดลองทุกรอบผูกกับชื่อธงพวกนี้ ("Reversal ใหม่" ในคอมเมนต์ข้างล่าง = Pullback)
 #   --rev-old = Reversal เดิม (เทียบ base ก่อน 2026-10-13) · --rev-new = บังคับแบบใหม่ตอน config ปิด
 #   --rev-new-trend = รอบแรก 2026-10-11 (เฉพาะ regime TREND · Key Level/div ตรวจใน branch) — ธง --rev-new เดิมหมายถึงแบบนี้
 #   ธงด้านล่างทั้งหมดทับค่าระบบจริงเพื่อทดลอง · tag ติดเฉพาะค่าที่ต่างจาก config
 #   ⚠️ ไฟล์ผลรอบก่อน 2026-10-13 ที่ติด _revnew* ใช้ความหมายธงเดิม (ตอนนั้นค่าเริ่มต้นคือ Reversal เดิม)
-rev_new = (config.REVERSAL_NEW or "--rev-new" in sys.argv) and "--rev-old" not in sys.argv
+rev_new = (config.PULLBACK_ENABLED or "--rev-new" in sys.argv) and "--rev-old" not in sys.argv
 rev_new_trend_only = "--rev-new-trend" in sys.argv
-# --rev-old-too : Reversal เดิม (REVERSAL-READY) เปิดคู่กับแบบใหม่ — config.REVERSAL_OLD_ALSO (ปิดอยู่ · ยังไม่เคยวัด)
-rev_old_too = config.REVERSAL_OLD_ALSO or "--rev-old-too" in sys.argv
+# --no-key-level / --key-level : ทับ regime_check.KEY_LEVEL_REQUIRED (ระบบจริง False ตั้งแต่ 2026-10-13) — มีผลทั้ง
+#   REVERSAL-READY/Breakout และ Pullback · tag _nokl / _kl เฉพาะตอนต่างจากค่าระบบจริง
+_KL_LIVE = regime_check.KEY_LEVEL_REQUIRED
+if "--no-key-level" in sys.argv:
+    regime_check.KEY_LEVEL_REQUIRED = False
+if "--key-level" in sys.argv:
+    regime_check.KEY_LEVEL_REQUIRED = True
+# Reversal เดิม (REVERSAL-READY) เปิดไหม — config.REVERSAL_ENABLED · --rev-old = เดิมอย่างเดียว (ปิด Pullback)
+# · --rev-old-too = เปิดคู่กับ Pullback (ยังไม่เคยวัด)
+rev_old_too = config.REVERSAL_ENABLED or "--rev-old-too" in sys.argv or "--rev-old" in sys.argv
 # --rev-new-adx=X : --rev-new แต่ไม่ต้องรอ regime TREND — แค่ ADX 4H > X (ทิศไหนก็ได้ · 0 = ไม่ดู ADX) + Bias สวน
 #   Structure + Key Level + divergence ทิศไม้ (ผู้ใช้ 2026-10-12 "ไม่ดู ADX กับ ADX > 12.5")
 #   ที่มา: คัดกรองแท่ง 4H 2 ปี 10 symbol — Bias สวน Structure 10,389 แท่ง แต่ 66% อยู่ที่ ADX < 20 · ADX ≥ 22 ขึ้น/ทรง แค่ 18%
@@ -622,9 +633,9 @@ rev_new_adx_nofall = "--rev-new-adx-nofall" in sys.argv
 #    โค้งลง (decl)   −8.47 · 58 +17.31 +0.30 | ≥ 22 ขึ้น/ทรง (TREND) −9.56 · 23 +15.91 +0.69
 #    = ด่านระดับ ADX ตัดไม้โดยไม่ได้คัด (ต่อไม้ ~0.3 ทุกค่า) · ตัดแค่ช่วง ADX "ลง" ได้ไม้น้อยลง 17 ไม้ R เท่าเดิม
 #    ทุกค่า |t| ≤ 0.79 · ตัด 5 ใหญ่ติดลบทุกค่า · nofall vs ไม่ดู ADX ต่าง +1.53 = noise
-# กฎ ADX ที่ส่งให้ reversal.new_reversal_direction — ไม่ใส่ธงเลย = ค่าระบบจริง · --rev-new-adx=X อย่างเดียว = "any" (แค่ > X)
+# กฎ ADX ที่ส่งให้ pullback.pullback_direction — ไม่ใส่ธงเลย = ค่าระบบจริง · --rev-new-adx=X อย่างเดียว = "any" (แค่ > X)
 rev_new_adx_rule = ("declining" if rev_new_adx_declining else "rising" if rev_new_adx_rising
-                    else "nofall" if rev_new_adx_nofall else "any" if _rna_arg else config.REVERSAL_NEW_ADX_RULE)
+                    else "nofall" if rev_new_adx_nofall else "any" if _rna_arg else config.PULLBACK_ADX_RULE)
 
 # --rev-new-pos=X : (ใช้คู่ --rev-new / --rev-new-adx) ไม่เข้าถ้าราคาอยู่ต่ำกว่า X ของกรอบ 24 แท่ง 1H ล่าสุด
 #   (Long: (ราคา − ต่ำสุด) / (สูงสุด − ต่ำสุด) · Short กลับด้าน · 0 = ก้นกรอบ = ยังไม่เด้ง · รวมแท่งปิดล่าสุด)
@@ -636,7 +647,7 @@ rev_new_adx_rule = ("declining" if rev_new_adx_declining else "rising" if rev_ne
 #      ด่านตัด 17 ไม้ −8.39 ตามคาด แต่ 9 ไม้กลับมาเข้าทิศเดิม median 3 ชม. ผลเท่าเดิม (−9.42 -> −9.39)
 #    ADX ≥ 22 + 0.3 (_revnew_pos0.3): 24 +12.27 -> 22 +12.13 (คัดกรองบอก +2.99) · ตัด 5 กลับมา 3 median 3 ชม. · ΔR −13.17
 _rnp_arg = next((a for a in sys.argv if a.startswith("--rev-new-pos=")), None)
-rev_new_pos = float(_rnp_arg.split("=")[1]) if _rnp_arg else config.REVERSAL_NEW_MIN_RANGE_POS
+rev_new_pos = float(_rnp_arg.split("=")[1]) if _rnp_arg else config.PULLBACK_MIN_RANGE_POS
 rev_new_pos = rev_new_pos or None          # 0 = ปิดด่าน
 
 # --rev-new-lock : (ใช้คู่ --rev-new-pos) ด่านตำแหน่งบล็อก divergence ตัวไหน -> divergence ตัวนั้นใช้ไม่ได้อีก
@@ -676,9 +687,9 @@ _revnew_locked = set()   # {(ขั้ว divergence, เวลา swing จุ�
 # 2026-10-13: ไม้เงาเป็นค่าระบบจริงแล้ว — --rev-new-noshadow = ด่านตำแหน่งแบบหน่วงเฉยๆ (รอบ 2026-10-12) · --rev-new-lock = ล็อกถาวร
 rev_new_shadow = (rev_new and rev_new_pos is not None and not rev_new_lock
                   and "--rev-new-noshadow" not in sys.argv)
-# TP ของ Reversal ใหม่ (config.REVERSAL_NEW_*) · --rev-tp-ratio ทับผ่าน reversal._TP_RATIO_OVERRIDE · --rev-fallback-rr ทับสำรอง
-rev_new_tp_ratio = config.REVERSAL_NEW_TP_FIB_RATIO
-rev_new_fallback = float(_rfb_arg.split("=")[1]) if _rfb_arg else config.REVERSAL_NEW_FALLBACK_RR
+# TP ของ Reversal ใหม่ (config.PULLBACK_*) · --rev-tp-ratio ทับผ่าน reversal._TP_RATIO_OVERRIDE · --rev-fallback-rr ทับสำรอง
+rev_new_tp_ratio = config.PULLBACK_TP_FIB_RATIO
+rev_new_fallback = float(_rfb_arg.split("=")[1]) if _rfb_arg else config.PULLBACK_FALLBACK_RR
 _rn_ghost = None         # {"direction", "sl", "tp", "until"}
 
 # --scoring-dir-structure : ไม้ Scoring เอาทิศจาก Structure 4H (regression) แทน Bias 1D (trend_flip) และไม่ตรวจกับ Bias เลย
@@ -1210,7 +1221,7 @@ def bias_at(t):
 
 def revnew_pos(i, direction):
     """--rev-new-pos: ตำแหน่งราคาปิดแท่ง i ในกรอบ 24 แท่ง 1H (รวมแท่ง i) · 0 = ก้น (Long) / ยอด (Short)"""
-    return reversal.range_position(clock.iloc[max(0, i - 23):i + 1], float(clock["close"].iloc[i]), direction)
+    return pullback.range_position(clock.iloc[max(0, i - 23):i + 1], float(clock["close"].iloc[i]), direction)
 
 
 def revnew_pos_gate(div, i, direction):
@@ -1230,7 +1241,7 @@ def revnew_pos_gate(div, i, direction):
 
 def revnew_candidate(t, check_signal=False, i=None):
     """Reversal ใหม่: ทิศไม้ (= Bias) หรือ None
-    check_signal (ระบบจริง): กฎเข้าครบจาก reversal.new_reversal_direction (บ้านเดียวกับ scheduler) + ไม้เงา
+    check_signal (ระบบจริง): กฎเข้าครบจาก pullback.pullback_direction (บ้านเดียวกับ scheduler) + ไม้เงา
       รอบที่ไม่ผ่านจึงเดินทางเดิม (Sideway/Scoring) ไม่เสียรอบ
     ไม่ check_signal (--rev-new-trend · รอบ TREND): แค่ Bias สวน Structure — Key Level/div ตรวจใน branch"""
     _r = regime_eff(t)
@@ -1240,7 +1251,8 @@ def revnew_candidate(t, check_signal=False, i=None):
         if _b is None or not (_s.startswith("Long") or _s.startswith("Short")) or _s.startswith(_b):
             return None
         return _b
-    _d, _ = reversal.new_reversal_direction(_r, _b, adx_rule=rev_new_adx_rule, adx_min=rev_new_adx_min)
+    _d, _ = pullback.pullback_direction(_r, _b, adx_rule=rev_new_adx_rule, adx_min=rev_new_adx_min,
+                                        require_key_level=regime_check.KEY_LEVEL_REQUIRED)
     if _d is None:
         return None
     if rev_new_shadow:                     # ด่านตำแหน่งอยู่หลังสุด (ก่อนเปิดไม้) — ตรงนี้ดูแค่ไม้เงา
@@ -1581,7 +1593,7 @@ for n, row in enumerate(clock.to_dict("records")):
             exec_sl, atr_entry_ = sl_info["exec_sl"], None      # None = ไม่มี ATR trailing / TP_MAX_ATR
         elif _revnew_dir and not _reentry:     # --rev-new (ดูที่จุด parse ธง)
             direction = _revnew_dir
-            if not (rinfo["key_level"] or {}).get("at_key_level"):
+            if regime_check.KEY_LEVEL_REQUIRED and not (rinfo["key_level"] or {}).get("at_key_level"):
                 note("Reversal ใหม่: ไม่อยู่ที่ Key Level"); fate("ไม่อยู่ที่ Key Level")
                 continue
             _need = "bullish" if direction == "Long" else "bearish"
@@ -1600,8 +1612,8 @@ for n, row in enumerate(clock.to_dict("records")):
             note(f"Reversal ใหม่ {direction}: Bias สวน Structure {rinfo['structure']['trend']} + Key Level + {_dv}")
             inf = reversal.compute_reversal_entry(
                 symbol, direction, entry, df_4h=rinfo["df_4h"], as_of=now,
-                tp_ratio=rev_new_tp_ratio, fallback_rr=rev_new_fallback)
-            sl, tp, strategy = inf["sl"], inf["tp"], "Reversal"
+                tp_ratio=rev_new_tp_ratio, fallback_rr=rev_new_fallback, min_rr=config.PULLBACK_MIN_RR)
+            sl, tp, strategy = inf["sl"], inf["tp"], "Pullback"
             exec_sl, atr_entry_ = inf["exec_sl"], inf["atr_entry"]
         elif regime in REGIME_TREND or _reentry:
             df_1d = df1d_at(now)
@@ -1695,7 +1707,7 @@ for n, row in enumerate(clock.to_dict("records")):
                         fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
                         continue
             if not flipped:
-                if rev_new and not rev_old_too:    # Reversal เดิมปิด เหลือแค่ทาง Breakout (--rev-old-too = เปิดคู่)
+                if not rev_old_too:                # Reversal เดิมปิด (config.REVERSAL_ENABLED) เหลือแค่ทาง Breakout
                     note("Reversal เดิมปิด (--rev-new)")
                     continue
                 if rev_min_adx is not None and rinfo["adx_now"] < rev_min_adx:   # --rev-min-adx
@@ -1855,7 +1867,7 @@ for n, row in enumerate(clock.to_dict("records")):
         continue
 
     # --rev-new-shadow: ด่านตำแหน่งในกรอบ 24 ชม. เป็นด่านสุดท้าย (ไม้ผ่านทุกด่านแล้ว) — บล็อก = เริ่มไม้เงา
-    if rev_new_shadow and _revnew_dir and strategy == "Reversal" and revnew_pos(n, direction) < rev_new_pos:
+    if rev_new_shadow and _revnew_dir and strategy == "Pullback" and revnew_pos(n, direction) < rev_new_pos:
         _rn_ghost = {"direction": direction, "sl": sl, "tp": tp, "until": now + timedelta(days=MAX_HOLD_DAYS)}
         note(f"Reversal ใหม่: ตำแหน่งในกรอบ 24 ชม. < {rev_new_pos:g} -> ไม้เงา")
         fate("ด่านตำแหน่ง -> ไม้เงา")
@@ -1930,7 +1942,7 @@ for n, row in enumerate(clock.to_dict("records")):
                 _r = ((entry - _p["entry"]) if _pl else (_p["entry"] - entry)) / abs(_p["entry"] - _p["sl0"])
                 trades.append(close_pos(_p, _k, now, _p["booked"] + _p["rem"] * _r, "REVERSE"))
     if tp_entry_on_opposite and strategy != "Sideway" \
-            and not (tp_entry_no_rev and strategy == "Reversal"):   # ไม่ใช้กับไม้ Sideway ทั้งสองทาง (ผู้ใช้ 2026-10-02)
+            and not (tp_entry_no_rev and strategy in ("Reversal", "Pullback")):   # ไม่ใช้กับไม้ Sideway ทั้งสองทาง (ผู้ใช้ 2026-10-02)
         for _k, _p in list(positions.items()):
             if _k != slot_of(strategy) and _p["direction"] != direction and _p["strategy"] != "Sideway":
                 _pl = _p["direction"] == "Long"
@@ -2225,15 +2237,17 @@ if _bw_arg:
 if rev_short_struct:
     _tag += "_revshortstruct"
 # Reversal ใหม่ = ค่าระบบจริงตั้งแต่ 2026-10-13 — ติด tag เฉพาะที่ต่างจาก config (ไฟล์ base ไม่มี tag)
-if rev_new != config.REVERSAL_NEW:
+if regime_check.KEY_LEVEL_REQUIRED != _KL_LIVE:
+    _tag += "_kl" if regime_check.KEY_LEVEL_REQUIRED else "_nokl"
+if rev_new != config.PULLBACK_ENABLED:
     _tag += "_revnew" if rev_new else "_revold"
-if rev_new and rev_old_too != config.REVERSAL_OLD_ALSO:
+if rev_new and rev_old_too != config.REVERSAL_ENABLED:
     _tag += "_revoldtoo" if rev_old_too else "_noold"
 if rev_new:
     _tag += "_revnewtrend" if rev_new_trend_only else ""
-    if (rev_new_adx_rule, rev_new_adx_min) != (config.REVERSAL_NEW_ADX_RULE, 0.0):
+    if (rev_new_adx_rule, rev_new_adx_min) != (config.PULLBACK_ADX_RULE, 0.0):
         _tag += f"_rnadx{rev_new_adx_rule}{rev_new_adx_min:g}"
-    if rev_new_pos != (config.REVERSAL_NEW_MIN_RANGE_POS or None):
+    if rev_new_pos != (config.PULLBACK_MIN_RANGE_POS or None):
         _tag += f"_pos{rev_new_pos or 0:g}"
     _tag += "_lock" if rev_new_lock else ""
     _tag += "_noshadow" if (rev_new_pos and not rev_new_shadow and not rev_new_lock) else ""
