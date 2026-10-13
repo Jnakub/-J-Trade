@@ -943,9 +943,16 @@ def calc_rsi(series: pd.Series, period: int = DIV_RSI_PERIOD) -> pd.Series:
 
 
 
-def _find_spacing_partner(points: list[int]) -> int | None:
+# DIV_REQUIRE_OPPOSITE_SWING — คู่ swing ต้องมี swing ฝั่งตรงข้ามคั่น (= คนละขา ตามนิยามตำรา) · False = ระบบจริง
+#   (memory divergence-internals: 43% ของ divergence ที่เจอเทียบสองยอดในกรอบเดียวกัน และไม่ได้แย่กว่า) · ทดลองด้วย
+#   backtest_replay --div-textbook (2026-10-14 ผู้ใช้: "ลองปรับ Divergence ให้ตรงตามตำรา")
+DIV_REQUIRE_OPPOSITE_SWING = False
+
+
+def _find_spacing_partner(points: list[int], opposite: list[int] = None) -> int | None:
     """หาจุดก่อนหน้า (h1) ที่ห่างจากจุดล่าสุด (points[-1]) อย่างน้อย DIV_MIN_SPACING_BARS แท่ง
-    ถอยย้อนจาก points[-2] ไปเรื่อยๆ จนเจอ หรือเกิน DIV_MAX_LOOKBACK_BARS ก็เลิกหา (คืน None)"""
+    ถอยย้อนจาก points[-2] ไปเรื่อยๆ จนเจอ หรือเกิน DIV_MAX_LOOKBACK_BARS ก็เลิกหา (คืน None)
+    DIV_REQUIRE_OPPOSITE_SWING: ต้องมี swing ฝั่งตรงข้าม (opposite) อยู่ระหว่างคู่ด้วย"""
     if len(points) < 2:
         return None
     last = points[-1]
@@ -954,6 +961,8 @@ def _find_spacing_partner(points: list[int]) -> int | None:
         if gap > DIV_MAX_LOOKBACK_BARS:
             break
         if gap >= DIV_MIN_SPACING_BARS:
+            if DIV_REQUIRE_OPPOSITE_SWING and not any(cand < o < last for o in (opposite or [])):
+                continue
             return cand
     return None
 
@@ -1014,7 +1023,7 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
     if not highs and not lows:
         result["fail"].append("ไม่มี swing เลย")
 
-    h1 = _find_spacing_partner(highs)
+    h1 = _find_spacing_partner(highs, lows)
     if highs and h1 is None:
         result["fail"].append("bearish: หาคู่ swing ที่ห่างพอไม่ได้")
     if h1 is not None:
@@ -1041,7 +1050,7 @@ def check_divergence(df: pd.DataFrame, symbol: str = None) -> dict:
             if not ok:
                 result["fail"].append(why)
 
-    l1 = _find_spacing_partner(lows)
+    l1 = _find_spacing_partner(lows, highs)
     if lows and l1 is None:
         result["fail"].append("bullish: หาคู่ swing ที่ห่างพอไม่ได้")
     if l1 is not None:

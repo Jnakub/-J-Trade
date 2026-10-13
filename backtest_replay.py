@@ -589,6 +589,23 @@ rev_short_struct = "--rev-short-struct" in sys.argv
 #   ⚠️ ไฟล์ผลรอบก่อน 2026-10-13 ที่ติด _revnew* ใช้ความหมายธงเดิม (ตอนนั้นค่าเริ่มต้นคือ Reversal เดิม)
 rev_new = (config.PULLBACK_ENABLED or "--rev-new" in sys.argv) and "--rev-old" not in sys.argv
 rev_new_trend_only = "--rev-new-trend" in sys.argv
+# --div-textbook : divergence ตามตำรา (2026-10-14 ผู้ใช้) — RSI(14) · จุดแรก ≥ 70 / ≤ 30 · RSI ต้องสวนจริง (ไม่มี stall)
+#   · ราคาต้องทำ new extreme จริง (ไม่มี tolerance) · คู่ swing ต้องมี swing ฝั่งตรงข้ามคั่น · กระทบ Pullback + Breakout (READY)
+#   --div-textbook-zone : เฉพาะ RSI(14) + 70/30 (แยกผลของโซนออกจากส่วนอื่น)
+div_textbook = "--div-textbook" in sys.argv
+div_textbook_zone = "--div-textbook-zone" in sys.argv
+#   --div-zone-7030 : เฉพาะโซน 70/30 · RSI period เดิม (20) (ผู้ใช้ 2026-10-14 — แยกผลของ period ออกจากโซน)
+div_zone_7030 = "--div-zone-7030" in sys.argv
+if div_zone_7030:
+    regime_check.DIV_ZONE_OVERBOUGHT, regime_check.DIV_ZONE_OVERSOLD = 70, 30
+if div_textbook or div_textbook_zone:
+    regime_check.DIV_RSI_PERIOD = 14
+    regime_check.calc_rsi.__defaults__ = (14,)     # default ผูกตอน def — ดู --div-rsi-period
+    regime_check.DIV_ZONE_OVERBOUGHT, regime_check.DIV_ZONE_OVERSOLD = 70, 30
+if div_textbook:
+    regime_check.DIV_STALL_THRESHOLD = -1          # 0 <= diff <= -1 ไม่มีทางจริง = ปิด soft stall
+    regime_check.DIV_PRICE_TOLERANCE_ATR = 0.0
+    regime_check.DIV_REQUIRE_OPPOSITE_SWING = True
 # --no-key-level / --key-level : ทับ regime_check.KEY_LEVEL_REQUIRED (ระบบจริง False ตั้งแต่ 2026-10-13) — มีผลทั้ง
 #   REVERSAL-READY/Breakout และ Pullback · tag _nokl / _kl เฉพาะตอนต่างจากค่าระบบจริง
 _KL_LIVE = regime_check.KEY_LEVEL_REQUIRED
@@ -2237,6 +2254,12 @@ if _bw_arg:
 if rev_short_struct:
     _tag += "_revshortstruct"
 # Reversal ใหม่ = ค่าระบบจริงตั้งแต่ 2026-10-13 — ติด tag เฉพาะที่ต่างจาก config (ไฟล์ base ไม่มี tag)
+if div_textbook:
+    _tag += "_divtextbook"
+elif div_textbook_zone:
+    _tag += "_divtbzone"
+elif div_zone_7030:
+    _tag += "_divzone7030"
 if regime_check.KEY_LEVEL_REQUIRED != _KL_LIVE:
     _tag += "_kl" if regime_check.KEY_LEVEL_REQUIRED else "_nokl"
 if rev_new != config.PULLBACK_ENABLED:
