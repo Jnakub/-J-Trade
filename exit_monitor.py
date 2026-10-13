@@ -997,6 +997,9 @@ def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timesta
 #    🔑 ทำไม: ตอน Structure พลิก Bias 1D ยังหนุนทิศไม้ **59/59 ไม้** (15 วัน: 22/22) = ย่อ 4H ในเทรนด์ 1D ที่ยังอยู่
 #       = จังหวะเดียวกับที่ Reversal ใหม่เข้าไม้ (Bias สวน Structure) · ถือต่อได้อีก +0.34R/ไม้
 #       ปิดเมื่อ Structure **และ** Bias สวนทั้งคู่: โดนแค่ 5 ไม้ (15 วัน: 4) ΔR −0.84/−0.99 = เทรนด์กลับจริงมักโดน SL ไปก่อนแล้ว
+#    ใช้ Bias 1D พลิกสวนทิศแทน Structure (ผู้ใช้: "Structure เล็กไป"): Scoring โดนแค่ 5/157 ไม้ใน 2 ปี (TP 0 · SL 3)
+#       ΔR −0.84 (5-20 วัน: −0.99) = ไม่มีผล · Bias ช้าจน SL ปิดไม้ไปก่อน (ไม้ SL ที่โดน อยู่ −0.9R แล้วตอน Bias พลิก)
+#       => Structure เร็วไป (จับการย่อ) · Bias ช้าไป (SL มาก่อน) · ไม่มีช่องให้กฎ "เทรนด์เปลี่ยน" ทำงาน
 STRUCTURE_BREAK_ENABLED = False
 
 
