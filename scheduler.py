@@ -26,7 +26,7 @@ from config import (
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
     BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE, TP_TO_ENTRY_REVERSAL_TRIGGERS,
     BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
-    REVERSAL_NEW, REVERSAL_NEW_ADX_RULE, REVERSAL_NEW_MIN_RANGE_POS,
+    REVERSAL_NEW, REVERSAL_OLD_ALSO, REVERSAL_NEW_ADX_RULE, REVERSAL_NEW_MIN_RANGE_POS,
     REVERSAL_NEW_TP_FIB_RATIO, REVERSAL_NEW_FALLBACK_RR,
 )
 from mt5_connect import connect, get_account_balance, mt5_now
@@ -578,7 +578,8 @@ def scan_symbol(symbol: str) -> None:
                 else:
                     print(f"  [{symbol}] Reversal Short — เทรนด์ 1D = Short ({bias_src}) ผ่านด่าน")
             # Reversal เดิมปิดตั้งแต่ 2026-10-13 (config.REVERSAL_NEW) — ทาง REVERSAL-READY เหลือแค่ flip เป็น Breakout
-            if REVERSAL_NEW and not breakout_flip:
+            # เปิดคู่กับแบบใหม่ได้ด้วย config.REVERSAL_OLD_ALSO (ยังไม่เคยวัด)
+            if REVERSAL_NEW and not REVERSAL_OLD_ALSO and not breakout_flip:
                 print(f"  [{symbol}] SKIP — Reversal เดิมปิดแล้ว (config.REVERSAL_NEW) · "
                       f"READY {div_polarity} ไม่ใช่ทาง Breakout")
                 return

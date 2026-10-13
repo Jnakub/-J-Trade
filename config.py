@@ -285,6 +285,13 @@ REVERSAL_NEW_MIN_RANGE_POS = 0.3   # 0 = ปิด · ไม้ตาย 37% ข
                                    # หน่วงเฉยๆ ได้ 0 (ไม้กลับมาใน 3 ชม.) · ล็อกถาวร −16.77 · ไม้เงา = ตัดตรงเป้า 17/17
 REVERSAL_NEW_TP_FIB_RATIO = 3.0    # ที่ราบ ×2.0/2.5/3.0/3.5 = ΔR −0.90/−2.10/+4.53/+5.63 (ยังไม่มีด่าน ADX)
 REVERSAL_NEW_FALLBACK_RR = 1.5     # TP สำรองตอนหา Fib ไม่ได้ · ใช้ 2/66 ไม้ · ผู้ใช้เลือก (เท่า Scoring/Breakout)
+# REVERSAL_OLD_ALSO — เปิด Reversal เดิมคู่กับแบบใหม่ (ผู้ใช้ 2026-10-13 "เก็บวิธีเดิมไว้ อนาคตอาจเอากลับมาเสริม")
+#   True = รอบ REVERSAL-READY (ADX peak ≥ 28.5 โค้งลง + Key Level + div) เปิด Reversal เดิมได้อีกทาง ช่อง Reversal ร่วมกัน
+#   แบบใหม่มาก่อน (ประเมินก่อน regime) · Reversal เดิมใช้ TP ×REVERSAL_TP_FIB_RATIO (2.0) · สำรอง reversal.MIN_RR_REVERSAL (2R)
+#   ⚠️ ยังไม่เคยวัดแบบคู่ — วัดด้วย backtest_replay --rev-old-too ก่อนเปิด · ไม้ทั้งสองแบบบันทึก strategy "Reversal" เหมือนกัน
+#      (แยกใน trades_log ไม่ได้ ถ้าจะเปิดจริงควรแยกชื่อก่อน) · ข้อมูลเดิม: ไม้สองแบบไม่ซ้อนกันเลย (เดิมเข้าตอน ADX โค้งลง)
+#   REVERSAL_NEW = False = Reversal เดิมอย่างเดียว (ค่านี้ไม่มีผล)
+REVERSAL_OLD_ALSO = False
 
 # REVERSAL_TP_FIB_RATIO — อัตราส่วน Fibonacci extension ของไม้ Reversal แยกจาก TP_FIB_RATIO (Scoring ใช้)
 # ⚠️ ตั้งแต่ 2026-10-13 ใช้กับ Reversal เดิมเท่านั้น (REVERSAL_NEW = False) — Reversal ใหม่ใช้ REVERSAL_NEW_TP_FIB_RATIO

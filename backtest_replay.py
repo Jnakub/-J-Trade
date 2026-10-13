@@ -586,6 +586,8 @@ rev_short_struct = "--rev-short-struct" in sys.argv
 #   ⚠️ ไฟล์ผลรอบก่อน 2026-10-13 ที่ติด _revnew* ใช้ความหมายธงเดิม (ตอนนั้นค่าเริ่มต้นคือ Reversal เดิม)
 rev_new = (config.REVERSAL_NEW or "--rev-new" in sys.argv) and "--rev-old" not in sys.argv
 rev_new_trend_only = "--rev-new-trend" in sys.argv
+# --rev-old-too : Reversal เดิม (REVERSAL-READY) เปิดคู่กับแบบใหม่ — config.REVERSAL_OLD_ALSO (ปิดอยู่ · ยังไม่เคยวัด)
+rev_old_too = config.REVERSAL_OLD_ALSO or "--rev-old-too" in sys.argv
 # --rev-new-adx=X : --rev-new แต่ไม่ต้องรอ regime TREND — แค่ ADX 4H > X (ทิศไหนก็ได้ · 0 = ไม่ดู ADX) + Bias สวน
 #   Structure + Key Level + divergence ทิศไม้ (ผู้ใช้ 2026-10-12 "ไม่ดู ADX กับ ADX > 12.5")
 #   ที่มา: คัดกรองแท่ง 4H 2 ปี 10 symbol — Bias สวน Structure 10,389 แท่ง แต่ 66% อยู่ที่ ADX < 20 · ADX ≥ 22 ขึ้น/ทรง แค่ 18%
@@ -1693,7 +1695,7 @@ for n, row in enumerate(clock.to_dict("records")):
                         fate("Reversal Short ไม่มีเทรนด์ 1D หนุน")
                         continue
             if not flipped:
-                if rev_new:                        # --rev-new: Reversal เดิมปิด เหลือแค่ทาง Breakout
+                if rev_new and not rev_old_too:    # Reversal เดิมปิด เหลือแค่ทาง Breakout (--rev-old-too = เปิดคู่)
                     note("Reversal เดิมปิด (--rev-new)")
                     continue
                 if rev_min_adx is not None and rinfo["adx_now"] < rev_min_adx:   # --rev-min-adx
@@ -2225,6 +2227,8 @@ if rev_short_struct:
 # Reversal ใหม่ = ค่าระบบจริงตั้งแต่ 2026-10-13 — ติด tag เฉพาะที่ต่างจาก config (ไฟล์ base ไม่มี tag)
 if rev_new != config.REVERSAL_NEW:
     _tag += "_revnew" if rev_new else "_revold"
+if rev_new and rev_old_too != config.REVERSAL_OLD_ALSO:
+    _tag += "_revoldtoo" if rev_old_too else "_noold"
 if rev_new:
     _tag += "_revnewtrend" if rev_new_trend_only else ""
     if (rev_new_adx_rule, rev_new_adx_min) != (config.REVERSAL_NEW_ADX_RULE, 0.0):
