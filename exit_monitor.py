@@ -994,6 +994,9 @@ def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timesta
 #    15 วันยังตัด TP 6 ไม้ −10.99 แลกประหยัด SL 8 ไม้ +5.24 (scratchpad struct_exit_days.py)
 #    เฉพาะ Scoring (ผู้ใช้: ห้ามใช้กับ Reversal/Breakout) ก็ติดลบทุกค่า: ทันที −20.27 (|t| 2.14) · 5 วัน −13.14 ·
 #    10 วัน −6.64 · 15 วัน −7.81 · 20 วัน −5.52 — ทันทีตัด TP 17 ไม้ −31.13 แลก SL 25 ไม้ +15.21
+#    🔑 ทำไม: ตอน Structure พลิก Bias 1D ยังหนุนทิศไม้ **59/59 ไม้** (15 วัน: 22/22) = ย่อ 4H ในเทรนด์ 1D ที่ยังอยู่
+#       = จังหวะเดียวกับที่ Reversal ใหม่เข้าไม้ (Bias สวน Structure) · ถือต่อได้อีก +0.34R/ไม้
+#       ปิดเมื่อ Structure **และ** Bias สวนทั้งคู่: โดนแค่ 5 ไม้ (15 วัน: 4) ΔR −0.84/−0.99 = เทรนด์กลับจริงมักโดน SL ไปก่อนแล้ว
 STRUCTURE_BREAK_ENABLED = False
 
 
