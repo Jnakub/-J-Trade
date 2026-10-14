@@ -596,6 +596,11 @@ div_textbook = "--div-textbook" in sys.argv
 div_textbook_zone = "--div-textbook-zone" in sys.argv
 #   --div-zone-7030 : เฉพาะโซน 70/30 · RSI period เดิม (20) (ผู้ใช้ 2026-10-14 — แยกผลของ period ออกจากโซน)
 div_zone_7030 = "--div-zone-7030" in sys.argv
+#   --div-zone=OB/OS : โซน RSI ของ divergence เอง (เช่น 55/45 · 60/40) · RSI period เดิม (ผู้ใช้ 2026-10-14: เช็คที่ราบรอบ 53/46)
+_dz_arg = next((a for a in sys.argv if a.startswith("--div-zone=")), None)
+if _dz_arg:
+    _ob, _os = (float(x) for x in _dz_arg.split("=")[1].split("/"))
+    regime_check.DIV_ZONE_OVERBOUGHT, regime_check.DIV_ZONE_OVERSOLD = _ob, _os
 if div_zone_7030:
     regime_check.DIV_ZONE_OVERBOUGHT, regime_check.DIV_ZONE_OVERSOLD = 70, 30
 if div_textbook or div_textbook_zone:
@@ -606,6 +611,14 @@ if div_textbook:
     regime_check.DIV_STALL_THRESHOLD = -1          # 0 <= diff <= -1 ไม่มีทางจริง = ปิด soft stall
     regime_check.DIV_PRICE_TOLERANCE_ATR = 0.0
     regime_check.DIV_REQUIRE_OPPOSITE_SWING = True
+# --pullback-no-div : Pullback ไม่ต้องมี divergence (ผู้ใช้ 2026-10-14 "divergence ไม่มีประโยชน์ ลองเอาออก")
+#   Breakout ยังต้องมี (ทิศมาจากขั้ว divergence) · tag _pbnodiv
+# 🔻 replay 2026-10-14 (_now1014_pbnodiv vs base 406 +194.74): **566 ไม้ +169.92 ΔR −24.82 · ไม่เอา** (|t| 0.98 · ตัด 5 ใหญ่ −46.18)
+#    Pullback 60 +22.05 (+0.37/ไม้ · ชนะ 43%) -> 239 +5.71 (+0.02/ไม้ · ชนะ 31%) · Long 117 +29.06 / Short 122 −23.34
+#    · Sideway −7.5 (เสียรอบให้ Pullback) = divergence คือตัวที่ทำให้ Pullback เป็นบวก (ตรงกับกลุ่มไม่มีตัวกรอง 73 ไม้ −3.12)
+# 🔻 โซน divergence (RSI 20 · ΔR vs 53/46): 55/45 −7.01 (0/10 symbol ดีขึ้น) · 70/30 −46.12 · RSI14 70/30 −40.31
+#    · ตามตำราครบ (RSI14 · 70/30 · ไม่มี stall/tolerance · คู่คนละขา) −46.96 (|t| 2.76) = เข้มขึ้นแย่ลงทุกขั้น · คง 53/46
+pullback_no_div = "--pullback-no-div" in sys.argv
 # --no-key-level / --key-level : ทับ regime_check.KEY_LEVEL_REQUIRED (ระบบจริง False ตั้งแต่ 2026-10-13) — มีผลทั้ง
 #   REVERSAL-READY/Breakout และ Pullback · tag _nokl / _kl เฉพาะตอนต่างจากค่าระบบจริง
 _KL_LIVE = regime_check.KEY_LEVEL_REQUIRED
@@ -1269,7 +1282,8 @@ def revnew_candidate(t, check_signal=False, i=None):
             return None
         return _b
     _d, _ = pullback.pullback_direction(_r, _b, adx_rule=rev_new_adx_rule, adx_min=rev_new_adx_min,
-                                        require_key_level=regime_check.KEY_LEVEL_REQUIRED)
+                                        require_key_level=regime_check.KEY_LEVEL_REQUIRED,
+                                        require_divergence=not pullback_no_div)
     if _d is None:
         return None
     if rev_new_shadow:                     # ด่านตำแหน่งอยู่หลังสุด (ก่อนเปิดไม้) — ตรงนี้ดูแค่ไม้เงา
@@ -1615,7 +1629,7 @@ for n, row in enumerate(clock.to_dict("records")):
                 continue
             _need = "bullish" if direction == "Long" else "bearish"
             _dv = (rinfo["divergence"] or {}).get("divergence")
-            if _dv != _need:
+            if _dv != _need and not pullback_no_div:
                 note(f"Reversal ใหม่ {direction}: divergence = {_dv} (ต้อง {_need})")
                 fate("ไม่มี divergence ทิศเดียวกับไม้" if _dv is None else "divergence สวนทิศไม้")
                 continue
@@ -2260,6 +2274,10 @@ elif div_textbook_zone:
     _tag += "_divtbzone"
 elif div_zone_7030:
     _tag += "_divzone7030"
+elif _dz_arg:
+    _tag += f"_divzone{regime_check.DIV_ZONE_OVERBOUGHT:g}-{regime_check.DIV_ZONE_OVERSOLD:g}"
+if pullback_no_div:
+    _tag += "_pbnodiv"
 if regime_check.KEY_LEVEL_REQUIRED != _KL_LIVE:
     _tag += "_kl" if regime_check.KEY_LEVEL_REQUIRED else "_nokl"
 if rev_new != config.PULLBACK_ENABLED:
