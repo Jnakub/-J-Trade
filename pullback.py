@@ -11,7 +11,8 @@ import pandas as pd
 
 def pullback_direction(regime_info: dict, bias: str | None,
                        adx_rule: str = "nofall", adx_min: float = 0.0,
-                       require_key_level: bool = True) -> tuple[str | None, str]:
+                       require_key_level: bool = True,
+                       require_divergence: bool = True) -> tuple[str | None, str]:
     """ทิศไม้ Pullback หรือ (None, เหตุผล) — กฎเต็มที่ config.PULLBACK_ENABLED
     regime_info = get_regime() · bias = get_trend_bias() (Bias 1D)
     adx_rule: "nofall" (ระบบจริง · ห้าม ADX ลง) / "any" / "rising" / "declining" (peak แล้วโค้งลง) — ตัวอื่นมีไว้ให้ replay
@@ -38,9 +39,10 @@ def pullback_direction(regime_info: dict, bias: str | None,
         return None, "ไม่อยู่ที่ Key Level"
     need = "bullish" if bias == "Long" else "bearish"
     got = (regime_info.get("divergence") or {}).get("divergence")
-    if got != need:
+    if require_divergence and got != need:
         return None, f"ไม่มี divergence {need} (เจอ {got})"
-    return bias, f"Bias 1D {bias} สวน Structure 4H {struct} + Key Level + {need} divergence"
+    return bias, (f"Bias 1D {bias} สวน Structure 4H {struct}"
+                  + (f" + {need} divergence" if require_divergence else " (ไม่บังคับ divergence)"))
 
 
 def range_position(bars: pd.DataFrame, price: float, direction: str) -> float:
