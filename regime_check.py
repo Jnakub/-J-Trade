@@ -374,8 +374,13 @@ KEY_LEVEL_REQUIRED = False
 # ใช้ --div-zone-legacy เพื่อกลับไป 55/45 สำหรับเทียบ
 DIV_RSI_PERIOD   = 20
 DIV_MAX_AGE_BARS = 20
-DIV_ZONE_OVERBOUGHT = 53
-DIV_ZONE_OVERSOLD   = 46
+# 🔴 2026-10-14: 53/46 -> **50/50** (คำสั่งผู้ใช้ หลังกวาดโซนครบ 8 จุด · RSI 20 · base 406 ไม้ +194.74R · backtest_replay --div-zone=OB/OS)
+#    ไม่บังคับ +10.39 · 45/55 +9.40 · **50/50 +13.62** · 53/46 0 · 55/45 −7.01 · 60/40 −25.44 · 65/35 −38.85 · 70/30 −46.12
+#    ฝั่งหลวมเป็นที่ราบ (ไม่บังคับ/45/50) · 53/46 อยู่ขอบหน้าผา (จูนเดิมจาก "swing ผ่าน ~50%" ไม่ใช่จาก R)
+#    50/50 ผ่านเกณฑ์ 3/3: |t| 2.08 · ตัด 5 ใหญ่ +0.77 · ดีขึ้น 7/10 · Pullback 60 +22.05 -> 69 +31.73 · Breakout 64 +42.73 -> 66 +44.64
+#    ⚠️ เลือกหลังเห็นผล · มีผลทั้ง Pullback และ REVERSAL-READY/Breakout · RSI(14)+70/30 / ตามตำราครบ −40/−47 (ดู --div-textbook)
+DIV_ZONE_OVERBOUGHT = 50
+DIV_ZONE_OVERSOLD   = 50
 
 # Soft divergence (OR-logic) — เพิ่มเข้ามา 2026-07-23: นอกจาก RSI Lower High/Higher Low
 # เป๊ะ (strict) ยังนับเป็น divergence ได้ถ้า RSI "แทบไม่ขยับตามราคา" (stall) คือขึ้น/ลง
