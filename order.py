@@ -205,6 +205,56 @@ def place_order(symbol: str, direction: str, entry: float,
     return result.order
 
 
+def place_limit_order(symbol: str, direction: str, price: float,
+                      sl: float, tp: float, lot: float,
+                      comment: str = "auto-trader rev-a") -> int:
+    """ตั้ง limit order (BUY_LIMIT / SELL_LIMIT) — ใช้กับ Reversal แบบ A เท่านั้น (2026-10-15 · rev_a.py)
+    คืนเลข order ซึ่ง MT5 ใช้เป็นเลข position ด้วยเมื่อถูกเติม (position.ticket == order ticket ที่เปิดมัน)
+    GTC โดยตั้งใจ — scheduler ยกเลิกเองเมื่อครบ REV_A_LIMIT_HOURS (ตรงกับ replay ที่นับเป็นแท่ง 1H)
+    ไม่บันทึก journal ที่นี่ — scheduler บันทึกเองพร้อม strategy/ฐานตรึง (ดู scheduler.rev_a_*)"""
+    if not is_demo_account():
+        raise RuntimeError("ปฏิเสธ — บัญชีนี้ไม่ใช่ DEMO ห้ามเปิดไม้อัตโนมัติ")
+    is_long = direction.lower() == "long"
+    tick = get_tick_or_raise(symbol)
+    market = tick.ask if is_long else tick.bid
+    if (price >= market) if is_long else (price <= market):
+        raise RuntimeError(f"limit {price} อยู่ผิดฝั่งราคาตลาด {market} (ราคาย่อกลับมาแล้ว — ไม่ตั้ง)")
+    request = {
+        "action":       mt5.TRADE_ACTION_PENDING,
+        "symbol":       symbol,
+        "volume":       lot,
+        "type":         mt5.ORDER_TYPE_BUY_LIMIT if is_long else mt5.ORDER_TYPE_SELL_LIMIT,
+        "price":        price,
+        "sl":           sl,
+        "tp":           tp,
+        "deviation":    20,
+        "magic":        MAGIC_NUMBER,
+        "comment":      comment,
+        "type_time":    mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_RETURN,
+    }
+    result = mt5.order_send(request)
+    if result is None:
+        code, msg = mt5.last_error()
+        raise RuntimeError(f"order_send() ล้มเหลว  [{code}] {msg}")
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        raise RuntimeError(f"Limit order rejected  retcode={result.retcode}  {result.comment}")
+    print(f"  Limit order สำเร็จ  #{result.order}  {symbol} {direction} @ {price}  SL {sl}  TP {tp}  lot {lot}")
+    return result.order
+
+
+def cancel_pending(ticket: int) -> bool:
+    """ยกเลิก pending order · True = ยกเลิกแล้ว หรือไม่มี order นี้ค้างแล้ว (ถูกเติม/ยกเลิกไปก่อน)"""
+    if not mt5.orders_get(ticket=ticket):
+        return True
+    result = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": ticket})
+    if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"  ⚠️ ยกเลิก order #{ticket} ไม่สำเร็จ — "
+              f"{result.retcode if result else mt5.last_error()} {result.comment if result else ''}")
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Close position
 # ---------------------------------------------------------------------------

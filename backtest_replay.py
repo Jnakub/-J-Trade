@@ -166,6 +166,9 @@ from regime_check import get_regime
 import exit_monitor as em
 import reversal
 import pullback
+import rev_a as rev_a_mod   # ชื่อ rev_a ถูกใช้เป็นธง --rev-a แล้ว (ชื่อซ้ำ = โมดูลถูกทับเป็น bool เงียบๆ)
+from indicators import calc_atr as _calc_atr_ra
+from indicators import calc_adx as _calc_adx_ra, calc_di as _calc_di_ra
 
 # อ่านจาก config ที่เดียว (2026-09-15) — เดิมเป็นสำเนา literal พร้อม comment "ตรงกับ scheduler.py"
 from config import REGIME_NO_TRADE, REGIME_TREND, REGIME_REVERSAL
@@ -308,8 +311,15 @@ rr_blocked_log = []
 blocked_log = []
 # --scoring-min-rr=X : ทับด่าน R:R ขั้นต่ำ **เฉพาะทาง Scoring** (ระบบจริง config.MIN_RR_HARD_BLOCK = 1.5 ใช้ร่วม
 # กับ Breakout) · ไม่แตะ Breakout และไม่แตะตัวคูณ TP fallback (ดู scoring.compute_entry min_rr) · tag _scoringminrrX
+# 🔻 ผล 2026-10-15 R:R 1.2 (คำสั่งผู้ใช้ · เทียบ --rev-a 426 ไม้ +218.07R · ไม่เอา คง 1.5):
+#   ทุกตัว 1.2 (--scoring/--breakout-min-rr · --rev-min-rr · --rev-a-rr) 453 ไม้ +208.97 (−9.10) · |t| 0.54 · ดีขึ้น 2/10
+#   ยกเว้น Scoring 445 ไม้ +213.43 (−4.64) · |t| 0.41 · ดีขึ้น 4/10 · ไม้ R:R 1.2-1.5 แทบไม่ได้กำไร (Scoring ใหม่ 34 ไม้ +1.51)
+#   แล้วเบียดไม้ดีออก (Breakout หาย 12 ไม้ +8.33 · Scoring หาย 26 ไม้ +5.97) · Sideway ไม่มีด่าน R:R จึงไม่แตะ
 _smr_arg = next((a for a in sys.argv if a.startswith("--scoring-min-rr=")), None)
 scoring_min_rr = float(_smr_arg.split("=")[1]) if _smr_arg else None
+# --breakout-min-rr=X : ทับด่าน R:R ขั้นต่ำเฉพาะทาง Breakout (ระบบจริงใช้ config.MIN_RR_HARD_BLOCK) · tag _bominrrX
+_bmr_arg = next((a for a in sys.argv if a.startswith("--breakout-min-rr=")), None)
+breakout_min_rr = float(_bmr_arg.split("=")[1]) if _bmr_arg else None
 # --rev-tp-ratio=X : ทับ config.REVERSAL_TP_FIB_RATIO (อัตราส่วน Fibonacci ของ TP ไม้ Reversal) · tag _revtpX
 _rtr_arg = next((a for a in sys.argv if a.startswith("--rev-tp-ratio=")), None)
 if _rtr_arg:
@@ -721,6 +731,86 @@ rev_new_shadow = (rev_new and rev_new_pos is not None and not rev_new_lock
 rev_new_tp_ratio = config.PULLBACK_TP_FIB_RATIO
 rev_new_fallback = float(_rfb_arg.split("=")[1]) if _rfb_arg else config.PULLBACK_FALLBACK_RR
 _rn_ghost = None         # {"direction", "sl", "tp", "until"}
+
+# --rev-a : Reversal "แบบ A" = Reversal ตามนิยาม (ผู้ใช้ 2026-10-14) — ยังไม่มีในระบบจริง
+#   สัญญาณ 4H (Long · Short กลับด้าน): Bias 1D = Short และ Structure 4H = Short (เทรนด์เดิม) + ADX peak ≥ 28.5 โค้งลง
+#     + bullish divergence (โซน/KL ตามระบบจริง) -> เริ่มเฝ้า
+#   ยืนยัน 1H: ภายใน CW แท่ง แท่ง 1H ปิดเหนือ high สูงสุด BK แท่งก่อนหน้า -> แนว = high นั้น
+#   เข้า: limit ที่แนว ภายใน RW แท่ง (แท่งที่เติมแตะ SL ด้วย = SL ทันที · มองร้าย) · ช่อง Reversal ต้องว่างตอนเติม
+#   SL = ก้น (24 แท่งก่อนสัญญาณ..ยืนยัน) − 0.1×ระยะ · TP = ก้น + TPF × (ยอด 120 แท่งก่อนสัญญาณ − ก้น) · R:R ≥ 1.5
+#   strategy "Reversal" (ช่อง Reversal ร่วม Breakout/Pullback) · กฎ exit ระบบจริงทั้งหมด (ฐาน ATR ตั้งให้ SL แรก = SL ของแบบ A)
+#   ที่มา: คัดกรอง (scratchpad revA_grid.py) 10 symbol 16 ไม้ edge +0.70 t 1.87 · กวาดค่า 29/29 ชุดชนะสุ่ม
+#   · 22 symbol นอกระบบ 33 ไม้ +15.52 edge +0.52 ตัด 5 ใหญ่ยังบวก · รวม t 2.08
+rev_a = "--rev-a" in sys.argv
+# --rev-a-no-adx : ตัดด่าน ADX (peak ≥ 28.5 แล้วโค้งลง) ออกจากการหาสัญญาณของแบบ A · tag _noadx
+#   🔻 ผล 2026-10-15 (เทียบ --rev-a 426 ไม้ +218.07R · ไม่เอาทุกแบบ): ADX peak 28.5 + โค้งลง ดีสุดในแกนนี้
+#     ไม่ดู ADX                    473 ไม้ +204.77 (−13.30) · แบบ A 11 -> 64 ไม้ ต่อไม้ +0.88 -> −0.01 · |t| 0.98 · แย่ลง 7/10
+#     ไม่ดู ADX + --rev-a-rr=1.2   495 ไม้ +201.31 (−16.76) · แบบ A 87 ไม้ −1.96
+#     --rev-a-adx-trend (22,30)    465 ไม้ +203.54 (−14.53) · แบบ A 56 ไม้ −1.51 · |t| 1.16
+#     --rev-a-di                   448 ไม้ +209.55 (−8.52)  · แบบ A 38 ไม้ +3.97 · |t| 0.91 · ดีขึ้น 5/10
+#     ทุกแบบที่ไม่มี peak: Long ยังบวก (+0.26..+0.87/ไม้) แต่ Short ลบ (−0.34..−0.51/ไม้) · มี ADX: Short 4 ไม้ +0.79/ไม้
+#     และไม้เพิ่มไปเบียด Breakout ออก 6-10 ไม้ (+6..+8R) ทุกรอบ
+rev_a_no_adx = "--rev-a-no-adx" in sys.argv
+# --rev-a-adx-trend[=X[,N]] : แทนด่าน ADX ของแบบ A ด้วย "เคยมีเทรนด์" — ADX 4H สูงสุดใน N แท่งที่ปิดแล้ว ≥ X
+#   ไม่ต้องรอ ADX โค้งลง (ให้การพังของโครงสร้างราคาเป็นตัวจับจังหวะแทน) · default 22,30 (22 = ADX_GRAY_HIGH
+#   เส้น "มีเทรนด์" ที่ระบบใช้อยู่แล้ว — ไม่ได้เลือกจากผล) · tag _adxtrendXnN
+# --rev-a-di : แทนด่าน ADX ด้วยทิศของ DI (+DI/−DI สูตรเดียวกับ ADX period 20 แต่มีทิศ) — กลับตัวขึ้น: +DI สูงกว่า
+#   3 แท่ง 4H ก่อน และ −DI ต่ำกว่า · กลับตัวลง: กลับกัน · tag _di
+#   ใส่ทั้งสองธงพร้อมกัน = ต้องผ่านทั้งคู่ · ทั้งสองธงตัดเงื่อนไข peak ≥ 28.5 + โค้งลงทิ้งเสมอ
+_rat_arg = next((a for a in sys.argv if a == "--rev-a-adx-trend" or a.startswith("--rev-a-adx-trend=")), None)
+rev_a_adx_trend = None
+if _rat_arg:
+    _v = (_rat_arg.split("=", 1)[1] if "=" in _rat_arg else "22,30").split(",")
+    rev_a_adx_trend = (float(_v[0]), int(_v[1]) if len(_v) > 1 else 30)
+rev_a_di = "--rev-a-di" in sys.argv
+RA_DI_BARS = 3
+# 🔻 สถานะปัจจุบัน: default tpf = 0.5 (2026-10-15 เปลี่ยนเป็น 0.618 ตอนเช้า แล้วกลับเป็น 0.5 ตอนบ่าย · คำสั่งผู้ใช้ทั้งคู่)
+#   เหตุผลที่กลับ: 35 symbol นอกระบบ (revA_oos2) ที่ 0.618 แยกตามขาเดิม — L/d ≥ 5.3 (= ผ่าน 0.5 ด้วย) 51 ไม้ +0.38/ไม้
+#   edge vs สุ่ม +0.52 (t 1.87) · L/d < 5.3 (หลุดเข้ามาเพราะ 0.618) 29 ไม้ −0.37/ไม้ = ด่าน R:R ที่ 0.5 คัดขาเดิมยาว/สั้นจริง
+#   ซ้ำกับในระบบ (ไม้ใหม่ 7 ไม้ ชนะ 1-2) · อยากได้ TP ไกลโดยไม่คลายด่าน: --rev-a-tpx=0.618 (ยังไม่ได้รัน)
+# ประวัติ — ตอนเปลี่ยนเป็น 0.618: เทียบ --rev-a ที่ 0.5 (426 ไม้ +218.07R)
+#   0.618 = 431 ไม้ +215.01R (−3.05) · direct ไม้เดิม +2.06R (ถึง TP ได้เพิ่ม 6 ไม้ · EURUSD 2024-10-24 TP +1.46 -> BE)
+#   churn: ไม้ใหม่ 7 ไม้ −4.72R (5/7 ไม่เคยวิ่งเกิน +0.53R = ไม้เสียตั้งแต่จุดเข้า ไม่ใช่เพราะ TP ไกล) · |t| 1.06 · ดีขึ้น 4/10
+#   ไฟล์ผล 0.618 = `_now1015_revatpf0.618`
+_ra_cfg = {k: float(next((a.split("=")[1] for a in sys.argv if a.startswith(f"--rev-a-{k}=")), d))
+           for k, d in (("cw", 48), ("bk", 12), ("rw", 24), ("tpf", 0.5), ("rr", 1.5), ("deep", 0), ("tpx", 0))}
+# --rev-a-deep=X : ตั้ง limit ลึกกว่าระดับที่ถูกทะลุ X ส่วนของระยะ ระดับ -> จุดสุดขั้ว (0 = ที่ระดับพอดี · SL/TP เดิม
+#   R:R คิดจากจุด limit ใหม่) · --rev-a-own-slot : แบบ A มีช่องของตัวเอง ไม่ร่วมกับ Breakout/Pullback · tag _ownslot
+#   🔻 ผล 2026-10-15 --rev-a-deep=0.25 (ที่ tpf 0.5 · เทียบ --rev-a 426 ไม้ +218.07R · เก็บเป็นข้อมูล ไม่เอา):
+#     429 ไม้ +216.10R (−1.97) · |t| 0.40 · ดีขึ้น 4/10 · ⚠️ compare แบบ key เวลาใช้ไม่ได้ (เติมช้ากว่าเดิม 1-6 ชม.)
+#     จับคู่ ±30 ชม.: ไม้เดิมที่ยังเติม 8 ไม้ +5.69 -> +10.84 (SL ใกล้ขึ้น ไม้ TP ได้ R มากขึ้น)
+#     · limit ไม่ถูกเติม 3 ไม้ −4.00 (EURUSD Short +1.94 · USDJPY Long +2.07 = ไม้ที่ทะลุแล้ววิ่งเลย)
+#     · ไม้ใหม่ 7 ไม้ −1.70 (ชนะ 2/7) = ชุดเดียวกับที่หลุดเข้ามาตอน tpf 0.618 · Breakout ถูกเบียด 1 ไม้ −1.42
+#     => ทุกการคลายด่าน R:R (TP ไกล / เข้าลึก) ดึงไม้ขาเดิมสั้นชุดเดิมเข้ามา
+rev_a_own_slot = "--rev-a-own-slot" in sys.argv
+# ต้นขาแบบ swing (เดิมคือธง --rev-a-swing · default ตั้งแต่ 2026-10-15 ดูข้างล่าง): ต้นขาเดิมจาก swing จริงบน 4H แทน high/low สุดขั้วในหน้าต่าง 120 แท่ง 1H
+#   ต้นขา (Long) = จุดเริ่มของชุด lower high: ไล่ swing high ก่อนก้นของ divergence (l2) ย้อนหลังทีละตัว ตราบที่ตัวก่อนหน้า
+#   สูงกว่าตัวถัดมา -> ตัวสูงสุดของชุด = จุดที่ขาลงเริ่ม (Short กลับด้าน: ชุด higher low) · ไม่มีตัวเลขให้เลือก · ไม่ติดขอบหน้าต่าง
+#   ก้น/SL คงแบบเดิม (low ล่าสุดก่อนเบรก) — ลองก้นจาก swing ของ divergence แล้ว: ก้นจริงอยู่ไกลจากจุดเข้า (XAU 2026-03:
+#   4098 vs จุดเข้า 4442) SL กว้างจน R:R ตกทั้ง 13/13 สัญญาณ · นิยามต้นขาแรก "swing ตรงข้ามตัวล่าสุดก่อน l1" ก็ได้ swing เล็ก
+#   ระหว่างทาง (XAU 2026-07 ต้นขา 4044 vs หน้าต่าง 4145) จึงเปลี่ยนเป็นชุด lower high
+#   ใช้ find_swing_highs/lows พารามิเตอร์เดียวกับ check_divergence (left/right · tolerance · volume OR wick)
+#   ไม่มี swing ตรงข้ามก่อนก้น -> ทิ้งสัญญาณ (นับ "swing: หาต้นขาไม่ได้")
+#   🔻 ผล 2026-10-15 (tpf 0.5 · ไม่เอา — ดีในระบบแต่ไม่ซ้ำนอกระบบ):
+#     replay 10 symbol: 426 ไม้ +218.07R -> 449 ไม้ +232.20R (+14.13) · แบบ A 11 +9.71 -> 36 +24.24 · direct +4.68 |t| 1.17
+#     · churn |t| 1.13 · ตัด 5 ใหญ่ +0.04 · ดีขึ้น 7/10 (ตกเกณฑ์ 2/3)
+#     สคริปต์คัดกรอง (scratchpad revA_oos3.py · นิยามเดียวกัน) ในระบบ 16 ไม้ +9.69 -> 59 ไม้ +30.22 (ทิศเดียวกับ replay)
+#     **นอกระบบ 57 symbol: หน้าต่าง 89 ไม้ +23.70 (+0.27/ไม้ · edge vs สุ่ม t 1.97) -> swing 196 ไม้ +2.05 (+0.01/ไม้)**
+#     ชุดใหม่ 35 ตัว −13.20R · Short 73 ไม้ −15.59 · ไม้ที่เพิ่มมานอกระบบไม่มีค่า = +14R ในระบบเป็นของ 10 symbol นี้
+#   ระดับยืนยัน (high 12 แท่ง 1H) ไม่แตะ — เป็นตัวจับจังหวะ · การยืนยันด้วย swing 4H จริง (CHoCH) เคยฆ่า Reversal ทั้งใบ
+#   ที่มา 2026-10-15: หน้าต่าง 120 ชม. — ต้นขาเกาะขอบซ้าย 13/26 ไม้ (ไม่ใช่ต้นขาจริง) · ก้นเกาะขอบ 5/26
+# 🔴 2026-10-15 swing เป็น default ของแบบ A (คำสั่งผู้ใช้ · ทั้งที่ตกการทดสอบนอกระบบตามตัวเลขข้างบน)
+#   --rev-a-window = กลับไปใช้ต้นขาแบบหน้าต่าง 120 แท่ง 1H (พฤติกรรมก่อนวันนี้ · tag _window)
+#   ไฟล์ผลของ default นี้ = `_now1015_reva_swing` (รันตอนยังเป็นธง) · รันใหม่ด้วย --rev-a เฉยๆ จะได้ชื่อ `_reva`
+#   ⚠️ ไฟล์ `_now1014_reva` และผลแบบ A ทุกตัวก่อนหน้านี้ในไฟล์นี้ = ต้นขาแบบหน้าต่าง
+rev_a_swing = "--rev-a-window" not in sys.argv
+
+# --rev-a-tpx=X : คัดไม้ (ด่าน R:R) ด้วย TP ที่ tpf เหมือนเดิม แต่ตั้ง TP จริงที่ X ของขาเดิม (0 = ใช้ tpf) · tag _revatpxX
+#   ที่มา 2026-10-15: --rev-a-tpf=0.618 ได้ −3.05R แต่ direct (ไม้เดิม 11 ไม้) +2.06R · ที่ลบมาจากไม้ใหม่ที่หลุดด่าน R:R
+#   7 ไม้ −4.72 (5/7 ไม่เคยวิ่งเกิน +0.53R) -> แยกสองอย่างออกจากกัน: ชุดไม้เดิม + TP ไกลขึ้น
+_ra = {"watch": None, "pend": None}
+ra_stats = {"swing: หาต้นขาไม่ได้": 0, "สัญญาณ": 0, "ยืนยัน": 0, "R:R ไม่ผ่าน/ระดับผิด": 0, "ยืนยันไม่ทันเวลา": 0,
+            "limit หมดอายุ": 0, "เติมแต่ช่อง/ด่านไม่ว่าง": 0, "เข้าไม้": 0, "เติมแล้วโดน SL แท่งเดียวกัน": 0}
 
 # --scoring-dir-structure : ไม้ Scoring เอาทิศจาก Structure 4H (regression) แทน Bias 1D (trend_flip) และไม่ตรวจกับ Bias เลย
 # (ปิด scoring.ENFORCE_BIAS_MATCH) — ที่มา 2026-10-10 ผู้ใช้: "structure กับ bias คล้ายกัน ทดสอบ เปิดคู่ / อย่างใดอย่างหนึ่ง"
@@ -1237,6 +1327,31 @@ def df1d_at(t):
     return _df1d_cache[key]
 
 
+_ra_adx_cache = {}
+
+
+def ra_adx_alt_ok(t, d):
+    """ด่าน ADX ทางเลือกของแบบ A (--rev-a-adx-trend / --rev-a-di) · d = ทิศไม้ที่จะเข้า
+    ใช้แท่ง 4H ชุดเดียวกับ get_regime (get_adx_bars · ADX_PERIOD · แท่งปิดล่าสุด = len-2)"""
+    key = (t - _BAR_OFFSET).floor("4h") + _BAR_OFFSET
+    if key not in _ra_adx_cache:
+        _ra_adx_cache.clear()
+        _df = regime_check.get_adx_bars(symbol, bars=regime_check.BARS, as_of=t)
+        _pdi, _mdi = _calc_di_ra(_df, regime_check.ADX_PERIOD)
+        _ra_adx_cache[key] = (_calc_adx_ra(_df, regime_check.ADX_PERIOD).to_numpy(),
+                              _pdi.to_numpy(), _mdi.to_numpy(), len(_df) - 2)
+    _adx, _pdi, _mdi, k = _ra_adx_cache[key]
+    if rev_a_adx_trend and not _adx[k - rev_a_adx_trend[1] + 1:k + 1].max() >= rev_a_adx_trend[0]:
+        return False
+    if rev_a_di:
+        m = RA_DI_BARS
+        if d == "Long" and not (_pdi[k] > _pdi[k - m] and _mdi[k] < _mdi[k - m]):
+            return False
+        if d == "Short" and not (_mdi[k] > _mdi[k - m] and _pdi[k] < _pdi[k - m]):
+            return False
+    return True
+
+
 _bias_cache = {}
 
 
@@ -1535,6 +1650,84 @@ for n, row in enumerate(clock.to_dict("records")):
             limit_stats["ยกเลิก: แตะ TP ก่อน"] += 1
             pending["log"].update(status="ยกเลิก: แตะ TP", resolved=now); pending = None
 
+    # --rev-a: limit ที่ค้าง -> เฝ้ายืนยัน -> หาสัญญาณใหม่ (ดูที่จุด parse ธง) · ทำก่อนเลือกกลยุทธ์ของรอบนี้
+    if rev_a:
+        _cw, _bk, _rw = int(_ra_cfg["cw"]), int(_ra_cfg["bk"]), int(_ra_cfg["rw"])
+        _ras = "RevA" if rev_a_own_slot else slot_of("Reversal")
+        if _ra["pend"] is not None:
+            _p = _ra["pend"]; _lg = _p["dir"] == "Long"
+            if n > _p["exp"]:
+                _ra["pend"] = None; ra_stats["limit หมดอายุ"] += 1
+            elif (bar["low"] <= _p["lvl"]) if _lg else (bar["high"] >= _p["lvl"]):
+                _ra["pend"] = None
+                _cd = COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)
+                if (_ras in _occupied
+                        or daily_r.get(now.date(), 0.0) <= -max_daily_loss_r
+                        or (_cd and last_close_time is not None and (now - last_close_time) < timedelta(hours=_cd))
+                        or (tp_cd and last_tp_close_time is not None
+                            and (now - last_tp_close_time) < timedelta(hours=tp_cd))):
+                    ra_stats["เติมแต่ช่อง/ด่านไม่ว่าง"] += 1
+                else:
+                    _w = clock.iloc[max(0, n - 40):n + 1]
+                    _atr = float(_calc_atr_ra(_w, 14).iloc[-1])
+                    _sl, _tp, _e = _p["sl"], _p["tp"], _p["lvl"]
+                    if tp_cap_atr and _atr:
+                        _tp = min(_tp, _e + _atr * tp_cap_atr) if _lg else max(_tp, _e - _atr * tp_cap_atr)
+                    _pos = {"time": now, "direction": _p["dir"], "entry": _e, "sl": _sl, "sl0": _sl,
+                            "tp": _tp, "tp0": _tp, "tp_fib": _p["tp"], "strategy": "Reversal", "regime": "REV-A",
+                            "booked": 0.0, "rem": 1.0, "cuts": 0,
+                            "pinned_swing": (_sl + scoring.EXEC_SL_ATR_MULT * _atr) if _lg
+                            else (_sl - scoring.EXEC_SL_ATR_MULT * _atr),
+                            "pinned_atr_entry": _atr}
+                    ra_stats["เข้าไม้"] += 1
+                    _occupied.add(_ras)
+                    if (bar["low"] <= _sl) if _lg else (bar["high"] >= _sl):
+                        ra_stats["เติมแล้วโดน SL แท่งเดียวกัน"] += 1
+                        trades.append(close_pos(_pos, _ras, now, -1.0, "SL"))
+                    else:
+                        positions[_ras] = _pos
+        if _ra["watch"] is not None and _ra["pend"] is None:
+            _wt = _ra["watch"]; _lg = _wt["dir"] == "Long"
+            if n > _wt["exp"]:
+                _ra["watch"] = None; ra_stats["ยืนยันไม่ทันเวลา"] += 1
+            elif n >= _wt["i_sig"]:
+                _cf = rev_a_mod.confirm(clock, n, _wt["i_sig"], _wt["dir"], _wt.get("leg"),   # leg None = --rev-a-window
+                                    tp_fib=_ra_cfg["tpf"], min_rr=_ra_cfg["rr"], deep=_ra_cfg["deep"],
+                                    tp_exec=_ra_cfg["tpx"], bk=_bk)
+                if _cf is not None:
+                    _ra["watch"] = None; ra_stats["ยืนยัน"] += 1
+                    if "--rev-a-debug" in sys.argv:                # บันทึกอย่างเดียว
+                        print(f"  [revA] {now} {_wt['dir']} lvl {_cf['lvl']:.5g} ext {_cf['ext']:.5g} leg {_cf['leg']:.5g} "
+                              f"tp {_cf['tp']:.5g} sl {_cf['sl']:.5g} rr {_cf['rr']:.2f} {_cf['why']}")
+                    if _cf["ok"]:
+                        _ra["pend"] = {"dir": _wt["dir"], "lvl": _cf["entry"], "sl": _cf["sl"], "tp": _cf["tp"],
+                                       "exp": n + _rw}
+                    else:
+                        ra_stats["R:R ไม่ผ่าน/ระดับผิด"] += 1
+        if _ra["watch"] is None and _ra["pend"] is None and _ras not in _occupied:
+            try:
+                _r = regime_eff(now); _b = bias_at(now)
+                _adx_ok = (ra_adx_alt_ok(now, "Long" if _b == "Short" else "Short") if (rev_a_adx_trend or rev_a_di)
+                           else True if rev_a_no_adx else None)               # None = กฎระบบจริงใน rev_a
+                _sdir, _ = rev_a_mod.signal_direction(_r, _b, adx_ok=_adx_ok)
+                if _sdir:
+                    _ra["watch"] = {"dir": _sdir, "i_sig": n + 1, "exp": n + _cw}
+                    if rev_a_swing:
+                        _anc = rev_a_mod.swing_leg(_r, symbol, _sdir == "Long")
+                        if _anc is None:
+                            _ra["watch"] = None
+                            ra_stats["swing: หาต้นขาไม่ได้"] += 1
+                        else:
+                            _ra["watch"]["leg"] = _anc
+                    if _ra["watch"] is not None:
+                        ra_stats["สัญญาณ"] += 1
+            except Exception as _exc:
+                # 2026-10-15: เดิม `except: pass` — refactor ไป rev_a.py แล้วพังทุกรอบเงียบๆ ได้สัญญาณ 0 ทั้ง 10 symbol
+                # (identity check จับได้) · regime ดึงไม่ได้บางชั่วโมงยังเกิดได้ จึงนับ + พิมพ์ตัวแรก ไม่ให้ล้มทั้ง replay
+                ra_stats["error ตอนหาสัญญาณ"] = ra_stats.get("error ตอนหาสัญญาณ", 0) + 1
+                if ra_stats["error ตอนหาสัญญาณ"] == 1:
+                    print(f"  ⚠️ Reversal A หาสัญญาณ error ({now}): {type(_exc).__name__}: {_exc}")
+
     # --cap-reentry: สิทธิ์กลับเข้าของไม้ที่ถูกเพดานปิด — ราคาปิดแท่งเลยจุดสุดขั้วเดิม + ช่อง Scoring ว่าง
     if reentry_watch is not None:
         if now >= reentry_watch["expires"]:
@@ -1722,7 +1915,8 @@ for n, row in enumerate(clock.to_dict("records")):
                         _swing_mod.TP_FIB_RATIO = BREAKOUT_TP_FIB_RATIO
                         try:
                             sl_info = compute_entry(
-                                symbol, direction, entry, as_of=now, df_1d=_df1d_rev)
+                                symbol, direction, entry, as_of=now, df_1d=_df1d_rev,
+                                min_rr=breakout_min_rr)   # --breakout-min-rr (None = ค่าระบบจริง)
                         finally:
                             _swing_mod.TP_FIB_RATIO = _saved_fib
                         sl, tp, strategy = sl_info["sl"], sl_info["tp"], "Breakout"
@@ -2045,6 +2239,11 @@ if reversal_fate:
     for k, v in sorted(reversal_fate.items(), key=lambda x: -x[1]):
         print(f"    {v:>6}  {k}")
     print(f"    {entered:>6}  -> เข้าไม้จริง")
+if rev_a:
+    print(f"  {'-' * 74}")
+    print(f"  Reversal แบบ A (cw {_ra_cfg['cw']:g} · bk {_ra_cfg['bk']:g} · rw {_ra_cfg['rw']:g} · tpf {_ra_cfg['tpf']:g}):")
+    for k, v in ra_stats.items():
+        print(f"    {v:>6}  {k}")
 if limit_rr:
     print(f"  {'-' * 74}")
     print(f"  limit order (Reversal ที่ติด R:R -> ตั้งที่ R:R {limit_rr:g} · อายุ {limit_hours:g} ชม.):")
@@ -2112,6 +2311,8 @@ if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
 if scoring_min_rr is not None:
     _tag += f"_scoringminrr{scoring_min_rr:g}"
+if breakout_min_rr is not None:
+    _tag += f"_bominrr{breakout_min_rr:g}"
 if _rtr_arg:
     _tag += f"_revtp{reversal._TP_RATIO_OVERRIDE:g}"
 if _rfb_arg:
@@ -2278,6 +2479,19 @@ elif _dz_arg:
     _tag += f"_divzone{regime_check.DIV_ZONE_OVERBOUGHT:g}-{regime_check.DIV_ZONE_OVERSOLD:g}"
 if pullback_no_div:
     _tag += "_pbnodiv"
+if rev_a:
+    _tag += "_reva" + "".join(f"{k}{_ra_cfg[k]:g}" for k, d in (("cw", 48), ("bk", 12), ("rw", 24), ("tpf", 0.5), ("rr", 1.5), ("deep", 0), ("tpx", 0))
+                              if _ra_cfg[k] != d)
+    if rev_a_own_slot:
+        _tag += "_ownslot"
+    if not rev_a_swing:
+        _tag += "_window"
+    if rev_a_no_adx:
+        _tag += "_noadx"
+    if rev_a_adx_trend:
+        _tag += f"_adxtrend{rev_a_adx_trend[0]:g}n{rev_a_adx_trend[1]}"
+    if rev_a_di:
+        _tag += "_di"
 if regime_check.KEY_LEVEL_REQUIRED != _KL_LIVE:
     _tag += "_kl" if regime_check.KEY_LEVEL_REQUIRED else "_nokl"
 if rev_new != config.PULLBACK_ENABLED:

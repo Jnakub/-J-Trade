@@ -28,11 +28,13 @@ from config import (
     BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
     PULLBACK_ENABLED, REVERSAL_ENABLED, PULLBACK_ADX_RULE, PULLBACK_MIN_RANGE_POS,
     PULLBACK_TP_FIB_RATIO, PULLBACK_FALLBACK_RR, PULLBACK_MIN_RR,
+    REV_A_ENABLED, REV_A_CONFIRM_HOURS, REV_A_LIMIT_HOURS, REV_A_BREAK_BARS,
 )
-from mt5_connect import connect, get_account_balance, mt5_now
-from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias
+from mt5_connect import connect, get_account_balance, mt5_now, is_demo_account
+from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias, EXEC_SL_ATR_MULT
+from indicators import calc_atr
 from order import (calculate_lot_size, clamp_lot, place_order, position_risk_amount,
-                   risk_pct_of, modify_sltp)
+                   risk_pct_of, modify_sltp, place_limit_order, cancel_pending, MAGIC_NUMBER)
 import swing
 from exit_monitor import (
     check_structure_break, MAX_HOLD_DAYS,
@@ -44,6 +46,7 @@ import regime_check
 import sideway
 import reversal
 import pullback
+import rev_a
 import notify
 from logger_setup import get_logger, tee_print
 
@@ -168,6 +171,201 @@ def _parse_iso(raw: str):
         return datetime.fromisoformat(raw)
     except (ValueError, TypeError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Reversal แบบ A (config.REV_A_* · กฎเข้าที่ rev_a.py · 2026-10-15)
+# ---------------------------------------------------------------------------
+# สามสถานะต่อ symbol (ทีละอย่าง) เก็บใน rev_a_state.json — รีสตาร์ทแล้วต้องไม่หาย (เหตุผลเดียวกับ reject_cooldown.json):
+#   watch = เจอสัญญาณ 4H แล้ว รอแท่ง 1H ปิดทะลุ (ไม่เกิน REV_A_CONFIRM_HOURS)
+#   pend  = ตั้ง limit ที่ระดับยืนยันแล้ว รอเติม (ไม่เกิน REV_A_LIMIT_HOURS)
+# เวลาทั้งหมดเป็นเวลาแท่ง MT5 (UTC) · ลำดับในรอบ = backtest_replay (limit ค้าง -> เฝ้ายืนยัน -> หาสัญญาณใหม่)
+# ความต่างจาก replay ที่รู้อยู่ (ตั้งใจ · ไม่มีทางทำให้ตรงกว่านี้ด้วย limit จริง):
+#   - replay เช็คด่าน (ช่อง/daily loss/cooldown) ตอนราคาแตะ limit · ระบบจริงโบรกเติมเอง -> ยกเลิก limit ทันทีที่
+#     เห็นด่านปิดตอนสแกน และยกเลิกตอนเปิดไม้อื่นในช่อง Reversal
+#   - ฐานตรึง ATR (pinned) คิดตอนตั้ง limit · replay คิดตอนเติม (ต่างกัน ≤ REV_A_LIMIT_HOURS แท่ง)
+#   - สแกนหลุดหลายชั่วโมง (รีสตาร์ท/MT5 หลุด) แล้วแท่งยืนยันไม่ใช่แท่งล่าสุด -> ทิ้งสัญญาณ ไม่ตั้ง limit ย้อนหลัง
+_REV_A_FILE = os.path.join(os.path.dirname(__file__), "rev_a_state.json")
+
+
+def _rev_a_load() -> dict:
+    try:
+        with open(_REV_A_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _rev_a_save(data: dict) -> None:
+    try:
+        with open(_REV_A_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as exc:
+        print(f"  ⚠️ เขียน {_REV_A_FILE} ไม่ได้ ({exc}) — สถานะ Reversal แบบ A รอบนี้จะไม่ถูกจำ")
+
+
+def _rev_a_set(symbol: str, st: dict | None) -> None:
+    data = _rev_a_load()
+    if st:
+        data[symbol] = st
+    else:
+        data.pop(symbol, None)
+    _rev_a_save(data)
+
+
+def rev_a_cancel_pending(symbol: str, reason: str) -> None:
+    """ยกเลิก limit ของแบบ A ที่ค้างใน symbol นี้ (ถ้ามี) + ลบแถว journal + ล้างสถานะ"""
+    st = _rev_a_load().get(symbol) or {}
+    p = st.get("pend")
+    if not p:
+        return
+    if mt5.positions_get(ticket=p["ticket"]):
+        return                                     # เติมไปแล้ว — เป็นไม้จริง ไม่ใช่ของที่ต้องยกเลิก
+    if cancel_pending(p["ticket"]):
+        journal.remove_unfilled(p["ticket"])
+        _rev_a_set(symbol, None)
+        print(f"  [{symbol}] Reversal A: ยกเลิก limit #{p['ticket']} — {reason}")
+        log.info(f"[{symbol}] rev-a cancel #{p['ticket']} {reason}")
+
+
+def _rev_a_blocked(symbol: str, occupied: set) -> str:
+    """ด่านที่ replay เช็คตอนเติม limit (ช่อง · daily loss · cooldown · TP cooldown) — "" = ผ่าน"""
+    if slot_of("Reversal") in occupied:
+        return "ช่อง Reversal มีไม้แล้ว"
+    try:
+        if not journal.check_daily_loss(get_account_balance(), MAX_DAILY_LOSS):
+            return "daily loss limit"
+    except RuntimeError as exc:
+        return f"อ่านยอดเงินไม่ได้ ({exc})"
+    ok, why = journal.check_cooldown(symbol, COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0))
+    if not ok:
+        return why
+    ok, why = journal.check_tp_cooldown(symbol, TP_COOLDOWN_HOURS)
+    return "" if ok else why
+
+
+def rev_a_step(symbol: str, occupied: set) -> None:
+    """หนึ่งรอบของแบบ A ใน symbol นี้ — เรียกจาก scan_symbol หลัง Exit Monitor ก่อนด่านอื่นทั้งหมด
+    (replay ทำบล็อกนี้ก่อนเลือกกลยุทธ์ของรอบ และไม่ผ่าน news/portfolio/regime ของกลยุทธ์อื่น)"""
+    st = _rev_a_load().get(symbol) or {}
+    if not REV_A_ENABLED:
+        if st:
+            rev_a_cancel_pending(symbol, "ปิดกลยุทธ์ (config.REV_A_ENABLED)")
+            _rev_a_set(symbol, None)
+        return
+    h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=REV_A_CONFIRM_HOURS + 120)
+    if h1 is None or len(h1) < REV_A_CONFIRM_HOURS + 60:
+        print(f"  [{symbol}] Reversal A: ดึงแท่ง 1H ไม่พอ — ข้ามรอบนี้")
+        return
+    h1 = h1.iloc[:-1].reset_index(drop=True)                 # ตัดแท่งที่ยังไม่ปิด
+    last_t = h1["time"].iloc[-1]
+
+    # 1) limit ค้าง
+    p = st.get("pend")
+    if p:
+        if mt5.positions_get(ticket=p["ticket"]):
+            print(f"  [{symbol}] Reversal A: limit #{p['ticket']} ถูกเติมแล้ว ({p['direction']} @ {p['entry']})")
+            notify.notify_order_opened(symbol, p["direction"], p["entry"], p["sl"], p["tp"], p["lot"],
+                                       p["ticket"], is_demo=is_demo_account())
+            _rev_a_set(symbol, None)
+            st = {}
+        elif not mt5.orders_get(ticket=p["ticket"]):
+            # ไม่มีทั้ง order และ position: เติมแล้วปิดไปในชั่วโมงเดียว (journal reconcile จัดการเอง) หรือถูกลบจากที่อื่น
+            if not mt5.history_deals_get(position=p["ticket"]):
+                journal.remove_unfilled(p["ticket"])
+            print(f"  [{symbol}] Reversal A: limit #{p['ticket']} ไม่ค้างแล้ว — ล้างสถานะ")
+            _rev_a_set(symbol, None)
+            st = {}
+        else:
+            exp = _parse_iso(p.get("exp_bar"))
+            why = ("ครบ {}ชม. ราคาไม่ย่อมาแตะ".format(REV_A_LIMIT_HOURS)
+                   if exp is None or last_t >= exp else _rev_a_blocked(symbol, occupied))
+            if why:
+                rev_a_cancel_pending(symbol, why)
+            return                                           # limit ยังค้าง = ไม่เฝ้า/หาสัญญาณใหม่ (ตรง replay)
+
+    # 2) เฝ้ายืนยัน
+    w = st.get("watch")
+    if w:
+        sig_t, exp, chk = (_parse_iso(w.get("sig_bar")), _parse_iso(w.get("exp_bar")),
+                           _parse_iso(w.get("checked_to")))
+        idx = h1.index[h1["time"] == sig_t] if sig_t is not None else []
+        if exp is None or chk is None or last_t > exp or not len(idx):
+            print(f"  [{symbol}] Reversal A: ไม่ยืนยันภายใน {REV_A_CONFIRM_HOURS} ชม. — ทิ้งสัญญาณ {w.get('direction')}")
+            w = None
+        elif last_t == sig_t:
+            return                                           # สัญญาณเพิ่งเกิดรอบนี้ — เริ่มเช็คแท่งถัดไป (replay i_sig = n+1)
+        else:
+            i_sig, i_conf = int(idx[0]) + 1, len(h1) - 1
+            # สแกนหลุดไปหลายชั่วโมง (แท่งระหว่าง checked_to กับแท่งล่าสุดไม่เคยถูกเช็ค): ถ้าแท่งไหนในนั้นยืนยันแล้ว
+            # replay จะยืนยันที่แท่งนั้น (ระดับ/limit คนละชุด) -> ทิ้งสัญญาณ ไม่ตั้งย้อนหลัง
+            skipped = [j for j in range(i_sig, i_conf) if h1["time"].iloc[j] > chk]
+            if any(rev_a.confirm(h1, j, i_sig, w["direction"], w.get("leg")) is not None for j in skipped):
+                print(f"  [{symbol}] Reversal A: ยืนยันไปแล้วระหว่างที่สแกนหลุด — ทิ้งสัญญาณ {w['direction']}")
+                w = None
+            else:
+                cf = rev_a.confirm(h1, i_conf, i_sig, w["direction"], w.get("leg"))
+                if cf is None:
+                    w["checked_to"] = last_t.isoformat()
+                    _rev_a_set(symbol, {"watch": w})
+                    return
+                if cf["ok"]:
+                    rev_a_place(symbol, w["direction"], cf, h1, last_t)
+                    return
+                print(f"  [{symbol}] Reversal A {w['direction']}: ยืนยันแล้วแต่ไม่เข้า — {cf['why']} "
+                      f"(ระดับ {cf['lvl']:.5f} · ก้น {cf['ext']:.5f} · ต้นขา {cf['leg']:.5f} · TP {cf['tp']:.5f})")
+                w = None
+        _rev_a_set(symbol, None)                             # สัญญาณจบ -> หาสัญญาณใหม่ต่อในรอบเดียวกันได้ (ตรง replay)
+
+    # 3) หาสัญญาณใหม่ — ช่อง Reversal ต้องว่าง (replay: เฉพาะตอนไม่มีทั้ง watch/pend)
+    if w is None and slot_of("Reversal") not in occupied:
+        regime_info = get_regime(symbol)
+        bias, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
+        direction, why = rev_a.signal_direction(regime_info, bias)
+        if not direction:
+            return
+        leg = rev_a.swing_leg(regime_info, symbol, direction == "Long")
+        if leg is None:
+            print(f"  [{symbol}] Reversal A {direction}: {why} แต่หาต้นขา (swing) ไม่ได้ — ทิ้ง")
+            return
+        _rev_a_set(symbol, {"watch": {"direction": direction, "sig_bar": last_t.isoformat(),
+                                      "exp_bar": (last_t + timedelta(hours=REV_A_CONFIRM_HOURS)).isoformat(),
+                                      "checked_to": last_t.isoformat(), "leg": leg}})
+        print(f"  [{symbol}] Reversal A: สัญญาณ {direction} — {why} · ต้นขา {leg:.5f} · "
+              f"รอปิดทะลุ {REV_A_BREAK_BARS} แท่ง 1H ภายใน {REV_A_CONFIRM_HOURS} ชม.")
+        log.info(f"[{symbol}] rev-a signal {direction} leg={leg}")
+
+
+def rev_a_place(symbol: str, direction: str, cf: dict, h1, last_t) -> None:
+    """ยืนยันแล้ว + R:R ผ่าน -> ตั้ง limit (ผ่านด่านเติมของ replay + เพดานความเสี่ยงพอร์ตก่อน)"""
+    _rev_a_set(symbol, None)                                 # สัญญาณจบที่นี่ไม่ว่าตั้งได้หรือไม่ (replay: watch = None)
+    try:
+        balance = get_account_balance()
+        ok, why = check_portfolio_risk(symbol, balance)
+        if not ok:
+            print(f"  [{symbol}] Reversal A: ไม่ตั้ง limit — {why}")
+            return
+        entry, sl, tp = cf["entry"], cf["sl"], cf["tp"]
+        atr = float(calc_atr(h1.iloc[-41:], 14).iloc[-1])   # ATR1H ชุดเดียวกับ replay (41 แท่ง · period 14)
+        if TP_MAX_ATR and atr:
+            tp = min(tp, entry + atr * TP_MAX_ATR) if direction == "Long" else max(tp, entry - atr * TP_MAX_ATR)
+        lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
+        lot = clamp_lot(symbol, lot)
+        ticket = place_limit_order(symbol, direction, entry, sl, tp, lot)
+        pin = sl + EXEC_SL_ATR_MULT * atr if direction == "Long" else sl - EXEC_SL_ATR_MULT * atr
+        journal.log_trade_open(symbol, direction, entry, sl, tp, lot, ticket,
+                               pinned_swing=pin, pinned_atr_entry=atr, strategy="Reversal")
+        _rev_a_set(symbol, {"pend": {"ticket": ticket, "direction": direction, "entry": entry, "sl": sl,
+                                     "tp": tp, "lot": lot,
+                                     "exp_bar": (last_t + timedelta(hours=REV_A_LIMIT_HOURS)).isoformat()}})
+        print(f"  [{symbol}] Reversal A {direction}: ตั้ง limit #{ticket} @ {entry:.5f}  SL {sl:.5f}  "
+              f"TP {tp:.5f}  R:R {cf['rr']:.2f}  lot {lot}  (ค้างไม่เกิน {REV_A_LIMIT_HOURS} ชม.)")
+        notify.send(f"🟠 <b>Reversal A ตั้ง limit</b>\n{symbol}  {direction}\nLimit: {entry:,.5f}\n"
+                    f"SL: {sl:,.5f}   TP: {tp:,.5f}\nR:R: {cf['rr']:.2f}   Lot: {lot}\nOrder: #{ticket}")
+        log.info(f"[{symbol}] rev-a limit #{ticket} {direction} @ {entry} sl={sl} tp={tp} lot={lot}")
+    except Exception as exc:
+        print(f"  [{symbol}] Reversal A: ตั้ง limit ไม่สำเร็จ — {exc}")
+        log.error(f"[{symbol}] rev-a place ERROR", exc_info=True)
 print = tee_print(log)   # เขียนทุกอย่างที่ print ลง logs/scheduler.log ด้วย (ดู logger_setup.py)
 
 # Regime ที่ "ไม่เปิด" scorecard ใดๆ — รอความชัดเจนก่อน (ตาม Mutual Exclusivity ที่ตั้งไว้)
@@ -302,6 +500,19 @@ def check_portfolio_risk(symbol: str, balance: float) -> tuple[bool, str]:
         if my_group and CORRELATION_GROUPS.get(pos.symbol) == my_group:
             group_r += r
 
+    # limit ของ Reversal แบบ A ที่ค้าง = ความเสี่ยงที่โบรกเปิดให้ได้ทุกเมื่อโดยไม่ผ่านด่านนี้อีก -> นับเหมือนเปิดแล้ว
+    for od in mt5.orders_get() or []:
+        if od.magic != MAGIC_NUMBER or not od.sl:
+            continue
+        _d = "Long" if od.type == mt5.ORDER_TYPE_BUY_LIMIT else "Short"
+        try:
+            r = position_risk_amount(od.symbol, _d, od.price_open, od.sl, od.volume_current) / risk_unit
+        except RuntimeError:
+            r = 1.0
+        total_r += r
+        if my_group and CORRELATION_GROUPS.get(od.symbol) == my_group:
+            group_r += r
+
     if total_r + 1.0 > MAX_PORTFOLIO_RISK_R + 1e-9:
         return False, (f"เพดานความเสี่ยงรวมทั้งพอร์ต — เปิดค้างอยู่ {total_r:.2f}R "
                        f"+ ไม้ใหม่ 1R > {MAX_PORTFOLIO_RISK_R}R "
@@ -366,6 +577,16 @@ def scan_symbol(symbol: str) -> None:
             except Exception as exc:
                 print(f"  [{symbol}] Exit Monitor ERROR — {exc}")
                 log.error(f"[{symbol}] Exit Monitor ERROR", exc_info=True)
+
+    # 1a. Reversal แบบ A — limit ค้าง / เฝ้ายืนยัน / หาสัญญาณ (ไม่ผ่านด่านของกลยุทธ์อื่น ตรงกับ replay)
+    #     ใช้ occupied ชุดเดียวกับข้อ 1 (snapshot ก่อน Exit Monitor) · พังแล้วไม่ล้มทั้ง scan_symbol
+    try:
+        rev_a_step(symbol, occupied)
+    except Exception as exc:
+        print(f"  [{symbol}] Reversal A ERROR — {exc}")
+        log.error(f"[{symbol}] Reversal A ERROR", exc_info=True)
+
+    if positions:
         if not SLOT_PER_STRATEGY:
             return
         if occupied >= {"Scoring", "Reversal"}:
@@ -763,6 +984,9 @@ def scan_symbol(symbol: str) -> None:
                              strategy=strategy,
                              pinned_swing=pinned_swing, pinned_atr_entry=pinned_atr_entry)
         print(f"  [{symbol}] ORDER SENT ✅  Ticket=#{ticket}  Lot={lot}")
+        if ticket and slot_of(strategy) == slot_of("Reversal"):
+            # ไม้นี้ครองช่อง Reversal แล้ว -> limit ของแบบ A ที่ค้างจะเติมไม่ได้ (replay: "เติมแต่ช่องไม่ว่าง")
+            rev_a_cancel_pending(symbol, f"ช่อง Reversal ถูกไม้ {strategy} #{ticket} ใช้แล้ว")
         if TP_TO_ENTRY_ON_OPPOSITE and ticket and strategy != "Sideway" \
                 and (strategy not in ("Reversal", "Pullback") or TP_TO_ENTRY_REVERSAL_TRIGGERS):   # ดู config (Pullback ทำตาม Reversal = ตอนวัด)
             _tp_to_entry_on_opposite(symbol, direction, ticket)

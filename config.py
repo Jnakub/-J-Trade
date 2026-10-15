@@ -293,6 +293,33 @@ PULLBACK_FALLBACK_RR = 1.5         # TP สำรองตอนหา Fib ไ�
 #   ทั้งที่ replay (แบบไม่ดู ADX) 1.2 = +4.99 vs 1.5 = +3.30 — ด่าน R:R เป็นตัวรอราคา (ตัด 14 ไม้ +0.31 แต่ 5 ไม้กลับมา −1.55)
 PULLBACK_MIN_RR = 1.5
 
+# ---------------------------------------------------------------------------
+# REV_A_* — Reversal แบบ A (กลับตัวตามตำรา · เข้าระบบ 2026-10-15 ตามคำสั่งผู้ใช้ · กฎทั้งหมดที่ rev_a.py)
+# ---------------------------------------------------------------------------
+# สัญญาณ (4H): ADX peak ≥ REV_A_ADX_MIN_PEAK แล้วโค้งลง + Bias 1D = Structure 4H (เทรนด์ใหญ่/เล็กทางเดียวกัน)
+#   + divergence สวนเทรนด์ -> เฝ้าการกลับตัว (ทิศตรงข้ามเทรนด์)
+# ยืนยัน (1H): ภายใน REV_A_CONFIRM_HOURS ราคาปิดทะลุ high/low สุดขั้วของ REV_A_BREAK_BARS แท่งก่อนหน้า = ระดับยืนยัน
+# เข้า: limit order ที่ระดับยืนยัน ค้างไม่เกิน REV_A_LIMIT_HOURS · SL = ก้น ∓ REV_A_SL_BUFFER × (ระดับ − ก้น)
+#   ก้น = low/high สุดขั้วตั้งแต่ REV_A_EXT_BACK_HOURS ก่อนสัญญาณถึงแท่งยืนยัน
+#   TP = ก้น + REV_A_TP_FIB × (ต้นขา − ก้น) · ต้นขา = จุดเริ่มชุด lower high / higher low (swing 4H) · R:R ≥ REV_A_MIN_RR
+# ช่อง: ร่วมช่อง Reversal กับ Breakout/Pullback (slot_of) · ไม้ = strategy "Reversal" ใน journal / exit_monitor
+# 🔴 หลักฐาน (2026-10-15 · ตกเกณฑ์ · ผู้ใช้สั่งเข้าทั้งที่รู้):
+#   replay 10 symbol: 415 ไม้ +208.36R -> 449 ไม้ +232.20R (+23.84 · แบบ A 36 ไม้ +24.24 · +0.67/ไม้ · ชนะ 61%)
+#   direct |t| 1.17 · churn |t| 1.13 · ตัด 5 ใหญ่ +0.04 · ดีขึ้น 7/10
+#   **นอกระบบ 57 symbol (สคริปต์คัดกรองนิยามเดียวกัน): 196 ไม้ +2.05R ≈ 0/ไม้** · ต้นขาแบบหน้าต่าง 120 ชม. ได้ +0.27/ไม้
+#   ทุกค่าที่นี่เลือกในวันเดียวกันหลังเห็นผล (ADX/R:R/TP/limit/swing กวาดไว้ที่ธง --rev-a-* ของ backtest_replay)
+# 👉 ต้องตามดู: ไม้ Reversal จริงหลัง 2026-10-15 — ต่อไม้ใกล้ +0.5 (ในระบบ) หรือใกล้ 0 (นอกระบบ)
+#   ปิดกลยุทธ์ = REV_A_ENABLED = False (scheduler ยกเลิก limit ที่ค้างให้เองรอบถัดไป)
+REV_A_ENABLED       = True
+REV_A_ADX_MIN_PEAK  = 28.5
+REV_A_CONFIRM_HOURS = 48
+REV_A_BREAK_BARS    = 12
+REV_A_LIMIT_HOURS   = 24
+REV_A_EXT_BACK_HOURS = 24
+REV_A_SL_BUFFER     = 0.1
+REV_A_TP_FIB        = 0.5
+REV_A_MIN_RR        = 1.5
+
 # REVERSAL_ENABLED — Reversal เดิม (REVERSAL-READY: ADX peak ≥ 28.5 โค้งลง + Key Level + div · ทิศจาก divergence)
 #   ปิดตั้งแต่ 2026-10-13 · เก็บไว้ครบ (ผู้ใช้: "อนาคตอาจเอากลับมาเสริม") — ทาง REVERSAL-READY ตอนปิดเหลือแค่ flip เป็น Breakout
 #   PULLBACK_ENABLED False + REVERSAL_ENABLED True = ระบบก่อน 2026-10-13 เป๊ะ (replay --rev-old ตรง base เดิมทุกไม้)

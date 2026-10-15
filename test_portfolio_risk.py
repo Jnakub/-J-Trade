@@ -23,6 +23,9 @@ for _name in ("scheduler", "exit_monitor"):
 
 import scheduler  # noqa: E402
 import order      # noqa: E402
+import tempfile as _tf_ra  # noqa: E402
+# 2026-10-15: scan_symbol เรียก rev_a_step ทุกรอบ -> ไฟล์สถานะแบบ A ต้องไม่ใช่ของบอทจริงตั้งแต่เคสแรก
+scheduler._REV_A_FILE = os.path.join(_tf_ra.mkdtemp(), "rev_a_state.json")
 
 BALANCE = 10_000.0          # 1R = 2% = 200 USD
 
@@ -689,6 +692,190 @@ print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ตำแหน่ง 0.5 -> ส่ง
       f"{_orders or 'ไม่ส่ง'} · {_comp}")
 results.append(_ok)
 scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED = _saved_rn
+
+# ---------------------------------------------------------------------------
+# Reversal แบบ A (2026-10-15 · rev_a.py + scheduler.rev_a_*)
+# ---------------------------------------------------------------------------
+import rev_a  # noqa: E402
+
+print("\nReversal A — กฎสัญญาณ (rev_a.signal_direction):")
+
+
+def _ri(peak=30.0, declining=True, struct="Short (reg)", div="bullish"):
+    return {"peak": {"peak": peak, "declining": declining}, "structure": {"trend": struct},
+            "divergence": {"divergence": div}}
+
+
+for _lab, _ri_, _b, _want in [
+        ("เทรนด์ Short + bullish div + ADX peak 30 โค้งลง -> Long", _ri(), "Short", "Long"),
+        ("เทรนด์ Long + bearish div -> Short", _ri(struct="Long (reg)", div="bearish"), "Long", "Short"),
+        ("peak 25 < 28.5 -> ไม่เข้า", _ri(peak=25.0), "Short", None),
+        ("ADX ยังไม่โค้งลง -> ไม่เข้า", _ri(declining=False), "Short", None),
+        ("Bias สวน Structure -> ไม่เข้า (ทาง Pullback)", _ri(), "Long", None),
+        ("divergence ทางเดียวกับเทรนด์ -> ไม่เข้า", _ri(div="bearish"), "Short", None),
+        ("regime ไม่ครบคีย์ -> ไม่เข้า (ไม่ crash)", {}, "Short", None)]:
+    _got = rev_a.signal_direction(_ri_, _b)[0]
+    _ok = _got == _want
+    print(f"  [{'ok  ' if _ok else 'FAIL'}] {_lab:52} -> {_got}")
+    results.append(_ok)
+
+
+_RA_PRE = 100   # แท่งนำหน้า — rev_a_step ต้องมีแท่ง 1H ≥ REV_A_CONFIRM_HOURS + 60 ไม่งั้นข้ามรอบ
+
+
+def _ra_h1(n_closed, breakout_close=101.0, forming=True, pre=0):
+    """แท่ง 1H: 0..29 กรอบ 95-100 (แท่ง 25 ก้น 90) · แท่ง 30 ปิด breakout_close · ต่อจากนั้นกรอบเดิม
+    pre = แท่งกรอบเดิมนำหน้า (เลขแท่งในข้อความ = นับหลัง pre)"""
+    rows = []
+    for i in range(-pre, n_closed + (1 if forming else 0)):
+        hi, lo, c = 100.0, 95.0, 97.0
+        if i == 25:
+            lo = 90.0
+        if i == 30:
+            hi, c = max(100.0, breakout_close + 0.5), breakout_close
+        rows.append((pd.Timestamp("2026-10-01 00:00") + pd.Timedelta(hours=i), hi, lo, c))
+    return pd.DataFrame(rows, columns=["time", "high", "low", "close"])
+
+
+print("\nReversal A — ยืนยันบนแท่ง 1H (rev_a.confirm):")
+_h = _ra_h1(31, forming=False)
+_c29 = rev_a.confirm(_h, 29, 20, "Long", 150.0)
+_c30 = rev_a.confirm(_h, 30, 20, "Long", 150.0)
+_c30b = rev_a.confirm(_h, 30, 20, "Long", 130.0)
+for _lab, _ok, _got in [
+        ("แท่งยังไม่ปิดเหนือ high 12 แท่ง -> ยังไม่ยืนยัน", _c29 is None, _c29),
+        ("ปิดทะลุ -> limit 100 · SL 89 · TP 120 · R:R 1.82", _c30 is not None and _c30["ok"]
+         and (_c30["entry"], round(_c30["sl"], 6), round(_c30["tp"], 6)) == (100.0, 89.0, 120.0),
+         _c30 and (_c30["entry"], _c30["sl"], _c30["tp"], round(_c30["rr"], 2))),
+        ("ต้นขาใกล้ (TP 110 · R:R 0.91) -> ยืนยันแต่ไม่เข้า", _c30b is not None and not _c30b["ok"],
+         _c30b and _c30b["why"])]:
+    print(f"  [{'ok  ' if _ok else 'FAIL'}] {_lab:52} -> {_got}")
+    results.append(_ok)
+
+
+class _FakeOrder:
+    def __init__(self, t):
+        self.ticket = t
+
+
+_ra_calls = []
+_ra_state = {"positions": [], "orders": [555]}
+
+
+def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0, breakout_close=101.0):
+    """รัน scheduler.rev_a_step("XAUUSDm") หนึ่งรอบด้วยแท่งปลอม n_closed แท่งที่ปิดแล้ว · คืน (สถานะหลังรอบ, ข้อความ)"""
+    _ra_calls.clear()
+    if state is not None:
+        scheduler._rev_a_save({"XAUUSDm": state} if state else {})
+    h1 = _ra_h1(n_closed, breakout_close, pre=_RA_PRE)
+    patches = {
+        (scheduler, "get_ohlcv"): lambda s, tf, bars=None, **k: h1 if tf == scheduler.MT5_TIMEFRAMES["1H"] else None,
+        (scheduler, "get_regime"): lambda s: {**_ri(), "df_4h": None},
+        (scheduler, "get_trend_bias"): lambda s, df: ("Short", "ทดสอบ"),
+        (scheduler.rev_a, "swing_leg"): lambda r, s, lg: leg,
+        (scheduler, "REV_A_ENABLED"): enabled,
+        (scheduler.mt5, "positions_get"): lambda **k: [p for p in _ra_state["positions"] if p == k.get("ticket")],
+        (scheduler.mt5, "orders_get"): lambda **k: [_FakeOrder(t) for t in _ra_state["orders"]
+                                                    if "ticket" not in k or t == k["ticket"]],
+        (scheduler.mt5, "history_deals_get"): lambda **k: [],
+        (scheduler, "place_limit_order"): lambda *a, **k: (_ra_calls.append(("limit",) + a), 555)[1],
+        (scheduler, "cancel_pending"): lambda t: (_ra_calls.append(("cancel", t)), True)[1],
+        (journal, "log_trade_open"): lambda *a, **k: _ra_calls.append(("journal", k.get("strategy"))),
+        (journal, "remove_unfilled"): lambda t: _ra_calls.append(("unjournal", t)),
+        (journal, "check_daily_loss"): lambda b, m: True,
+        (journal, "check_cooldown"): lambda s, h: (True, "OK"),
+        (journal, "check_tp_cooldown"): lambda s, h: (True, "OK"),
+        (scheduler, "check_portfolio_risk"): lambda s, b: (True, ""),
+        (scheduler, "get_account_balance"): lambda: BALANCE,
+        (scheduler, "calculate_lot_size"): lambda *a, **k: (0.1, None),
+        (scheduler, "clamp_lot"): lambda s, l: l,
+        (scheduler.notify, "send"): lambda *a, **k: True,
+        (scheduler.notify, "notify_order_opened"): lambda *a, **k: None,
+        (scheduler, "is_demo_account"): lambda: True,
+    }
+    saved = {k: getattr(*k) for k in patches}
+    for (obj, name), fn in patches.items():
+        setattr(obj, name, fn)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            scheduler.rev_a_step("XAUUSDm", set(occupied))
+    finally:
+        for (obj, name), fn in saved.items():
+            setattr(obj, name, fn)
+    return scheduler._rev_a_load().get("XAUUSDm"), buf.getvalue()
+
+
+def ra_check(label, ok, got):
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {got}")
+    results.append(bool(ok))
+
+
+print("\nReversal A — วงจร watch -> limit -> เติม/ยกเลิก (scheduler.rev_a_step):")
+_t = lambda i: (pd.Timestamp("2026-10-01 00:00") + pd.Timedelta(hours=i)).isoformat()
+_st, _ = ra_scan(30, state={})
+ra_check("สัญญาณ -> เริ่มเฝ้า (sig_bar = แท่งปิดล่าสุด)", _st and _st.get("watch", {}).get("sig_bar") == _t(29)
+         and _st["watch"]["direction"] == "Long", _st)
+_st2, _ = ra_scan(30)
+ra_check("รอบเดียวกันซ้ำ -> ยังไม่เช็ค (เริ่มแท่งถัดไป)", _st2 == _st and not _ra_calls, _ra_calls)
+_st, _ = ra_scan(31)
+ra_check("แท่งถัดไปปิดทะลุ -> ตั้ง limit Long 100 / SL 89 / TP 120",
+         [c for c in _ra_calls if c[0] == "limit"] == [("limit", "XAUUSDm", "Long", 100.0, 89.0, 120.0, 0.1)]
+         and ("journal", "Reversal") in _ra_calls and _st.get("pend", {}).get("exp_bar") == _t(54), _ra_calls)
+_pend = dict(_st)
+_st, _ = ra_scan(32, state=_pend)
+ra_check("limit ค้าง ไม่มีด่านปิด -> ไม่ทำอะไร", _st == _pend and not _ra_calls, _ra_calls)
+_st, _ = ra_scan(32, state=_pend, occupied={"Reversal"})
+ra_check("ช่อง Reversal มีไม้แล้ว -> ยกเลิก limit + ลบแถว journal",
+         _st is None and ("cancel", 555) in _ra_calls and ("unjournal", 555) in _ra_calls, _ra_calls)
+_st, _ = ra_scan(55, state=_pend)
+ra_check("ครบ 24 ชม. -> ยกเลิก", _st is None and ("cancel", 555) in _ra_calls, _ra_calls)
+_ra_state["positions"] = [555]
+_st, _ = ra_scan(33, state=_pend, occupied={"Reversal"})      # เติมแล้ว = position อยู่ในช่อง Reversal ตั้งแต่ต้นรอบ
+ra_check("ถูกเติมแล้ว (มี position เลขเดียวกัน) -> ล้างสถานะ ไม่ยกเลิก",
+         _st is None and not any(c[0] == "cancel" for c in _ra_calls), _ra_calls)
+_ra_state["positions"] = []
+_st, _ = ra_scan(33, state=_pend, enabled=False)
+ra_check("ปิดกลยุทธ์ (REV_A_ENABLED False) -> ยกเลิก limit ที่ค้าง", _st is None and ("cancel", 555) in _ra_calls,
+         _ra_calls)
+_watch = {"watch": {"direction": "Long", "sig_bar": _t(29), "exp_bar": _t(77), "checked_to": _t(29), "leg": 130.0}}
+_st, _out = ra_scan(31, state=_watch, leg=130.0)
+ra_check("ยืนยันแต่ R:R 0.91 -> ทิ้ง ไม่ตั้ง limit", not any(c[0] == "limit" for c in _ra_calls)
+         and (_st is None or "pend" not in _st) and "ไม่เข้า" in _out, _ra_calls)
+_st, _ = ra_scan(80, state={**_watch, "watch": {**_watch["watch"], "leg": 150.0}})
+ra_check("เกิน 48 ชม. ไม่ยืนยัน -> ทิ้ง (หาสัญญาณใหม่ต่อได้)",
+         not any(c[0] == "limit" for c in _ra_calls) and (_st is None or _st.get("watch", {}).get("sig_bar") == _t(79)),
+         _st)
+_st, _out = ra_scan(33, state={**_watch, "watch": {**_watch["watch"], "leg": 150.0}})
+ra_check("สแกนหลุด แท่งยืนยันอยู่ในช่วงที่หลุด -> ทิ้ง ไม่ตั้งย้อนหลัง",
+         not any(c[0] == "limit" for c in _ra_calls) and "สแกนหลุด" in _out, _ra_calls)
+_ra_state["orders"] = []
+_st, _ = ra_scan(32, state=_pend)
+ra_check("order หายไปเอง ไม่มี deal -> ลบแถว journal + ล้าง limit", (_st is None or "pend" not in _st)
+         and ("unjournal", 555) in _ra_calls, _ra_calls)
+_ra_state["orders"] = [555]
+_saved_ra_file = scheduler._REV_A_FILE
+
+
+class _FakeLimit:
+    """limit ของแบบ A ที่ค้าง — ความเสี่ยง = ระยะ limit -> SL × lot (เหมือน position)"""
+    def __init__(self, p, magic):
+        self.symbol, self.price_open, self.sl, self.volume_current = p.symbol, p.price_open, p.sl, p.volume
+        self.type = mt5.ORDER_TYPE_BUY_LIMIT if p.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_SELL_LIMIT
+        self.magic = magic
+
+
+print("\nReversal A — limit ที่ค้างนับในเพดานความเสี่ยงรวม (check_portfolio_risk):")
+_saved_og = scheduler.mt5.orders_get
+_cap = scheduler.MAX_PORTFOLIO_RISK_R
+for _lab, _orders, _want in [
+        ("เปิดอยู่ 5R + limit ค้าง 1R + ไม้ใหม่ -> บล็อก", [_FakeLimit(pos_at("XAUUSDm", "Long", 1.0), order.MAGIC_NUMBER)], False),
+        ("เปิดอยู่ 5R + order ของคนอื่น (magic อื่น) -> ผ่าน", [_FakeLimit(pos_at("XAUUSDm", "Long", 1.0), 1)], True)]:
+    scheduler.mt5.orders_get = lambda o=_orders, **k: o
+    results.append(check(_lab, [pos_at("US500m", "Long", 1.0) for _ in range(int(_cap) - 1)], "BTCUSDm", _want))
+scheduler.mt5.orders_get = _saved_og
+ra_check("ไฟล์สถานะไม่ใช่ของบอทจริง", os.path.dirname(_saved_ra_file) != os.path.dirname(scheduler.__file__),
+         _saved_ra_file)
 
 # เคสข้างบนยิง WARNING "ไม่มี SL" จริง 2 บรรทัด — ต้องไม่มี handler ตัวไหนเขียนลงไฟล์ในโฟลเดอร์ logs/
 # (ถ้า get_logger เปลี่ยนวิธีเช็ค handler ซ้ำเมื่อไหร่ เคสนี้จะพังก่อนที่ log จริงจะถูกปนอีก)
