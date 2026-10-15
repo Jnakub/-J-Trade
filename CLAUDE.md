@@ -1,6 +1,6 @@
 # -J-Trade
 
-บอทเทรด MT5 (Exness) — สแกนทุก 1 ชม. เปิดไม้ตาม **4 กลยุทธ์** (Scoring = ตามเทรนด์,
+บอทเทรด MT5 (Exness) — สแกนทุก 1 ชม. เปิดไม้ตาม **5 กลยุทธ์** (Scoring = ตามเทรนด์, **Reversal แบบ A** = กลับตัวด้วย limit (2026-10-15),
 **Pullback** = เข้าตามเทรนด์ 1D ตอน 4H ย่อจบ (**แทน Reversal 2026-10-13**), Breakout = เบรกแนว — เพิ่ม 2026-09-21 · **Sideway = เทรดกรอบตอน ADX ต่ำ — เพิ่ม 2026-10-02**) แล้วจัดการไม้ด้วย `exit_monitor`
 เป็นรอบทุกชั่วโมง
 
@@ -60,6 +60,18 @@ replay เต็ม: base เดิม 378 ไม้ +191.46R -> **406 ไม้
 ⚠️ ธง backtest ยังชื่อ `--rev-new*` / `--rev-old*` (ผลทดลองผูกชื่อนี้) · ไฟล์ผลเก่าที่ติด `_revnew*` = Pullback · ไม้ Pullback ในไฟล์ก่อนเปลี่ยนชื่อติดป้าย "Reversal"
 👉 **ต้องตามดู:** ไม้ Pullback จริงหลัง 2026-10-13 (backtest ต่อไม้ +0.37 · ไม้ตาย ~31%) + บรรทัด "ไม้เงา" ใน scheduler.log
 · ผู้ใช้: "เส้น 0.3 ติดไว้ก่อน จูนครั้งหน้า" · เสนอจุดทบทวนเมื่อไม้ Pullback จริงครบ 30 ไม้
+🔴 **2026-10-15 Reversal แบบ A เข้าระบบจริง (`config.REV_A_*` · กฎเข้าบ้านเดียว `rev_a.py` · คำสั่งผู้ใช้ · ตกเกณฑ์ + ตกนอกระบบ)**
+กลับตัวตามตำรา: ADX 4H peak ≥ 28.5 โค้งลง + **Bias 1D = Structure 4H** + divergence สวนเทรนด์ -> รอแท่ง 1H ปิดทะลุ high/low 12 แท่ง
+(≤ 48 ชม.) -> **limit order** ที่ระดับนั้น (≤ 24 ชม.) · SL ใต้ low 24 ชม.ก่อนสัญญาณ−10% · TP 0.5 ของขาเดิม (ต้นขา = จุดเริ่มชุด
+lower high/higher low บน 4H) · R:R ≥ 1.5 · ช่อง Reversal (ร่วม Breakout/Pullback) · ไม้ = strategy "Reversal"
+**ระบบใช้ pending order ครั้งแรก** (`order.place_limit_order` / `cancel_pending`) · สถานะ `rev_a_state.json` (บน VPS) · แถว journal
+เขียนตอนตั้ง limit (position ใช้เลขเดียวกับ order) แล้วลบถ้ายกเลิก (`journal.remove_unfilled`) · limit ค้างนับในเพดานความเสี่ยงพอร์ต
+replay: 415 +208.36R -> 449 +232.20R (แบบ A 36 ไม้ +24.24 · `_now1015_reva_swing`) · direct |t| 1.17 · ตัด 5 ใหญ่ +0.04 · ดีขึ้น 7/10
+**นอกระบบ 57 symbol (สคริปต์คัดกรองนิยามเดียวกัน) ≈ 0/ไม้** (196 ไม้ +2.05R) · ทุกค่าเลือกวันเดียวกันหลังเห็นผล ·
+ผลกวาดทั้งหมด (ADX ×4 · R:R 1.2 · TP 0.618 · limit ลึก · หน้าต่าง vs swing) จดที่ธง `--rev-a-*` ของ `backtest_replay`
+👉 **ต้องตามดู:** ไม้ Reversal จริงหลัง 2026-10-15 ต่อไม้ใกล้ +0.5 (ในระบบ) หรือ 0 (นอกระบบ) · บรรทัด "Reversal A" ใน scheduler.log
+· ปิด = `REV_A_ENABLED = False` (scheduler ยกเลิก limit ค้างเองรอบถัดไป)
+
 🔴 **2026-10-14 divergence โซน RSI 53/46 -> 50/50** (`regime_check.DIV_ZONE_*` · คำสั่งผู้ใช้ · **ผ่านเกณฑ์ 3/3**: |t| 2.08 ·
 ตัด 5 ใหญ่ +0.77 · ดีขึ้น 7/10) · 406 +194.74 -> **415 ไม้ +208.36R** · กวาด 8 จุด: ฝั่งหลวม (ไม่บังคับ/45/55/50/50) เป็นที่ราบ +9..+14 ·
 เข้มกว่า 53/46 ตกเป็นขั้น (55/45 −7 · 60/40 −25 · 70/30 −46) · divergence ตามตำรา (RSI14 70/30 คนละขา) −47 · ตัด divergence ออกจาก
@@ -132,7 +144,7 @@ daily loss ยิง 1 วัน บล็อก 1 ไม้ (ที่ 3R ไ�
 
 🔴 **ห้ามรัน scheduler/exit_monitor บน Mac อีก** — สองเครื่องพร้อมกัน = เปิดไม้ซ้ำ + แย่งกันขยับ SL/TP
 Mac ใช้ทำ backtest (`run_wine.sh`) เท่านั้น
-🔴 **`trades_log.csv` / `reject_cooldown.json` / `daily_summary_state.json` / `cuts_log.csv` / `pullback_ghost.json` (2026-10-13) ฉบับจริงอยู่บน VPS**
+🔴 **`trades_log.csv` / `reject_cooldown.json` / `daily_summary_state.json` / `cuts_log.csv` / `pullback_ghost.json` (2026-10-13) / `rev_a_state.json` (2026-10-15) ฉบับจริงอยู่บน VPS**
 ของบน Mac/ใน git ล้าหลังตั้งแต่วันย้าย · **ห้าม commit `trades_log.csv` จาก Mac** (`git pull` บน VPS จะชน)
 อยากวิเคราะห์ไม้จริงบน Mac: `scp root@<IP>:/home/trader/-J-Trade/trades_log.csv /tmp/` แล้วอ่านจากนั้น
 
@@ -190,7 +202,7 @@ Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay
 เช็คด้วย `./run_wine.sh -c "import scoring; print(scoring.__file__)"` · ทางแก้ = ตัวเรียกที่ทำ
 `sys.path.insert(0, os.getcwd())` แล้ว `runpy.run_path(สคริปต์, run_name="__main__")`
 
-เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (102 เคส ณ 2026-10-13 —
+เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (127 เคส ณ 2026-10-15 · +Reversal A: กฎ · ยืนยัน · วงจร limit · limit ในเพดานพอร์ต —
 รวมช่องถือไม้ของ Breakout ใน `scan_symbol` และเกณฑ์ส่งคำสั่งขยับ SL/TP ของ `execute_decision` ตั้งแต่ 2026-09-28
 · Pullback: กฎเข้า · ช่อง · ทางของ scan_symbol · ไม้เงาบนไฟล์ temp · ด่าน 4e ถึงจุดส่ง order ปลอม ตั้งแต่ 2026-10-13)
 ⚠️ ถ้าจะรันเทสต์กับโค้ดรุ่นเก่า (ตัวเรียก runpy) **ห้าม import scheduler/exit_monitor ก่อนรันไฟล์เทสต์**

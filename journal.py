@@ -105,6 +105,20 @@ def log_trade_open(symbol: str, direction: str, entry: float,
     print(f"[journal] Open logged  ticket=#{ticket}  {symbol} {direction}")
 
 
+def remove_unfilled(ticket: int) -> bool:
+    """ลบแถว 'Open' ของ limit order ที่ถูกยกเลิกก่อนเติม (Reversal แบบ A · 2026-10-15)
+    แถวถูกเขียนตอนตั้ง limit (เพื่อให้ exit_monitor รู้ strategy/ฐานตรึงทันทีที่เติม — position ใช้เลขเดียวกับ order)
+    ถ้าไม่ลบ: แถวค้าง 'Open' ตลอดไป (reconcile ข้ามเพราะไม่มี deal) · ถ้าเปลี่ยนเป็น status อื่น: check_cooldown
+    จะนับเป็นไม้ที่ปิดแล้ว · คืน True ถ้าลบ"""
+    df = _load()
+    mask = (df["ticket"] == str(ticket)) & (df["status"] == "Open")
+    if not mask.any():
+        return False
+    _save(df.loc[~mask].reset_index(drop=True))
+    print(f"[journal] ลบแถว limit ที่ไม่ได้เติม #{ticket}")
+    return True
+
+
 # ---------------------------------------------------------------------------
 # ATR Trailing SL pinned anchor (บันทึกตอนเปิดไม้ — อ่านกลับใน exit_monitor.py)
 # ---------------------------------------------------------------------------
