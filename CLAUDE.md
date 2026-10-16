@@ -81,6 +81,7 @@ replay: 415 +208.36R -> 449 +232.20R (แบบ A 36 ไม้ +24.24 · `_now10
 เข้มกว่า 53/46 ตกเป็นขั้น (55/45 −7 · 60/40 −25 · 70/30 −46) · divergence ตามตำรา (RSI14 70/30 คนละขา) −47 · ตัด divergence ออกจาก
 Pullback −24.82 (ต่อไม้ +0.37 -> +0.02) = divergence จำเป็น แต่โซนต้องหลวม · ตารางเต็มที่ค่าคงที่นั้น
 ⚠️ บล็อก 2026-10-10 ข้างล่างยังมีผล: swing low 2 แท่ง (divergence + SL/TP Long) ใช้กับ Pullback ด้วย
+🔴 **2026-10-16 swing high ยืนยัน 2 แท่งด้วย** (`DIV_SWING_RIGHT_HIGHS = 2` · `reversal.SWING_RIGHT_SHORT = 2` · คำสั่งผู้ใช้) — บวกทั้งสองช่วง (+7.37 / +6.85R) แต่ตัวขับคนละกลยุทธ์ · Pullback แย่ลงทั้งคู่ · ตัวเลขที่ค่าคงที่
 
 🔴 **2026-10-10 Reversal Long ยืนยัน swing low ที่ 2 แท่ง 4H (เดิม 4) + ไม้ Reversal ใหม่ไม่ย้าย TP ไม้อื่น (คำสั่งผู้ใช้ · ตกเกณฑ์ 2/3)**
 `regime_check.DIV_SWING_RIGHT_LOWS = 2` (bullish divergence) · `reversal.SWING_RIGHT_LONG = 2` (SL/TP ของ Long) · swing high คง 4
