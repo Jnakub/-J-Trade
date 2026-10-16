@@ -67,7 +67,7 @@ _MIN_RR_OVERRIDE   = None   # backtest_replay --rev-min-rr ตั้งให้
 _TP_RATIO_OVERRIDE = None   # backtest_replay --rev-tp-ratio ตั้งให้ (None = config.REVERSAL_TP_FIB_RATIO)
 # แท่ง 4H ฝั่งขวาที่ยืนยัน swing ของ SL/TP แยกตามทิศไม้ — backtest_replay --rev-swing-right[-lows] ตั้งคู่กับ regime_check.DIV_SWING_RIGHT_*
 SWING_RIGHT_LONG   = 2      # 2026-10-10 คำสั่งผู้ใช้ (เดิม 4) — เหตุผล/ตัวเลขที่ regime_check.DIV_SWING_RIGHT_LOWS
-SWING_RIGHT_SHORT  = 4
+SWING_RIGHT_SHORT  = 2      # 2026-10-16 คำสั่งผู้ใช้ (เดิม 4) — เหตุผล/ตัวเลขที่ regime_check.DIV_SWING_RIGHT_HIGHS
 
 GREEN, YELLOW, RED, CYAN, BOLD, DIM, RESET = (
     "\033[92m", "\033[93m", "\033[91m", "\033[96m", "\033[1m", "\033[2m", "\033[0m"
