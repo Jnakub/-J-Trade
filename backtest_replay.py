@@ -751,6 +751,13 @@ rev_a = "--rev-a" in sys.argv
 #     ทุกแบบที่ไม่มี peak: Long ยังบวก (+0.26..+0.87/ไม้) แต่ Short ลบ (−0.34..−0.51/ไม้) · มี ADX: Short 4 ไม้ +0.79/ไม้
 #     และไม้เพิ่มไปเบียด Breakout ออก 6-10 ไม้ (+6..+8R) ทุกรอบ
 rev_a_no_adx = "--rev-a-no-adx" in sys.argv
+# --rev-a-leg-max=N : ชุด lower high / higher low ของต้นขาไม่เกิน N swing (rev_a.LEG_MAX_SWINGS) · tag _legmaxN
+#   ที่มา 2026-10-16 คัดกรองนอกระบบ 57 symbol (spread ตรึง): ≤2 +15.25R · ≤3 +10.86 · ≤4 −10.11 · ≤5 −19.37 · ไม่จำกัด −20.17
+#   replay 10 symbol ≤4 (2026-10-16 · เทียบไม่จำกัด 449 ไม้ +232.20R): 444 ไม้ +230.77R (−1.43) · แบบ A 36 -> 31 ไม้ +22.82
+#   (ต่อไม้ +0.67 -> +0.74) · ไม้หาย 5 ไม้ +0.62 · ไม้ใหม่ 0 · ดีขึ้น 2/10 = ในระบบแทบไม่ต่าง · ⚠️ ไม่ใช่ identity เพราะตัดไม้ 5 ไม้
+_lm_arg = next((a for a in sys.argv if a.startswith("--rev-a-leg-max=")), None)
+if _lm_arg:
+    rev_a_mod.LEG_MAX_SWINGS = int(_lm_arg.split("=")[1]) or None    # 0 = ไม่จำกัด (ระบบจริงก่อน 2026-10-16)
 # --rev-a-adx-trend[=X[,N]] : แทนด่าน ADX ของแบบ A ด้วย "เคยมีเทรนด์" — ADX 4H สูงสุดใน N แท่งที่ปิดแล้ว ≥ X
 #   ไม่ต้องรอ ADX โค้งลง (ให้การพังของโครงสร้างราคาเป็นตัวจับจังหวะแทน) · default 22,30 (22 = ADX_GRAY_HIGH
 #   เส้น "มีเทรนด์" ที่ระบบใช้อยู่แล้ว — ไม่ได้เลือกจากผล) · tag _adxtrendXnN
@@ -1193,8 +1200,17 @@ else:
         sys.exit(f"ไม่มี {symbol} ใน config.SPREAD_PCT_BY_SYMBOL — วัด spread แล้วใส่ค่าไว้ก่อน "
                  f"(ตอนนี้ตลาดให้ {live_cost_pct:.4f}%) หรือใช้ --live-spread ถ้าตั้งใจรันด้วยค่าสด")
 
-h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=days * 24 + 500)
-h4 = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=days * 6 + 400)
+# --end ย้อนไกล (> 60 วันจากวันนี้ · ทดสอบช่วงเวลาก่อนหน้า 2026-10-16): ดึงแท่งเพิ่มให้ถึงต้นหน้าต่าง
+# เดิมนับ days ถอยจาก "ตอนนี้" -> --end=2024-09-24 ได้แท่ง 0 แท่งในหน้าต่าง (IndexError ทุก symbol)
+# ไม่แตะรอบปกติ (--end ใกล้ๆ) เพื่อให้จำนวนแท่งที่ดึงเท่าเดิมเป๊ะ (base / identity ไม่เปลี่ยน)
+_extra_h = 0
+_end_arg0 = next((a for a in sys.argv if a.startswith("--end=")), None)
+if _end_arg0:
+    _gap_h = int((pd.Timestamp.utcnow().tz_localize(None) - pd.Timestamp(_end_arg0.split("=", 1)[1])).total_seconds() // 3600)
+    if _gap_h > 60 * 24:
+        _extra_h = _gap_h + 48
+h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=days * 24 + 500 + _extra_h)
+h4 = get_ohlcv(symbol, MT5_TIMEFRAMES["4H"], bars=days * 6 + 400 + _extra_h // 4)
 end_time   = h1["time"].iloc[-1]
 # --end=YYYY-MM-DDTHH:MM : ตรึงปลายหน้าต่าง (นาฬิกา MT5 = UTC) ให้ทุกรอบที่จะเทียบกันใช้แท่งชุดเดียวกัน
 # 🔴 2026-09-25 เพิ่มเพราะ ETH สองโปรเซสที่เริ่ม**พร้อมกัน**ได้ปลายหน้าต่างต่างกัน 5 ชม.
@@ -2486,6 +2502,8 @@ if rev_a:
         _tag += "_ownslot"
     if not rev_a_swing:
         _tag += "_window"
+    if _lm_arg:
+        _tag += f"_legmax{rev_a_mod.LEG_MAX_SWINGS or 0}"
     if rev_a_no_adx:
         _tag += "_noadx"
     if rev_a_adx_trend:

@@ -63,7 +63,7 @@ replay เต็ม: base เดิม 378 ไม้ +191.46R -> **406 ไม้
 🔴 **2026-10-15 Reversal แบบ A เข้าระบบจริง (`config.REV_A_*` · กฎเข้าบ้านเดียว `rev_a.py` · คำสั่งผู้ใช้ · ตกเกณฑ์ + ตกนอกระบบ)**
 กลับตัวตามตำรา: ADX 4H peak ≥ 28.5 โค้งลง + **Bias 1D = Structure 4H** + divergence สวนเทรนด์ -> รอแท่ง 1H ปิดทะลุ high/low 12 แท่ง
 (≤ 48 ชม.) -> **limit order** ที่ระดับนั้น (≤ 24 ชม.) · SL ใต้ low 24 ชม.ก่อนสัญญาณ−10% · TP 0.5 ของขาเดิม (ต้นขา = จุดเริ่มชุด
-lower high/higher low บน 4H) · R:R ≥ 1.5 · ช่อง Reversal (ร่วม Breakout/Pullback) · ไม้ = strategy "Reversal"
+lower high/higher low บน 4H · **ไม่เกิน 4 swing ตั้งแต่ 2026-10-16** `REV_A_LEG_MAX_SWINGS`) · R:R ≥ 1.5 · ช่อง Reversal (ร่วม Breakout/Pullback) · ไม้ = strategy "Reversal"
 **ระบบใช้ pending order ครั้งแรก** (`order.place_limit_order` / `cancel_pending`) · สถานะ `rev_a_state.json` (บน VPS) · แถว journal
 เขียนตอนตั้ง limit (position ใช้เลขเดียวกับ order) แล้วลบถ้ายกเลิก (`journal.remove_unfilled`) · limit ค้างนับในเพดานความเสี่ยงพอร์ต
 replay: 415 +208.36R -> 449 +232.20R (แบบ A 36 ไม้ +24.24 · `_now1015_reva_swing`) · direct |t| 1.17 · ตัด 5 ใหญ่ +0.04 · ดีขึ้น 7/10
@@ -71,6 +71,10 @@ replay: 415 +208.36R -> 449 +232.20R (แบบ A 36 ไม้ +24.24 · `_now10
 ผลกวาดทั้งหมด (ADX ×4 · R:R 1.2 · TP 0.618 · limit ลึก · หน้าต่าง vs swing) จดที่ธง `--rev-a-*` ของ `backtest_replay`
 👉 **ต้องตามดู:** ไม้ Reversal จริงหลัง 2026-10-15 ต่อไม้ใกล้ +0.5 (ในระบบ) หรือ 0 (นอกระบบ) · บรรทัด "Reversal A" ใน scheduler.log
 · ปิด = `REV_A_ENABLED = False` (scheduler ยกเลิก limit ค้างเองรอบถัดไป)
+
+🔴 **2026-10-16 ระบบทั้งหมดบนช่วง 2023-11 ถึง 2024-09 (ไม่เคยใช้จูน · replay `--end=2024-09-24T00:00` ทำได้แล้ว): ต่อไม้ +0.13 เทียบ +0.52**
+180 ไม้ +22.74R · Scoring +0.19 · Breakout +0.30 · Reversal A +0.44 · **Sideway −0.01 · Pullback −0.07** · DD −15R (−30%) · บวก 5/10 symbol
+= ตัวเลข base พองจากการจูนบนช่วง 2024-26 · คาดผลจริงราว +0.1-0.2R/ไม้ · **ค่าใหม่ต่อจากนี้ต้องดีขึ้นทั้งสองช่วง** (memory `out-of-time-2023-24`)
 
 🔴 **2026-10-14 divergence โซน RSI 53/46 -> 50/50** (`regime_check.DIV_ZONE_*` · คำสั่งผู้ใช้ · **ผ่านเกณฑ์ 3/3**: |t| 2.08 ·
 ตัด 5 ใหญ่ +0.77 · ดีขึ้น 7/10) · 406 +194.74 -> **415 ไม้ +208.36R** · กวาด 8 จุด: ฝั่งหลวม (ไม่บังคับ/45/55/50/50) เป็นที่ราบ +9..+14 ·

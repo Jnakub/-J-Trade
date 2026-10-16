@@ -319,6 +319,12 @@ REV_A_EXT_BACK_HOURS = 24
 REV_A_SL_BUFFER     = 0.1
 REV_A_TP_FIB        = 0.5
 REV_A_MIN_RR        = 1.5
+# REV_A_LEG_MAX_SWINGS — ชุด lower high / higher low ของต้นขาไล่ได้ไม่เกินกี่ swing (None = ไม่จำกัด)
+# 🔴 2026-10-16: None -> 4 (คำสั่งผู้ใช้) · replay 10 symbol: 449 ไม้ +232.20R -> 444 ไม้ +230.77R (−1.43 · แบบ A 36 -> 31 ไม้
+#   ต่อไม้ +0.67 -> +0.74 · ไม้หาย 5 ไม้ +0.62 · |t| 0.17 = ในระบบไม่ต่าง)
+#   คัดกรองนอกระบบ 57 symbol (spread ตรึง): ไม่จำกัด −20.17R · ≤5 −19.37 · **≤4 −10.11** · ≤3 +10.86 · ≤2 +15.25
+#   = ยิ่งไล่ขาไกลยิ่งแย่นอกระบบ (เส้นทางเดียว) · ≤4 ดีกว่าเดิมนอกระบบ ~10R แต่ยังติดลบ · ≤2 ยังไม่ได้ replay
+REV_A_LEG_MAX_SWINGS = 4
 
 # REVERSAL_ENABLED — Reversal เดิม (REVERSAL-READY: ADX peak ≥ 28.5 โค้งลง + Key Level + div · ทิศจาก divergence)
 #   ปิดตั้งแต่ 2026-10-13 · เก็บไว้ครบ (ผู้ใช้: "อนาคตอาจเอากลับมาเสริม") — ทาง REVERSAL-READY ตอนปิดเหลือแค่ flip เป็น Breakout
