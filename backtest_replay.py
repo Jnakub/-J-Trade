@@ -1151,6 +1151,7 @@ if _bel_arg:
 # ต้องวัดที่นี่ด้วยเหตุผลเดียวกับ BE: เปลี่ยนเวลาออก = คืนช่องถือไม้ = ชุดไม้เปลี่ยน
 for _flag, _attr in (("--be-trigger=", "BREAKEVEN_TRIGGER_R"),
                      ("--be-level=",   "BREAKEVEN_LEVEL_R"),
+                     ("--be-atr-float=", "BREAKEVEN_ATR_FLOAT"),   # 2026-10-16 BE ลอยตาม ATR (ดู exit_monitor)
                      ("--trail-tp-buffer=",  "TRAIL_TP_ATR_BUFFER"),
                      ("--trail-tp-trigger=", "TRAIL_TP_TRIGGER_PCT")):
     _a = next((a for a in sys.argv if a.startswith(_flag)), None)
@@ -2325,6 +2326,8 @@ if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
 if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
+if _min_sl_arg:
+    _tag += f"_minsl{float(_min_sl_arg.split('=')[1]):g}"   # 2026-10-16: เดิมไม่ติด tag = ทับไฟล์ base
 if scoring_min_rr is not None:
     _tag += f"_scoringminrr{scoring_min_rr:g}"
 if breakout_min_rr is not None:
@@ -2450,6 +2453,8 @@ if any(a.startswith("--trail-tp-buffer=") for a in sys.argv):
     _tag += f"_trailtpbuf{em.TRAIL_TP_ATR_BUFFER:g}"
 if any(a.startswith("--trail-tp-trigger=") for a in sys.argv):
     _tag += f"_trailtptrig{em.TRAIL_TP_TRIGGER_PCT:g}"
+if any(a.startswith("--be-atr-float=") for a in sys.argv):
+    _tag += f"_beatr{em.BREAKEVEN_ATR_FLOAT:g}"
 if any(a.startswith("--be-level=") for a in sys.argv):
     _tag += f"_belevel{em.BREAKEVEN_LEVEL_R:g}"
 if div_wick_gold:

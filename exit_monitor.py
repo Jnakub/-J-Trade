@@ -429,6 +429,17 @@ BREAKEVEN_TRIGGER_R  = 1.5
 # ราคามักย่อกลับมาแตะ** แกนนี้จึงเก็บการป้องกันไว้แต่ขยับจุดล็อกออกจากจุดนั้น
 BREAKEVEN_LEVEL_R    = 0.0
 
+# BREAKEVEN_ATR_FLOAT — BE แบบจุดล็อกลอยตาม ATR (ไอเดียผู้ใช้ 2026-10-16 · 0 = ปิด = พฤติกรรมเดิมเป๊ะ)
+# ถึง BREAKEVEN_TRIGGER_R -> SL = entry ∓ k × ATR1H ล่าสุด (แทน entry เป๊ะ) แล้วคำนวณใหม่ทุกรอบ **ถอยหลังได้**
+# (ไม่มี ratchet ในช่วงนี้) จนกว่าจะถึงขั้นบันได (BREAKEVEN_LADDER) ซึ่งล็อกเหนือ entry แล้วกลับไปใช้ ratchet เดิม
+# รู้ว่า "เคยถึง BE แล้ว" จาก SL บน broker: ก่อน BE ratchet ยอมให้ SL ห่างออกเท่านั้น -> SL ที่แคบกว่า initial_sl
+# แปลว่าเคยยิงแล้ว (ไม่ต้องจำ state ข้ามรอบ) · ไม่ต่ำกว่า initial_sl เสมอ · ไม้ Sideway ไม่มี ATR -> ใช้ BE เดิม
+# ที่มา: ไม้จริง HK50 2026-10-14 จบ BE 0 แล้วราคาไปต่อ · ผลวัดอยู่ที่ backtest_replay --be-atr-float
+# 🔻 ผล 2026-10-16 (K = 1 · ผสมกับ SL ขั้นต่ำดัชนี 0.5% · เทียบ 444 ไม้ +230.77R · ไม่เอา ตามคำสั่งผู้ใช้):
+#   2024-26 436 ไม้ +227.02R (−3.75) · ไม้ชุดเดียวกัน: จบ BE -> โดน SL 30 ไม้ −6.90R (−0.25/ไม้) vs จบ BE -> TP 1 ไม้ +1.89R
+#   = ไม้ที่ย้อนกลับถึง entry หลังเคยถึง +1.5R ส่วนใหญ่ย้อนต่อ ที่หายใจ 1 ATR แค่เปลี่ยน 0R เป็นขาดทุนเล็กน้อย
+BREAKEVEN_ATR_FLOAT  = 0.0
+
 # BREAKEVEN_LADDER — ขั้นบันไดต่อจาก BE: ((trigger_R, level_R), ...) ถึง trigger เมื่อไหร่ จุดล็อก
 # ขยับขึ้นเป็น level (เอาขั้นสูงสุดที่ถึง · ratchet `past_breakeven` ด้านล่างกัน SL ถอยกลับเอง)
 # นับ "ถึง" ด้วย r_multiple ของรอบนั้น (ราคาปัจจุบัน) แบบเดียวกับ BREAKEVEN_TRIGGER_R ไม่ใช่ extreme
@@ -1529,6 +1540,18 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                                  else min(desired_sl, lock_sl)
     else:
         desired_sl = be_price if be_lock else None  # คำนวณสูตรไม่ได้ -> ใช้กติกาเดิม (ล็อกเมื่อ >=1R)
+
+    # BE ลอยตาม ATR (BREAKEVEN_ATR_FLOAT > 0 · ดูที่ค่าคงที่) — ทับผลของ BE/ratchet ข้างบนเฉพาะช่วงก่อนถึงขั้นบันได
+    if (BREAKEVEN_ATR_FLOAT and BREAKEVEN_ENABLED and trail is not None and initial_sl and sl
+            and be_level <= 0):
+        _lg = direction == "Long"
+        _eps = 1e-9 * abs(entry)
+        _float = (entry - BREAKEVEN_ATR_FLOAT * trail["atr_latest"]) if _lg \
+            else (entry + BREAKEVEN_ATR_FLOAT * trail["atr_latest"])
+        _float = max(_float, initial_sl) if _lg else min(_float, initial_sl)
+        _in_float = (initial_sl + _eps < sl < entry - _eps) if _lg else (entry + _eps < sl < initial_sl - _eps)
+        if ge1r or _in_float:
+            desired_sl = _float
 
     # ── TP ที่ควรตั้งรอบนี้ — เริ่ม trail เมื่อใกล้ TP เดิม <= TRAIL_TP_TRIGGER_PCT ──
     desired_tp = None
