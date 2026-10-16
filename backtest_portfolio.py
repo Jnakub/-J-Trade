@@ -36,15 +36,20 @@ P = datetime.datetime.fromisoformat
 BE_PREFIXES = (em.BE_DECISION_PREFIX, "ขยับ SL ไปจุด Entry")
 
 
+# --tag=SUFFIX : อ่าน replay_trades_<sym>SUFFIX.csv / replay_cuts_<sym>SUFFIX.csv แทนไฟล์ base (2026-10-16 ·
+#   เช็คพอร์ตของชุดทดลองที่ยังไม่ได้แทน base เช่น --tag=_now1015_reva_swing)
+TAG = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--tag=")), "")
+
+
 def load():
     """คืน list ของไม้ พร้อม sched = [(เวลา, ความเสี่ยงที่เหลือเป็น R), ...]"""
     trades = []
     _no_be_col = set()     # symbol ที่ไฟล์ replay ยังไม่มีคอลัมน์ be_time (รุ่นก่อน 2026-09-28)
     for sym in SYMBOLS:
         try:
-            fh = open(f"replay_trades_{sym}.csv")
+            fh = open(f"replay_trades_{sym}{TAG}.csv")
         except FileNotFoundError:
-            sys.exit(f"ไม่มี replay_trades_{sym}.csv — รัน backtest_replay.py {sym} ก่อน")
+            sys.exit(f"ไม่มี replay_trades_{sym}{TAG}.csv — รัน backtest_replay.py {sym} ก่อน")
         for row in csv.DictReader(fh):
             if not row.get("exit_time"):
                 continue        # ไม้ที่ยังค้างตอน replay จบ — ไม่รู้ผล ตัดทิ้ง
@@ -62,9 +67,9 @@ def load():
     cuts = defaultdict(list)
     for sym in SYMBOLS:
         try:
-            fh = open(f"replay_cuts_{sym}.csv")
+            fh = open(f"replay_cuts_{sym}{TAG}.csv")
         except FileNotFoundError:
-            print(f"  ! ไม่มี replay_cuts_{sym}.csv — ไม้ของ {sym} จะถูกคิดเป็น 1R เต็ม"
+            print(f"  ! ไม่มี replay_cuts_{sym}{TAG}.csv — ไม้ของ {sym} จะถูกคิดเป็น 1R เต็ม"
                   f" ตลอดอายุไม้ (รัน replay ด้วย --log-cuts เพื่อให้แม่นขึ้น)")
             continue
         for row in csv.DictReader(fh):

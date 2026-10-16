@@ -9,7 +9,7 @@ state ระหว่างรอ (เฝ้า/limit ค้าง) อยู่
 import pandas as pd
 
 from config import (REV_A_ADX_MIN_PEAK, REV_A_BREAK_BARS, REV_A_EXT_BACK_HOURS, REV_A_SL_BUFFER,
-                    REV_A_TP_FIB, REV_A_MIN_RR)
+                    REV_A_TP_FIB, REV_A_MIN_RR, REV_A_LEG_MAX_SWINGS)
 
 LEG_WINDOW_BARS = 120   # ต้นขาแบบหน้าต่าง (ก่อน 2026-10-15) — เหลือไว้ให้ backtest_replay --rev-a-window เท่านั้น
 
@@ -32,6 +32,9 @@ def signal_direction(regime_info: dict, bias: str | None, adx_ok: bool | None = 
     if bias == "Long" and dv == "bearish":
         return "Short", "เทรนด์ Long (1D+4H) + bearish divergence"
     return None, f"ไม่มี divergence สวนเทรนด์ ({dv or 'ไม่มี'})"
+
+
+LEG_MAX_SWINGS = REV_A_LEG_MAX_SWINGS   # ค่าจาก config (ระบบจริง) · replay --rev-a-leg-max ทับได้ (0 = ไม่จำกัด)
 
 
 def swing_leg(regime_info: dict, symbol: str, long_: bool) -> float | None:
@@ -63,12 +66,14 @@ def swing_leg(regime_info: dict, symbol: str, long_: bool) -> float | None:
         return None
     px = d4["high"] if long_ else d4["low"]
     leg = float(px.iloc[prev[-1]])
+    n = 1
     for i in reversed(prev[:-1]):
         v = float(px.iloc[i])
-        if (v > leg) if long_ else (v < leg):
-            leg = v
-        else:
+        if not ((v > leg) if long_ else (v < leg)):
             break
+        if LEG_MAX_SWINGS and n >= LEG_MAX_SWINGS:
+            break
+        leg, n = v, n + 1
     return leg
 
 
