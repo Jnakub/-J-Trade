@@ -207,6 +207,33 @@ legacy_sl = "--legacy-sl" in sys.argv   # ตั้ง scoring.EXEC_SL_ATR_MULT 
 
 # --min-sl=X : ทับเกณฑ์ระยะ SL ขั้นต่ำของ symbol นี้ — get_min_sl_distance_pct() อ่าน dict
 # ตอนถูกเรียกทุกครั้ง การแก้ตรงนี้จึงมีผลกับ compute_entry/reversal ทันทีโดยไม่ต้องแก้ config.py
+# --sideway-min-width-atr=K : กรอบ Sideway ต้องกว้าง ≥ K ATR 4H แทนเกณฑ์ % (config.SIDEWAY_MIN_WIDTH_ATR) · tag _swwatrK
+# --sideway-min-sl-atr=K : ไม้ Sideway ที่ SL < K ATR1H ไม่เข้า (config.SIDEWAY_MIN_SL_ATR · ปกติ 1) · tag _swminslK
+# --sideway-sl-widen-atr=K : ขยาย SL ไม้ Sideway ให้ห่างอย่างน้อย K ATR1H (config.SIDEWAY_SL_WIDEN_ATR) · tag _swwidenK
+# --sideway-edge-pctl=P : ขอบกรอบ Sideway = high P / low (100−P) (config.SIDEWAY_EDGE_PCTL · ปกติ 90) · tag _swedgeP
+# --sideway-min-run=N : ADX 4H ต่ำกว่า ADX_CHOPPY ติดกันอย่างน้อย N แท่ง (config.SIDEWAY_MIN_RUN_BARS · ปกติ 22) · tag _swrunN
+# --sideway-r2 : หาช่วง sideway ด้วย R² แทน ADX (config.SIDEWAY_DETECT = "r2") · tag _swr2
+# --sideway-wick=K : Sideway เข้าหลังแท่ง 1H ไส้ทะลุขอบแล้วปิดกลับ ไส้ ≥ K ATR1H (config.SIDEWAY_ENTRY_WICK_ATR) · tag _swwickK
+_swwk_arg = next((a for a in sys.argv if a.startswith("--sideway-wick=")), None)
+if _swwk_arg:
+    config.SIDEWAY_ENTRY_WICK_ATR = float(_swwk_arg.split("=")[1])
+if "--sideway-r2" in sys.argv:
+    config.SIDEWAY_DETECT = "r2"
+_swr_run_arg = next((a for a in sys.argv if a.startswith("--sideway-min-run=")), None)
+if _swr_run_arg:
+    config.SIDEWAY_MIN_RUN_BARS = int(_swr_run_arg.split("=")[1])
+_swe_arg = next((a for a in sys.argv if a.startswith("--sideway-edge-pctl=")), None)
+if _swe_arg:
+    config.SIDEWAY_EDGE_PCTL = float(_swe_arg.split("=")[1])
+_swm_arg = next((a for a in sys.argv if a.startswith("--sideway-min-sl-atr=")), None)
+if _swm_arg:
+    config.SIDEWAY_MIN_SL_ATR = float(_swm_arg.split("=")[1])
+_swwd_arg = next((a for a in sys.argv if a.startswith("--sideway-sl-widen-atr=")), None)
+if _swwd_arg:
+    config.SIDEWAY_SL_WIDEN_ATR = float(_swwd_arg.split("=")[1])
+_swa_arg = next((a for a in sys.argv if a.startswith("--sideway-min-width-atr=")), None)
+if _swa_arg:
+    config.SIDEWAY_MIN_WIDTH_ATR = float(_swa_arg.split("=")[1])
 _min_sl_arg = next((a for a in sys.argv if a.startswith("--min-sl=")), None)
 if _min_sl_arg:
     config.MIN_SL_DISTANCE_PCT_BY_SYMBOL = dict(config.MIN_SL_DISTANCE_PCT_BY_SYMBOL)
@@ -1761,7 +1788,7 @@ for n, row in enumerate(clock.to_dict("records")):
     _sw = False
     if sideway_enabled and _rg in REGIME_NO_TRADE and not _reentry:
         try:
-            _sw = regime_eff(now)["adx_now"] < regime_check.ADX_CHOPPY
+            _sw = config.SIDEWAY_DETECT == "r2" or regime_eff(now)["adx_now"] < regime_check.ADX_CHOPPY
         except Exception:
             _sw = False
     elif sideway_first and sideway_enabled and _rg in REGIME_REVERSAL and not _reentry:   # --sideway-first
@@ -2326,6 +2353,20 @@ if _rms_arg:
     _tag += f"_revminsl{reversal.MIN_SL_OVERRIDE:g}"
 if _rmr_arg:
     _tag += f"_revminrr{reversal._MIN_RR_OVERRIDE:g}"
+if config.SIDEWAY_DETECT == "r2":
+    _tag += "_swr2"
+if _swwk_arg:
+    _tag += f"_swwick{config.SIDEWAY_ENTRY_WICK_ATR:g}"
+if _swr_run_arg:
+    _tag += f"_swrun{config.SIDEWAY_MIN_RUN_BARS}"
+if _swe_arg:
+    _tag += f"_swedge{config.SIDEWAY_EDGE_PCTL:g}"
+if _swm_arg:
+    _tag += f"_swminsl{config.SIDEWAY_MIN_SL_ATR:g}"
+if _swwd_arg:
+    _tag += f"_swwiden{config.SIDEWAY_SL_WIDEN_ATR:g}"
+if _swa_arg:
+    _tag += f"_swwatr{config.SIDEWAY_MIN_WIDTH_ATR:g}"
 if _min_sl_arg:
     _tag += f"_minsl{float(_min_sl_arg.split('=')[1]):g}"   # 2026-10-16: เดิมไม่ติด tag = ทับไฟล์ base
 if scoring_min_rr is not None:

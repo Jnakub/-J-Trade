@@ -16,6 +16,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8")
 
 import journal
+import config
 from config import (
     SYMBOLS, RISK_PER_TRADE,
     MAX_DAILY_LOSS, MT5_TIMEFRAMES,
@@ -707,7 +708,8 @@ def scan_symbol(symbol: str) -> None:
         # Sideway (config.SIDEWAY_*): เข้าได้เฉพาะรอบที่ regime ห้ามเทรดและ ADX 4H < ADX_CHOPPY
         #   = Reversal (REVERSAL-READY ไม่อยู่ใน NO_TRADE · Pullback ข้างบน) มาก่อนเสมอตามคำสั่งผู้ใช้ 2026-10-02
         sideway_mode = (not pb_dir and regime in REGIME_NO_TRADE and SIDEWAY_ENABLED
-                        and regime_info.get("adx_now", 99) < regime_check.ADX_CHOPPY)
+                        and (config.SIDEWAY_DETECT == "r2"
+                             or regime_info.get("adx_now", 99) < regime_check.ADX_CHOPPY))
         if regime in REGIME_NO_TRADE and not sideway_mode and not pb_dir:
             print(f"  [{symbol}] SKIP — regime ยังไม่พร้อมเปิด scorecard ใดๆ")
             return
