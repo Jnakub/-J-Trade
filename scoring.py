@@ -65,34 +65,40 @@ ENFORCE_BIAS_MATCH = True
 #    = คัดกรองรายวันต่างกันนิดเดียวแล้ว replay ออกมาแย่ — Bias ต่างแค่ ~2-6% ของวันแต่ไปเปลี่ยนจังหวะเข้าไม้ใหญ่
 TREND_FLIP_WINDOW = 5
 
+# 🔴 2026-10-18 k = 0 ทุก symbol (คำสั่งผู้ใช้) — trend flip พลิกทันทีที่ราคาปิดหลุดก้น/ทะลุยอดที่ยืนยันแล้ว ไม่เผื่อ k×ATR
+#   ค่าเดิม (ดู comment ราย symbol ข้างล่าง): 0.20 ส่วนใหญ่ · XAU/ETH 0.40 · GBPCHF 0.30 · ถอยกลับ = ใส่ค่าเดิม
+#   คัดกรอง: เปลี่ยนทิศ 0.6-6.4% ของวัน (มากสุด ETH/AUDNZD 6.4% · XAU 5.0%) · flip เพิ่ม 0-7 ครั้ง/symbol ใน ~3 ปี
+#   replay 2024-26 (backtest_replay --bias-k=0 · 10 symbol): 478 ไม้ +237.50R -> 483 ไม้ +238.03R (**+0.53R** · churn |t| 0.06 ·
+#   ตัด 5 ใหญ่ −0.20 · ดีขึ้น 4/10) = ไม่มีผล · **ช่วง 2023-24 ไม่ได้วัด** (หยุดกลางคัน) = ยังไม่ผ่านกฎ "ดีขึ้นทั้งสองช่วง"
+#   ตรงกับ 2026-09-17 ที่วัดว่า k 0.1-0.6 แทบไม่เปลี่ยนอะไร (memory trend-flip-k-barely-matters)
 TREND_FLIP_K = {
-    "BTCUSDm": 0.20,
-    "XAUUSDm": 0.40,
-    "ETHUSDm": 0.40,
-    "XRPUSDm": 0.20,
-    "USDJPYm": 0.20,
-    "US500m": 0.20,
-    "EURUSDm": 0.20,
-    "GBPUSDm": 0.20,
+    "BTCUSDm": 0.0,
+    "XAUUSDm": 0.0,
+    "ETHUSDm": 0.0,
+    "XRPUSDm": 0.0,
+    "USDJPYm": 0.0,
+    "US500m": 0.0,
+    "EURUSDm": 0.0,
+    "GBPUSDm": 0.0,
     # 2026-09-18: UKOILm — backtest_trend_flip_ksweep UKOILm 3000 1D (1,726 แท่ง 1D)
     #   k 0.20-0.60 ให้ FalseFlip = 0% ทุกค่า · เลือก 0.20 เพราะได้ flip มากสุด (36 ครั้ง)
     #   และเร็วกว่า EMA50/200 cross เฉลี่ย 10.2 แท่ง (matched 13 คู่) — เกณฑ์เดียวกับตัวอื่น
-    "UKOILm": 0.20,
+    "UKOILm": 0.0,
     # 2026-09-19: HK50m — backtest_trend_flip_ksweep HK50m 3000 1D (2,007 แท่ง 1D)
     #   k 0.20-0.60 ให้ FalseFlip = 0% ทุกค่า · เลือก 0.20 เพราะได้ flip มากสุด (46 ครั้ง)
     #   และเร็วกว่า EMA50/200 cross เฉลี่ย 9.3 แท่ง (matched 17 คู่) — เกณฑ์เดียวกับตัวอื่น
     # ⚠️ **ต้องส่ง `1D` ต่อท้ายเสมอ** — ตัว sweep default เป็น 4H แต่ compute_trend_regime
     #   ที่ระบบเรียกจริงใช้ `df_1d` (ดู get_trend_flip_bias) รันด้วย default จะได้ k ของ
     #   timeframe ที่ไม่มีใครใช้ (เจอกับตัวเองรอบนี้: 4H ให้ FalseFlip 2.1% ส่วน 1D ให้ 0%)
-    "HK50m": 0.20,
+    "HK50m": 0.0,
     # 2026-09-28: GBPCHFm — backtest_trend_flip_ksweep GBPCHFm 3000 1D (2,999 แท่ง 1D)
     #   k 0.20/0.25 FalseFlip 1.4% · k 0.30-0.60 = 0% · เลือก 0.30 = ค่าต่ำสุดที่ FalseFlip 0%
     #   (63 flip · เร็วกว่า EMA50/200 cross เฉลี่ย 13.6 แท่ง · matched 26 คู่)
-    "GBPCHFm": 0.30,
+    "GBPCHFm": 0.0,
     # 2026-09-28: AUDNZDm — backtest_trend_flip_ksweep AUDNZDm 3000 1D (2,999 แท่ง)
     #   **ไม่มีค่าไหนได้ FalseFlip 0%** ทุก k พลิกหลอก 2 ครั้ง (0.20 = 2/67 · 0.25-0.60 = 2/65)
     #   เลือก 0.20 = พลิกบ่อยสุด เร็วกว่า EMA50/200 cross 19.3 แท่ง (matched 33)
-    "AUDNZDm": 0.20,
+    "AUDNZDm": 0.0,
 }
 
 
