@@ -60,6 +60,8 @@ replay เต็ม: base เดิม 378 ไม้ +191.46R -> **406 ไม้
 ⚠️ ธง backtest ยังชื่อ `--rev-new*` / `--rev-old*` (ผลทดลองผูกชื่อนี้) · ไฟล์ผลเก่าที่ติด `_revnew*` = Pullback · ไม้ Pullback ในไฟล์ก่อนเปลี่ยนชื่อติดป้าย "Reversal"
 👉 **ต้องตามดู:** ไม้ Pullback จริงหลัง 2026-10-13 (backtest ต่อไม้ +0.37 · ไม้ตาย ~31%) + บรรทัด "ไม้เงา" ใน scheduler.log
 · ผู้ใช้: "เส้น 0.3 ติดไว้ก่อน จูนครั้งหน้า" · เสนอจุดทบทวนเมื่อไม้ Pullback จริงครบ 30 ไม้
+🔴 **2026-10-19 ปิดด่านตำแหน่ง + ไม้เงาแล้ว (`config.PULLBACK_MIN_RANGE_POS` 0.3 -> 0 · คำสั่งผู้ใช้)** — replay 2024-26 −3.51R (|t| 0.62 ·
+ไม้เดิมหาย 0 · Pullback ได้เพิ่ม 12 ไม้ −0.29/ไม้) · ช่วง 2023-24 และค่า 0.2/0.4 ไม่ได้รัน · scheduler ข้ามไม้เงาที่ค้างใน `pullback_ghost.json` เมื่อเป็น 0
 🔴 **2026-10-15 Reversal แบบ A เข้าระบบจริง (`config.REV_A_*` · กฎเข้าบ้านเดียว `rev_a.py` · คำสั่งผู้ใช้ · ตกเกณฑ์ + ตกนอกระบบ)**
 กลับตัวตามตำรา: ADX 4H peak ≥ 28.5 โค้งลง + **Bias 1D = Structure 4H** + divergence สวนเทรนด์ -> รอแท่ง 1H ปิดทะลุ high/low 12 แท่ง
 (≤ 48 ชม.) -> **limit order** ที่ระดับนั้น (≤ 24 ชม.) · SL ใต้ low 24 ชม.ก่อนสัญญาณ−10% · TP 0.5 ของขาเดิม (ต้นขา = จุดเริ่มชุด
@@ -218,7 +220,7 @@ Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay
 เช็คด้วย `./run_wine.sh -c "import scoring; print(scoring.__file__)"` · ทางแก้ = ตัวเรียกที่ทำ
 `sys.path.insert(0, os.getcwd())` แล้ว `runpy.run_path(สคริปต์, run_name="__main__")`
 
-เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (127 เคส ณ 2026-10-15 · +Reversal A: กฎ · ยืนยัน · วงจร limit · limit ในเพดานพอร์ต —
+เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (129 เคส ณ 2026-10-19 · +ด่าน Pullback ปิด · +Reversal A: กฎ · ยืนยัน · วงจร limit · limit ในเพดานพอร์ต —
 รวมช่องถือไม้ของ Breakout ใน `scan_symbol` และเกณฑ์ส่งคำสั่งขยับ SL/TP ของ `execute_decision` ตั้งแต่ 2026-09-28
 · Pullback: กฎเข้า · ช่อง · ทางของ scan_symbol · ไม้เงาบนไฟล์ temp · ด่าน 4e ถึงจุดส่ง order ปลอม ตั้งแต่ 2026-10-13)
 ⚠️ ถ้าจะรันเทสต์กับโค้ดรุ่นเก่า (ตัวเรียก runpy) **ห้าม import scheduler/exit_monitor ก่อนรันไฟล์เทสต์**
