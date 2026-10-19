@@ -556,6 +556,114 @@ if _amp_arg:
 breakout_no_min_peak = (config.BREAKOUT_IGNORES_MIN_PEAK or "--breakout-no-min-peak" in sys.argv) \
     and "--no-breakout-no-min-peak" not in sys.argv
 
+# --breakout-no-div : Breakout ไม่ต้องมี divergence (คำถามผู้ใช้ 2026-10-17 "ตัด divergence ออก")
+# สมมติฐาน: กำไรของ Breakout มาจากเทรนด์ 1D ไม่ใช่ bearish divergence (หลักฐานเดิมพิสูจน์แค่ว่า "สวน 1D แพ้")
+# กฎที่เหลือ: ADX 4H peak โค้งลง (เกณฑ์ peak ตาม breakout_no_min_peak) + Bias 1D Long + Structure 4H Long -> Long
+# ทำโดย: รอบแบบนั้นถือเป็น REVERSAL-READY + divergence "bearish" **เฉพาะในทางเข้าไม้** (regime_entry) แล้วไหลเข้าทาง flip
+# เดิม (SL/TP compute_entry · TP fib Breakout · ช่อง Reversal) · Reversal A / Pullback ยังเห็น regime/divergence จริง
+# (Pullback ต้อง Bias สวน Structure จึงไม่มีรอบชนกัน) · ยังไม่มีในระบบจริง · tag _bonodiv
+# 🔻 วัดแล้ว 2026-10-17 (10 symbol · เทียบไฟล์ _b1016_reva / _b2324_reva) — **ไม่เอา: divergence คือตัวกรองจริง**
+#    2024-26: 478 +237.50R -> 598 +212.45R (**−25.05R**) · Breakout 84 -> 217 ไม้ ต่อไม้ +0.50 -> +0.13
+#      ไม้ Breakout ใหม่ 159 ไม้ +0.07/ไม้ เข้าช่องก่อนแล้วเบียดไม้เดิมหาย 30 ไม้ +0.78/ไม้ (+ Pullback หาย 6 ไม้ +10.29)
+#      direct 0 · churn |t| 1.08 · ตัด 5 ใหญ่ −29.61 · ดีขึ้น 2/10
+#    2023-24: 190 +29.16R -> 228 +35.23R (+6.07) · ไม้ใหม่ 59 ไม้ +0.24/ไม้ · churn |t| 0.43 · ตัด 5 ใหญ่ −4.81 · ดีขึ้น 6/10
+#    = ตกกฎ "ต้องดีขึ้นทั้งสองช่วง" · ไม้ไม่มี divergence ≈ ศูนย์ต่อไม้ ส่วนไม้ที่มี divergence ได้ +0.78
+#    (สมมติฐาน "กำไรมาจากเทรนด์ 1D ล้วน" ผิด — ข้อมูลชุดนี้ชี้ว่า bearish divergence ในขาขึ้นเป็นจังหวะเข้าที่ดีจริง)
+breakout_no_div = "--breakout-no-div" in sys.argv
+
+# --bias-lr=N : Bias 1D = ทิศความชัน linear regression ของ log close N แท่ง 1D ที่ปิดแล้ว แทน trend flip
+# (คำขอผู้ใช้ 2026-10-18 หลังวัดว่า trend flip ทำนายทิศไม่ได้ · regression 10 วันออกหลังยอดเร็วกว่า ~4 เท่า)
+# แทนทุกจุดที่เรียก get_trend_bias (scoring.compute_entry ข้างใน + ทุกกลยุทธ์ในไฟล์นี้) · ตัดแท่งที่ยังไม่ปิดแบบเดียวกับของเดิม
+# ยังไม่มีในระบบจริง · tag _biaslrN
+# 🔻 วัดแล้ว 2026-10-18 N=10 (10 symbol · เทียบ _b1016_reva / _b2324_reva) — **ไม่เอา: แย่ลงทั้งสองช่วง**
+#    2024-26: 478 +237.50R -> 485 +177.81R (**−59.70R**) · churn |t| 2.27 · ตัด 5 ใหญ่ −47.14 · ดีขึ้น 1/10
+#      Pullback 79 -> 19 ไม้ (Bias เร็วตาม 4H จน "Bias สวน Structure" แทบไม่เกิด) · Scoring 157 -> 189 ไม้ ต่อไม้ +0.49 -> +0.28
+#    2023-24: 190 +29.16R -> 196 +21.87R (−7.29 · |t| 0.37) · ดีขึ้น 5/10
+#    N=20: 2024-26 −19.43R (|t| 1.01 · ดีขึ้น 3/10 · Pullback 79 -> 53 ไม้ +0.34 -> +0.15/ไม้) · 2023-24 −9.60R (|t| 0.81 · 3/10)
+#    N=30: 2024-26 −23.68R (|t| 1.37 · ตัด 5 ใหญ่ −1.53 · 4/10 · Pullback 84 ไม้ แต่ +0.18/ไม้) · 2023-24 −7.30R (|t| 0.67 · 3/10)
+#    = ยิ่ง Bias เร็วยิ่งแย่ (10 < 20 < trend flip) · ความช้าของ trend flip แยก "เทรนด์ใหญ่" จาก "จังหวะ 4H" ให้ Pullback/Scoring
+#    (คัดกรองบอกไว้ก่อนแล้ว: regression 10 วันทำนาย 5 วันข้างหน้าติดลบช่วง 2024-26 · memory bias-1d-does-not-forecast-direction)
+# --bias-k=X : ทับ scoring.TREND_FLIP_K ทุก symbol (ระยะเผื่อ k×ATR ของ trend flip · 0 = พลิกทันทีที่ปิดหลุดก้น/ทะลุยอด)
+# (คำขอผู้ใช้ 2026-10-18 "ลองตัด k ATR ออก") · คัดกรอง: k=0 เปลี่ยนทิศ 0.6-6.4% ของวัน · flip เพิ่ม 0-7 ครั้ง/symbol · tag _biaskX
+# 🔻 วัดแล้ว 2026-10-18 k=0 ช่วง 2024-26: 478 +237.50R -> 483 +238.03R (+0.53 · churn |t| 0.06 · 4/10) = ไม่มีผล
+#    ช่วง 2023-24 ไม่ได้รัน (ผู้ใช้สั่งหยุด) · สอดคล้อง memory trend-flip-k-barely-matters
+_bk_arg = next((a for a in sys.argv if a.startswith("--bias-k=")), None)
+bias_k = float(_bk_arg.split("=")[1]) if _bk_arg else None
+if bias_k is not None:
+    import scoring as _scoring_k
+    for _s in list(_scoring_k.TREND_FLIP_K):
+        _scoring_k.TREND_FLIP_K[_s] = bias_k
+_blr_arg = next((a for a in sys.argv if a.startswith("--bias-lr=")), None)
+bias_lr_n = int(_blr_arg.split("=")[1]) if _blr_arg else 0
+if bias_lr_n:
+    import scoring as _scoring_mod
+
+    def _lr_bias(symbol, df_1d, _n=bias_lr_n):
+        import numpy as np
+        y = np.log(df_1d["close"].iloc[:-1].to_numpy(dtype=float)[-_n:])
+        if len(y) < _n:
+            return None, "lr_not_ready"
+        x = np.arange(_n) - (_n - 1) / 2
+        b = float((x * (y - y.mean())).sum())
+        return ("Long" if b > 0 else "Short" if b < 0 else None), f"lr{_n}"
+    _scoring_mod.get_trend_bias = _lr_bias
+    get_trend_bias = _lr_bias
+
+# --bias-fvg : Bias 1D = FVG ทิศเดียวกันครบ fvg.BIAS_STREAK (2) ช่องติดกัน แทน trend flip (ไอเดียผู้ใช้ 2026-10-19)
+# นับทุกช่องตามลำดับ (มีวันไม่มีช่องคั่นได้ · ไม่สนการเติม) · ช่องสวนช่องเดียว = ค้างทิศเดิม · กฎอยู่ที่ fvg.fvg_bias
+# แทนทุกจุดแบบเดียวกับ --bias-lr (compute_entry ข้างใน + ทุกกลยุทธ์ในไฟล์นี้) · ยังไม่มีในระบบจริง · tag _biasfvg
+# 🔻 วัดแล้ว 2026-10-19 (10 symbol · เทียบ _b1016_reva / _b2324_reva) — **ไม่เอา: ตกเกณฑ์สองช่วง**
+#    คัดกรองรายวัน: พลิก 12.2-12.5 ครั้ง/ปี (trend flip 6.4-6.6) · ทิศตรงกัน 73-75% ของวัน
+#    2024-26: 478 +237.50R -> 485 +197.66R (**−39.84R**) · churn |t| 1.90 · ตัด 5 ใหญ่ −26.19 · ดีขึ้น 2/10
+#      ไม้หาย 86 ไม้ +0.51/ไม้ (95% อยู่วันที่ Bias สองแบบขัดกัน) · ไม้ใหม่ 93 ไม้ +0.03 (93% เข้าทิศตาม FVG)
+#      Pullback 79 -> 55 ไม้ +0.34 -> +0.16: FVG พลิกตามการย่อ 1D จน "Bias สวน Structure" หายตรงจังหวะซื้อ · Scoring ใหม่ 38 ไม้ −0.19
+#    2023-24: 190 +29.16R -> 203 +33.96R (+4.81 · churn |t| 0.30 · ตัด 5 ใหญ่ −4.79 · ดีขึ้น 4/10 · GBPCHF +8.49 กระจุก)
+#    = บทเรียนเดียวกับ --bias-lr: Bias ที่เร็วขึ้นแย่ลง · ระบบต้องการ Bias ที่ค้างทิศเทรนด์ใหญ่ตลอดช่วงย่อ
+#    ข้อสังเกต (in-sample · ยังไม่ทดสอบ): ไม้ Pullback ใน base ดีกว่าในวันที่ FVG สวน trend flip ทั้งสองช่วง
+#      (2024-26 +0.52 vs +0.12 · 2023-24 +0.09 vs −0.31 · n 17-44)
+# --bias-sunmerge : Bias ตัวจริง (trend flip) แต่รวมแท่ง 1D วันอาทิตย์เข้ากับวันจันทร์ก่อนคำนวณ (fvg.merge_sunday · ไม่แตะ crypto)
+#   (ผู้ใช้ 2026-10-19: แท่งอาทิตย์ 1D ของ non-crypto มี volume 3-9% · ช่วงราคา 14-70% ของแท่งปกติ แต่ถูกนับเป็น 1 วันเต็ม
+#    -> หน้าต่าง swing 5 แท่งของ trend flip = ~4 วันทำการ · ราคาปิดวันอาทิตย์ = ราคาไม่กี่ชั่วโมง)
+#   เป็นการแก้ข้อมูล ไม่มีค่าให้จูน · แท่ง live (ตัวท้าย) ส่งต่อไปเหมือนเดิม — get_trend_bias ตัดเอง · tag _biassunmerge
+# 🔻 วัดแล้ว 2026-10-19 บน k = 0 (เทียบ _b1016_biask0_reva / _k0b2324_reva) — **ไม่เอา: ไม่มีผล**
+#    คัดกรอง: Bias เปลี่ยน 0-11% ของวัน (AUDNZD 10.7 · EUR/US500/XAU/HK50 4-5 · crypto/UKOIL 0) · พลิกน้อยลง 0-1.4 ครั้ง/ปี
+#    2024-26: 483 +238.03 -> 481 +232.81R (−5.22 · churn |t| 0.93 · 12 ไม้ · ตัด 5 ใหญ่ −6.15 · 2/10)
+#    2023-24: 190 +34.54 -> 192 +40.41R (+5.86 · |t| 0.86 · 18 ไม้ · ตัด 5 ใหญ่ +1.17 · 4/10)
+#    = แท่งอาทิตย์ผิดรูปจริง แต่ trend flip (fractal 11 แท่ง + ราคาปิดหลุดเส้น) ทนได้อยู่แล้ว
+#    ผลพลอยได้: base k = 0 ช่วง 2023-24 = +34.54R vs k 0.4 เดิม +29.16 (+5.39) · ช่วง 2024-26 +0.53 = บวกทั้งสองช่วง (noise)
+#   🔴 2026-10-19 เข้าระบบจริงแล้ว (scoring.TREND_FLIP_MERGE_SUNDAY = True · คำสั่งผู้ใช้) — ธงนี้เลยเป็น identity
+#      --no-bias-sunmerge = ระบบก่อน 2026-10-19 (tag _nobiassunmerge) · เดิมธงนี้ห่อ get_trend_bias เอง ตอนนี้แค่สลับสวิตช์
+import scoring as _scoring_sm
+_bias_sm_default = _scoring_sm.TREND_FLIP_MERGE_SUNDAY
+if "--bias-sunmerge" in sys.argv:
+    _scoring_sm.TREND_FLIP_MERGE_SUNDAY = True
+if "--no-bias-sunmerge" in sys.argv:
+    _scoring_sm.TREND_FLIP_MERGE_SUNDAY = False
+bias_sunmerge = _scoring_sm.TREND_FLIP_MERGE_SUNDAY
+
+# --bias-fvg-sunmerge : เหมือน --bias-fvg แต่รวมแท่ง 1D วันอาทิตย์เข้ากับวันจันทร์ก่อนหา FVG (ไม่แตะ crypto)
+#   (คำขอผู้ใช้ 2026-10-19 หลังเห็นว่าแท่งอาทิตย์สั้นของ XAU สร้างช่องหลอก · ดู fvg.MERGE_SUNDAY) · tag _biasfvgsun
+# --bias-fvg-1w : เหมือน --bias-fvg แต่หา FVG บนแท่ง 1W (สร้างจาก 1D · สัปดาห์ที่ยังไม่จบไม่นับ · ดู fvg.to_weekly)
+#   (คำขอผู้ใช้ 2026-10-19 หลัง 1D + รวมอาทิตย์ยัง −38.68R) · tag _biasfvg1w
+# 🔻 วัดแล้ว 2026-10-19 — **ไม่เอาทั้งสองแบบ** (เทียบ _b1016_reva / _b2324_reva)
+#    sunmerge: พลิก 12.4 -> 9.7 ครั้ง/ปี · 2024-26 +198.83R (**−38.68** · churn |t| 1.79 · ตัด 5 ใหญ่ −17.53 · 2/10)
+#      = เท่า FVG 1D เดิม (+1.16) · 2023-24 ไม่ได้รัน (ผู้ใช้สั่งหยุด เพราะตกช่วงแรกแล้ว)
+#    1w: FVG 11.3 ช่อง/ปี · Bias พลิกแค่ 1.6 ครั้ง/ปี (trend flip 6.5) · ทิศตรง trend flip 61%
+#      2024-26: 478 +237.50 -> 461 +171.91R (**−65.59** · churn |t| **2.45** · ตัด 5 ใหญ่ −53.90 · 2/10)
+#        ไม้หาย 148 ไม้ +0.46/ไม้ (Breakout 17 +1.12 · Reversal A 17 +1.29) · ไม้ใหม่ 131 +0.01 (Pullback 65 −0.18)
+#      2023-24: 190 +29.16 -> 194 +35.26R (+6.11 · |t| 0.36 · ตัด 5 ใหญ่ +2.65 · 6/10) = noise
+#    => ทั้งเร็วกว่า (FVG 1D · --bias-lr) และช้ากว่า (FVG 1W) trend flip แพ้หมด · trend flip อยู่ใกล้จุดดีของแกนความเร็ว
+bias_fvg_sun = "--bias-fvg-sunmerge" in sys.argv
+bias_fvg_1w = "--bias-fvg-1w" in sys.argv
+bias_fvg = "--bias-fvg" in sys.argv or bias_fvg_sun or bias_fvg_1w
+if bias_fvg:
+    import scoring as _scoring_fvg
+    import fvg as _fvg
+    _fvg.MERGE_SUNDAY = bias_fvg_sun
+    _fvg.TIMEFRAME = "1W" if bias_fvg_1w else "1D"
+    _scoring_fvg.get_trend_bias = _fvg.fvg_bias
+    get_trend_bias = _fvg.fvg_bias
+
 # --rev-no-adx-floor / --rev-adx-floor : Reversal ไม่ต้อง/ต้องผ่านพื้น ADX ≥ 22 เหลือแค่ peak ≥ ADX_MIN_PEAK_REVERSAL + โค้งลง
 # (ดู regime_check.REVERSAL_USES_ADX_FLOOR)
 # 2026-09-30: ระบบจริงเอาพื้นออกแล้ว (default = False) · --rev-adx-floor = ใส่พื้นกลับเพื่อเทียบ
@@ -1344,6 +1452,24 @@ def regime_eff(t):
     return r
 
 
+def regime_entry(t):
+    """regime_eff + --breakout-no-div — ใช้เฉพาะทางเข้าไม้หลัก (ไม่ใช่ Reversal A / Pullback ที่ต้องเห็น divergence จริง)"""
+    r = regime_eff(t)
+    if not (breakout_no_div and breakout_mode and rev_short_1d):
+        return r
+    if r["regime"] == "REVERSAL-READY" and r["divergence"].get("divergence") == "bearish":
+        return r                                           # ทาง Breakout เดิมอยู่แล้ว
+    _rv = (r.get("reversal_nopeak") or ("",))[0] if breakout_no_min_peak else r["regime"]
+    if _rv not in ("REVERSAL-READY", "REVERSAL-WATCH"):     # peak ยังไม่โค้งลง
+        return r
+    if not r["structure"]["trend"].startswith("Long"):
+        return r
+    if get_trend_bias(symbol, df1d_at(t))[0] != "Long":
+        return r
+    return {**r, "regime": "REVERSAL-READY", "breakout_nopeak": True,
+            "divergence": {**r["divergence"], "divergence": "bearish"}}
+
+
 def regime_at(t):
     # 2026-09-01: key ต้องเป็น "ขอบแท่ง 4H จริงของ symbol นี้" ไม่ใช่ t.floor("4h") เฉยๆ —
     # symbol ที่ BAR_OFFSET_H != 0 (เช่น XAUUSDm=2) แท่งปิดที่ 02/06/10/14 แต่ floor("4h")
@@ -1632,7 +1758,7 @@ for n, row in enumerate(clock.to_dict("records")):
     # เดินมาถึงด่านนั้นๆ รอบที่ถือไม้อยู่จึงหายไปทั้งหมด ทำให้ตอบไม่ได้ว่า "REVERSAL-READY
     # เกิดกี่ครั้งจริง แล้วตายที่ไหน" (regime_at cache ต่อแท่ง 4H อยู่แล้ว ต้นทุนจึงต่ำ)
     try:
-        _rg = regime_eff(now)["regime"]
+        _rg = regime_entry(now)["regime"]
     except Exception as exc:
         _rg = f"regime error: {type(exc).__name__}"
     regime_seen[_rg] = regime_seen.get(_rg, 0) + 1
@@ -1839,7 +1965,7 @@ for n, row in enumerate(clock.to_dict("records")):
         continue
 
     try:                                                   # ด่าน 4
-        rinfo = regime_eff(now)
+        rinfo = regime_entry(now)
     except Exception as exc:
         # ใส่ชนิด+ข้อความไว้ด้วย — รอบที่ MT5 หลุดกลางทางเคยขึ้น "regime error" เฉยๆ หลายพัน
         # รอบแล้วผลออกมาดูเหมือนผลปกติ แยกไม่ออกว่าเป็นผลจริงหรือ run เสีย
@@ -2460,6 +2586,16 @@ if perfect_entry:
     _tag += "_perfectentry"
 if sideway_enabled != config.SIDEWAY_ENABLED:      # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_sideway" if sideway_enabled else "_nosideway"
+if breakout_no_div:
+    _tag += "_bonodiv"
+if bias_lr_n:
+    _tag += f"_biaslr{bias_lr_n}"
+if bias_sunmerge != _bias_sm_default:              # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
+    _tag += "_biassunmerge" if bias_sunmerge else "_nobiassunmerge"
+if bias_fvg:
+    _tag += "_biasfvg1w" if bias_fvg_1w else "_biasfvgsun" if bias_fvg_sun else "_biasfvg"
+if bias_k is not None:
+    _tag += f"_biask{bias_k:g}"
 if breakout_no_min_peak != config.BREAKOUT_IGNORES_MIN_PEAK:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_bonopeak" if breakout_no_min_peak else "_nobonopeak"
 if regime_check.REVERSAL_USES_ADX_FLOOR != _rev_floor_default:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง

@@ -94,3 +94,31 @@ def calc_adx(df: pd.DataFrame, period: int = 20) -> pd.Series:
     plus_di, minus_di = calc_di(df, period)
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-12)
     return dx.ewm(alpha=1 / period, adjust=False).mean()
+
+
+# ---------------------------------------------------------------------------
+# แท่ง 1D วันอาทิตย์ของ symbol ที่ไม่เทรดเสาร์-อาทิตย์ (2026-10-19 · ย้ายมาจาก fvg.py เพราะ Bias ตัวจริงใช้ด้วย)
+# วัด 799 แท่ง: แท่งอาทิตย์ = ไม่กี่ชั่วโมงหลังตลาดเปิด · volume 3-9% · ช่วงราคา 14-70% ของแท่งปกติ แต่ถูกนับเป็น 1 วันเต็ม
+# ผู้ใช้: scoring.get_trend_bias (TREND_FLIP_MERGE_SUNDAY) · fvg.fvg_bias (MERGE_SUNDAY)
+# ---------------------------------------------------------------------------
+def merge_sunday(df: pd.DataFrame) -> pd.DataFrame:
+    """รวมแท่งวันอาทิตย์เข้ากับแท่งถัดไป: open = อาทิตย์ · high/low = สุดขั้วของสองแท่ง · close/time = แท่งถัดไป
+    ทำเฉพาะ df ที่ไม่มีแท่งวันเสาร์ (ไม่ใช่ crypto) · แท่งอาทิตย์ที่เป็นแท่งสุดท้าย (ยังไม่มีวันจันทร์ที่ปิดแล้ว) ถูกตัดทิ้ง
+    — จะถูกนับตอนวันจันทร์ปิด ไม่มองล่วงหน้า · ต้องส่งแท่งที่ปิดแล้วเท่านั้น (ตัดแท่ง live ก่อนเรียก)"""
+    if "time" not in df.columns or len(df) == 0:
+        return df
+    dow = pd.to_datetime(df["time"]).dt.dayofweek.to_numpy()
+    if (dow == 5).any() or not (dow == 6).any():
+        return df.reset_index(drop=True)
+    rows, pend = [], None
+    for r, d in zip(df.to_dict("records"), dow):
+        if d == 6:
+            pend = r
+            continue
+        if pend is not None:
+            r = {**r, "open": pend["open"], "high": max(r["high"], pend["high"]), "low": min(r["low"], pend["low"])}
+            if "tick_volume" in r:
+                r["tick_volume"] = r["tick_volume"] + pend["tick_volume"]
+            pend = None
+        rows.append(r)
+    return pd.DataFrame(rows, columns=df.columns)

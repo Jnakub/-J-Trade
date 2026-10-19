@@ -1,12 +1,17 @@
 """
-trend_flip.py — ตัวตัดสิน "ตอนนี้ตลาดเป็นขาขึ้นหรือขาลง" ที่ไวกว่า EMA cross แต่กัน noise
-ด้วยรัศมีปลอดภัยที่ปรับตามความผันผวนจริง (ATR) — ไม่ได้ต่อกับระบบเทรดจริงเลย (ไฟล์แยก
-ตามที่ขอ) มีไว้ทดลอง/หา k ที่เหมาะสมก่อน (ดู backtest_trend_flip_ksweep.py สำหรับขั้นตอน E)
+trend_flip.py — ตัวตัดสิน "ตอนนี้ตลาดเป็นขาขึ้นหรือขาลง" บนแท่ง 1D = **Bias 1D ของระบบจริง**
+(scoring.get_trend_bias เรียกตัวนี้ · ทุกกลยุทธ์ใช้: Scoring/Breakout ทิศไม้ · Pullback ต้องสวน Structure 4H
+· Reversal A ต้องตรง Structure 4H) — 2026-10-19 แก้ comment: เดิมเขียนว่า "ไม่ได้ต่อกับระบบเทรดจริงเลย"
+ซึ่งจริงแค่ตอนเขียนไฟล์แรก
+ค่าที่ระบบจริงใช้ไม่ใช่ default ข้างล่าง: k มาจาก scoring.TREND_FLIP_K (**0 ทุก symbol ตั้งแต่ 2026-10-18** =
+พลิกทันทีที่ราคาปิดหลุดเส้น ไม่มีระยะเผื่อ ATR) · window มาจาก scoring.TREND_FLIP_WINDOW
 
-หมายเหตุ ATR: โปรเจกต์นี้ไม่มีการเชื่อมต่อ TradingView เลย ATR คำนวณเองจาก swing.calc_atr()
-(Wilder TR สูตรมาตรฐาน + EWM span=period) ซึ่งตอบสนองไวกว่า RMA ที่ TradingView ใช้เป็น
-default ประมาณ 2 เท่า (alpha ต่างกัน) — เป็นสูตรเดียวกับที่ใช้ทั่วทั้งโปรเจกต์อยู่แล้ว
-(SL buffer, swing tolerance) ไม่ได้เปลี่ยนเฉพาะที่นี่
+หมายเหตุ ATR: คำนวณจาก calc_atr() (indicators.py · Wilder RMA alpha=1/period ตั้งแต่ 2026-08-19
+ตรงกับ default ของ TradingView — เดิมเป็น EWM span=period ที่ไวกว่าเกือบ 2 เท่า) · ตอน k = 0 ATR ไม่มีผลกับการพลิก
+
+หมายเหตุแท่งวันอาทิตย์ (2026-10-19): symbol ที่ไม่ใช่ crypto มีแท่ง 1D วันอาทิตย์ = ไม่กี่ชั่วโมงหลังตลาดเปิด
+(volume 3-9% · ช่วงราคา 14-70% ของแท่งปกติ) ซึ่งนับเป็น 1 แท่งเต็ม -> window 5 แท่ง ≈ 4 วันทำการ
+รวมเข้ากับวันจันทร์แล้ว Bias เปลี่ยนแค่ 0-11% ของวัน (replay --bias-sunmerge · ผลดูที่ธงนั้น)
 
 === 3 ชั้น ===
 B — Fractal Swing (find_fractal_swings)
@@ -25,7 +30,7 @@ D — กฎพลิกเทรนด์
     พลิกแล้วเริ่ม track ฝั่งตรงข้ามใหม่จากจุดยืนยันล่าสุดที่มีตอนนั้น
 
 ใช้: from trend_flip import compute_trend_regime
-     result_df, flips = compute_trend_regime(df, k=0.3)
+     result_df, flips = compute_trend_regime(df, k=0.3)   # ตัวอย่าง — ระบบจริงส่ง k จาก TREND_FLIP_K
 """
 import pandas as pd
 

@@ -18,6 +18,7 @@ from swing import (find_sl_from_structure, find_tp_from_fibonacci,
                    find_swing_lows, find_swing_highs, swing_vol_multiplier, swing_wick_ratio_min)
 from binance import merge_real_volume
 from trend_flip import compute_trend_regime
+from indicators import merge_sunday
 from bars import BAR_OFFSET_H, get_aligned_4h, get_bars
 
 # ตัวคูณ ATR ที่ SL ตอนเข้าถูกขยับออกจาก SL โครงสร้าง ก่อนส่ง broker — ต้องตรงกับสูตรใน
@@ -64,6 +65,15 @@ ENFORCE_BIAS_MATCH = True
 #    (หาย 20 ไม้ +8.75 · ใหม่ 13 +3.93) · Breakout −7.95 (ไม้ TP ใหญ่ XAU/US500 หาย 2 ไม้ +5.83) · ดีขึ้น 3/8 symbol
 #    = คัดกรองรายวันต่างกันนิดเดียวแล้ว replay ออกมาแย่ — Bias ต่างแค่ ~2-6% ของวันแต่ไปเปลี่ยนจังหวะเข้าไม้ใหญ่
 TREND_FLIP_WINDOW = 5
+
+# 🔴 2026-10-19 รวมแท่ง 1D วันอาทิตย์เข้ากับวันจันทร์ก่อนคิด trend flip (คำสั่งผู้ใช้ · ทั้งที่วัดแล้วไม่มีผล)
+#   เหตุผลผู้ใช้: แท่งอาทิตย์ของ symbol ที่ไม่ใช่ crypto = ไม่กี่ชั่วโมงหลังตลาดเปิด (volume 3-9% · ช่วงราคา 14-70% ของแท่งปกติ)
+#   แต่ถูกนับเป็น 1 แท่งเต็ม -> window 5 แท่ง ≈ 4 วันทำการ · = แก้ข้อมูลให้ถูก ไม่ใช่ค่าที่จูน · crypto (มีแท่งเสาร์) / UKOIL ไม่เปลี่ยน
+#   คัดกรอง: Bias เปลี่ยน 0-11% ของวัน (AUDNZD 10.7 · EUR/US500/XAU/HK50 4-5%) · พลิกน้อยลง 0-1.4 ครั้ง/ปี
+#   replay (k = 0 · backtest_replay --bias-sunmerge): 2024-26 483 +238.03 -> 481 +232.81R (−5.22 · |t| 0.93 · 2/10)
+#     2023-24 190 +34.54 -> 192 +40.41R (+5.86 · |t| 0.86 · 4/10) = noise ทั้งคู่ · ตกกฎ "ดีขึ้นทั้งสองช่วง"
+#   ถอยกลับ = False (backtest_replay --no-bias-sunmerge = ระบบก่อน 2026-10-19)
+TREND_FLIP_MERGE_SUNDAY = True
 
 # 🔴 2026-10-18 k = 0 ทุก symbol (คำสั่งผู้ใช้) — trend flip พลิกทันทีที่ราคาปิดหลุดก้น/ทะลุยอดที่ยืนยันแล้ว ไม่เผื่อ k×ATR
 #   ค่าเดิม (ดู comment ราย symbol ข้างล่าง): 0.20 ส่วนใหญ่ · XAU/ETH 0.40 · GBPCHF 0.30 · ถอยกลับ = ใส่ค่าเดิม
@@ -168,6 +178,8 @@ def get_trend_bias(symbol: str, df_1d: pd.DataFrame) -> tuple[str | None, str]:
         return None, "no_trend_flip_k"
 
     closed_1d = df_1d.iloc[:-1].reset_index(drop=True)
+    if TREND_FLIP_MERGE_SUNDAY:     # หลังตัดแท่ง live — แท่งอาทิตย์ท้ายสุดที่ยังไม่มีวันจันทร์ปิดตามถูกตัด (ไม่มองล่วงหน้า)
+        closed_1d = merge_sunday(closed_1d)
     flip_df, _ = compute_trend_regime(closed_1d, k=trend_flip_k, window=TREND_FLIP_WINDOW)
     flip_regime = flip_df["regime"].iloc[-1]
     if flip_regime == "Bull":
