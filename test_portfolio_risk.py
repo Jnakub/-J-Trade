@@ -563,8 +563,10 @@ for _lbl, _args, _want in (("Long ราคา 103 ในกรอบ 100-110 ->
 
 # ไม้เงา — ไฟล์ state ชี้ไป temp · นาฬิกา MT5 ตรึง · แท่ง 1H ปลอม (แท่งสุดท้าย = ยังไม่ปิด)
 _ghost_tmp = os.path.join(tempfile.mkdtemp(), "pullback_ghost.json")
-_saved_rn = (scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED)
-scheduler._PULLBACK_GHOST_FILE, scheduler.PULLBACK_ENABLED = _ghost_tmp, True
+_saved_rn = (scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED,
+             scheduler.PULLBACK_MIN_RANGE_POS)
+# กลไกไม้เงา/ด่าน 4e ทดสอบที่เส้น 0.3 เสมอ (ค่าระบบจริงเป็น 0 ตั้งแต่ 2026-10-19 · กลไกยังเก็บไว้ถอยกลับได้)
+scheduler._PULLBACK_GHOST_FILE, scheduler.PULLBACK_ENABLED, scheduler.PULLBACK_MIN_RANGE_POS = _ghost_tmp, True, 0.3
 _T0 = pd.Timestamp("2026-10-13 10:05").to_pydatetime()
 
 
@@ -642,6 +644,9 @@ results += [
     route_check("ไม้เงายังไม่จบ -> ไม่เข้า Pullback", [], "Long", True, "ไม้เงาบล็อก"),
     route_check("Bias ตรง Structure -> ไม่ใช่ Pullback", [], "Short", False, "Sideway/อื่น"),
 ]
+scheduler.PULLBACK_MIN_RANGE_POS = 0.0
+results.append(route_check("ด่านปิด (0) + ไม้เงาค้างในไฟล์ -> ข้ามไม้เงา -> Pullback", [], "Long", True, "Pullback"))
+scheduler.PULLBACK_MIN_RANGE_POS = 0.3
 
 
 def gate_scan(close_pos):
@@ -691,7 +696,15 @@ _ok = _orders == [("order", "Pullback")] and _g is None and _comp == _want_compu
 print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ตำแหน่ง 0.5 -> ส่ง order Pullback · TP/สำรองค่าใหม่':52} -> "
       f"{_orders or 'ไม่ส่ง'} · {_comp}")
 results.append(_ok)
-scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED = _saved_rn
+scheduler.PULLBACK_MIN_RANGE_POS = 0.0
+_out, _calls, _g = gate_scan(0.2)
+_orders = [c for c in _calls if c[0] == "order"]
+_ok = _orders == [("order", "Pullback")] and _g is None and "เริ่มไม้เงา" not in _out
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ด่านปิด (0): ตำแหน่ง 0.2 -> ส่ง order · ไม่มีไม้เงา':52} -> "
+      f"{_orders or 'ไม่ส่ง'} · ไม้เงา {_g}")
+results.append(_ok)
+(scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED,
+ scheduler.PULLBACK_MIN_RANGE_POS) = _saved_rn
 
 # ---------------------------------------------------------------------------
 # Reversal แบบ A (2026-10-15 · rev_a.py + scheduler.rev_a_*)

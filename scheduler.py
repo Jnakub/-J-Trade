@@ -693,7 +693,8 @@ def scan_symbol(symbol: str) -> None:
         #       ที่ประเมินเฉพาะตอนช่องว่าง · กฎเข้าบ้านเดียวที่ pullback.pullback_direction
         pb_dir = None
         if PULLBACK_ENABLED and slot_of("Pullback") not in occupied:
-            _ghost = pullback_ghost_active(symbol)
+            # ด่านตำแหน่งปิด (0) = ไม่มีไม้เงา — ข้ามของที่ค้างใน pullback_ghost.json ด้วย ให้ตรงกับ replay (2026-10-19)
+            _ghost = pullback_ghost_active(symbol) if PULLBACK_MIN_RANGE_POS else None
             if _ghost:
                 print(f"  [{symbol}] Pullback: ไม้เงา {_ghost['direction']} ยังไม่จบ "
                       f"(SL {_ghost['sl']:.5f} / TP {_ghost['tp']:.5f}) — ยังไม่เข้า Pullback")
