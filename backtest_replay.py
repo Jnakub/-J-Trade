@@ -134,7 +134,7 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  tag _beladderT-L · 99:0 = identity check
      --trail-tp-buffer=X / --trail-tp-trigger=X  ทับ exit_monitor.TRAIL_TP_ATR_BUFFER (0.5 · 0 = ปิด
                  TP trailing) / TRAIL_TP_TRIGGER_PCT (1.0) · tag _trailtpbufX / _trailtptrigX
-     --sideway-min-adx=X  ทับ config.SIDEWAY_MIN_ENTRY_ADX (ระบบจริง 12.5) · 0 = ไม่กรอง · tag _swminadxX
+     --sideway-min-adx=X  ทับ config.SIDEWAY_MIN_ENTRY_ADX (ระบบจริง 0 ตั้งแต่ 2026-10-19 · เดิม 12.5) · 0 = ไม่กรอง · tag _swminadxX
      --tag=NAME  ต่อท้ายชื่อไฟล์ผลด้วย _NAME — ใช้ทุกครั้งที่หน้าต่างต่างจาก base (ไม่งั้นทับไฟล์ base)
      --cap-reentry=W  ไม้ที่ถูกเพดานเวลาปิด กลับเข้าทิศเดิมได้ใน W วัน เมื่อราคาปิดเลยจุดสุดขั้วเดิม
                  (ข้ามด่าน regime/run-up/cooldown/min-turn · ยังผ่าน R:R/SL/TP) · ใช้คู่ --max-hold · tag _capreW
@@ -379,7 +379,7 @@ import sideway as _sideway_mod
 # ช่องเดียวกับ Scoring (config.slot_of) · R ของไม้ Sideway = หน่วยความเสี่ยงของตัวเอง (1%) คอลัมน์
 # risk_w = SIDEWAY_RISK_PER_TRADE / RISK_PER_TRADE (0.5) ไว้แปลงเป็น R ของระบบ (2%) ตอนรวมยอด
 sideway_enabled = (config.SIDEWAY_ENABLED or "--sideway" in sys.argv) and "--no-sideway" not in sys.argv
-# --sideway-min-adx=X : ทับ config.SIDEWAY_MIN_ENTRY_ADX (ระบบจริง 12.5 ตั้งแต่ 2026-10-08) · 0 = ไม่มีตัวกรอง (ของเดิม)
+# --sideway-min-adx=X : ทับ config.SIDEWAY_MIN_ENTRY_ADX (ระบบจริง 12.5 ตั้งแต่ 2026-10-08 · 0 ตั้งแต่ 2026-10-19) · 0 = ไม่มีตัวกรอง (ของเดิม)
 _swma = next((a for a in sys.argv if a.startswith("--sideway-min-adx=")), None)
 if _swma:
     config.SIDEWAY_MIN_ENTRY_ADX = float(_swma.split("=", 1)[1])
