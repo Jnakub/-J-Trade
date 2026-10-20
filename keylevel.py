@@ -10,8 +10,15 @@ keylevel.py — Key Level นิยามใหม่ (2026-10-20 · ผู้�
   - แนวที่นับ (ขึ้นกับทิศไม้):
       Long  -> swing low ล่าสุด (แนวรับที่ขาขึ้นเพิ่งสร้าง) · Short -> swing high ล่าสุด
       + โซนที่ swing (ยอด/ก้นปนกัน) จับกลุ่มกันภายใน KL_ATR × ATR4H แล้วมี ≥ KL_MIN_TOUCHES จุด
-  - "อยู่ที่ Key Level" = ราคาห่างจากแนวใดแนวหนึ่งไม่เกิน KL_ATR × ATR4H(14)
+  - "อยู่ที่ Key Level" = แนวอยู่ฝั่งรับของไม้ (Long: แนวอยู่ใต้หรือที่ราคา · Short: เหนือหรือที่ราคา)
+    และห่างจากราคาไม่เกิน KL_ATR × ATR4H(14)
+    (2026-10-20 แก้: รุ่นแรกนับระยะอย่างเดียว -> Long ที่อยู่ใต้แนวต้านก็ผ่าน)
+  - โซน: ทั้งโซนกว้างไม่เกิน KL_ATR × ATR (เทียบจุดแรกของโซน · รุ่นแรกเทียบจุดก่อนหน้าจึงลากเป็นโซ่ได้)
   - swing = find_swing_highs/lows ค่าเดียวกับนิยามเดิม (ซ้าย/ขวา SWING_LEFT_RIGHT · ตัวกรอง vol/ไส้ราย symbol)
+
+ผลวัดรุ่นแก้ (2026-10-20 · ไม้ Scoring/Pullback/Breakout ของระบบ 10-19 สองช่วง · 474 ไม้ · ตรวจย้อนหลังบนไม้ชุดคงที่):
+  อยู่ที่แนว 90 ไม้ +0.22/ไม้ vs ไม่อยู่ 384 ไม้ +0.40 (t −1.0) · ไม่มีแถวไหนที่อยู่ที่แนวดีกว่าชัด
+  (รุ่นแรก 138 ไม้ +0.21 vs +0.43 · ไม้ที่รุ่นแรกนับผิดฝั่งไม่ได้แย่กว่า) = Key Level ไม่ช่วยคัดไม้ ทั้งนิยามเดิมและใหม่
 """
 import numpy as np
 import pandas as pd
@@ -47,15 +54,17 @@ def key_level(df_4h: pd.DataFrame, symbol: str, price: float, direction: str) ->
     pts = sorted([float(df["high"].iloc[i]) for i in highs] + [float(df["low"].iloc[i]) for i in lows])
     tol = KL_ATR * atr
     cluster = []
-    for p in pts + [None]:                           # จับกลุ่มเรียงตามราคา · ห่างจากจุดก่อนหน้าไม่เกิน tol = กลุ่มเดียวกัน
-        if p is not None and cluster and p - cluster[-1] <= tol:
+    for p in pts + [None]:                           # จับกลุ่มเรียงตามราคา · ห่างจากจุดแรกของกลุ่มไม่เกิน tol = กลุ่มเดียวกัน
+        if p is not None and cluster and p - cluster[0] <= tol:
             cluster.append(p)
             continue
         if len(cluster) >= KL_MIN_TOUCHES:
             levels.append((float(np.mean(cluster)), f"โซน {len(cluster)} จุด"))
         cluster = [p] if p is not None else []
+    sgn = 1 if direction == "Long" else -1           # ระยะฝั่งรับ: Long = ราคา − แนว · Short = แนว − ราคา (≥ 0 = แนวอยู่ฝั่งรับ)
+    levels = [(l, k) for l, k in levels if sgn * (price - l) >= 0]
     if not levels:
         return {**none, "atr": atr}
-    lvl, kind = min(levels, key=lambda x: abs(price - x[0]))
-    d = abs(price - lvl) / atr
+    lvl, kind = min(levels, key=lambda x: sgn * (price - x[0]))
+    d = sgn * (price - lvl) / atr
     return {"at_key_level": d <= KL_ATR, "level": lvl, "kind": kind, "dist_atr": d, "atr": atr}
