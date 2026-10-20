@@ -706,6 +706,8 @@ def scan_symbol(symbol: str) -> None:
                     min_disagree_bars=PULLBACK_MIN_DISAGREE_BARS)
                 if pb_dir:
                     print(f"  [{symbol}] Pullback {pb_dir} — {_pb_why}")
+                elif "เพิ่งสวน" in _pb_why:     # ด่านอายุการสวน (2026-10-20) — พิมพ์ไว้ให้ตามดูใน scheduler.log
+                    print(f"  [{symbol}] Pullback รอ: {_pb_why}")
 
         # Sideway (config.SIDEWAY_*): เข้าได้เฉพาะรอบที่ regime ห้ามเทรดและ ADX 4H < ADX_CHOPPY
         #   = Reversal (REVERSAL-READY ไม่อยู่ใน NO_TRADE · Pullback ข้างบน) มาก่อนเสมอตามคำสั่งผู้ใช้ 2026-10-02

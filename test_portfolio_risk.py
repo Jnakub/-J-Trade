@@ -552,6 +552,34 @@ _got = pullback.pullback_direction({"regime": "TREND"}, "Long")[0]
 print(f"  [{'ok  ' if _got is None else 'FAIL'}] {'regime_info ไม่ครบคีย์ -> ไม่เข้า (ไม่ crash)':52} -> {_got}")
 results.append(_got is None)
 
+# ด่านอายุการสวน (config.PULLBACK_MIN_DISAGREE_BARS · ระบบจริง 6 ตั้งแต่ 2026-10-20) — Structure ย้อนหลังทีละแท่งปลอมด้วย
+# check_structure_reg ที่คืนตามความยาว df (แท่ง 4H ปิดแล้ว 20 แท่ง + แท่ง live 1 = แท่งล่าสุดคือความยาว 20)
+import regime_check as _rc  # noqa: E402
+_saved_csr, _saved_usr = _rc.check_structure_reg, _rc.USE_STRUCT_REG
+
+
+def dis_check(label, flip_len, want_n, need=6):
+    """Structure สวน Bias (Short) ที่ความยาว df ≥ flip_len · ก่อนหน้านั้นตรง Bias (Long)"""
+    _rc.USE_STRUCT_REG = True
+    _rc.check_structure_reg = lambda d, sym="": {"trend": "Short (reg)" if len(d) >= flip_len else "Long (reg)"}
+    ri = {**_RI, "df_4h": pd.DataFrame({"close": [1.0] * 21}), "symbol": "X"}
+    n = pullback.disagree_bars(ri, "Long", need)
+    got = pullback.pullback_direction(ri, "Long", min_disagree_bars=need)[0]
+    ok = n == want_n and got == ("Long" if want_n >= need else None)
+    print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> สวน {n} แท่ง · {got}")
+    return ok
+
+
+results += [
+    dis_check("สวนมา 6 แท่งพอดี -> เข้า", 15, 6),
+    dis_check("สวนมานานกว่านั้น -> เข้า (นับถึง 6 พอ)", 1, 6),
+    dis_check("เพิ่งสวน 2 แท่ง -> ไม่เข้า", 19, 2),
+]
+_got = pullback.pullback_direction(_RI, "Long", min_disagree_bars=6)[0]
+print(f"  [{'ok  ' if _got is None else 'FAIL'}] {'ด่านเปิด แต่ไม่มี df_4h -> ไม่เข้า (ไม่ crash)':52} -> {_got}")
+results.append(_got is None)
+_rc.check_structure_reg, _rc.USE_STRUCT_REG = _saved_csr, _saved_usr
+
 _bars = pd.DataFrame({"high": [110.0, 108.0], "low": [100.0, 104.0]})
 for _lbl, _args, _want in (("Long ราคา 103 ในกรอบ 100-110 -> 0.3", (_bars, 103.0, "Long"), 0.3),
                            ("Short ราคา 107 ในกรอบ 100-110 -> 0.3", (_bars, 107.0, "Short"), 0.3),
@@ -564,7 +592,9 @@ for _lbl, _args, _want in (("Long ราคา 103 ในกรอบ 100-110 ->
 # ไม้เงา — ไฟล์ state ชี้ไป temp · นาฬิกา MT5 ตรึง · แท่ง 1H ปลอม (แท่งสุดท้าย = ยังไม่ปิด)
 _ghost_tmp = os.path.join(tempfile.mkdtemp(), "pullback_ghost.json")
 _saved_rn = (scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED,
-             scheduler.PULLBACK_MIN_RANGE_POS)
+             scheduler.PULLBACK_MIN_RANGE_POS, scheduler.PULLBACK_MIN_DISAGREE_BARS)
+# regime ปลอมของเทสต์ scan_symbol ไม่มีแท่ง 4H -> ปิดด่านอายุการสวนไว้ (ทดสอบแยกข้างบนแล้ว)
+scheduler.PULLBACK_MIN_DISAGREE_BARS = 0
 # กลไกไม้เงา/ด่าน 4e ทดสอบที่เส้น 0.3 เสมอ (ค่าระบบจริงเป็น 0 ตั้งแต่ 2026-10-19 · กลไกยังเก็บไว้ถอยกลับได้)
 scheduler._PULLBACK_GHOST_FILE, scheduler.PULLBACK_ENABLED, scheduler.PULLBACK_MIN_RANGE_POS = _ghost_tmp, True, 0.3
 _T0 = pd.Timestamp("2026-10-13 10:05").to_pydatetime()
@@ -704,7 +734,7 @@ print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ด่านปิด (0): ตำแ�
       f"{_orders or 'ไม่ส่ง'} · ไม้เงา {_g}")
 results.append(_ok)
 (scheduler._PULLBACK_GHOST_FILE, scheduler.mt5_now, scheduler.get_ohlcv, scheduler.PULLBACK_ENABLED,
- scheduler.PULLBACK_MIN_RANGE_POS) = _saved_rn
+ scheduler.PULLBACK_MIN_RANGE_POS, scheduler.PULLBACK_MIN_DISAGREE_BARS) = _saved_rn
 
 # ---------------------------------------------------------------------------
 # Reversal แบบ A (2026-10-15 · rev_a.py + scheduler.rev_a_*)
