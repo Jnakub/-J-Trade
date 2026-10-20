@@ -267,7 +267,7 @@ def rev_a_step(symbol: str, occupied: set) -> None:
         if mt5.positions_get(ticket=p["ticket"]):
             print(f"  [{symbol}] Reversal A: limit #{p['ticket']} ถูกเติมแล้ว ({p['direction']} @ {p['entry']})")
             notify.notify_order_opened(symbol, p["direction"], p["entry"], p["sl"], p["tp"], p["lot"],
-                                       p["ticket"], is_demo=is_demo_account())
+                                       p["ticket"], is_demo=is_demo_account(), strategy="Reversal A (limit)")
             _rev_a_set(symbol, None)
             st = {}
         elif not mt5.orders_get(ticket=p["ticket"]):
