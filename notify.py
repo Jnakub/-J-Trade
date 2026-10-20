@@ -53,12 +53,14 @@ def send(message: str) -> bool:
 
 def notify_order_opened(symbol: str, direction: str, entry: float,
                         sl: float, tp: float, lot: float, ticket: int,
-                        is_demo: bool = True) -> None:
+                        is_demo: bool = True, strategy: str | None = None) -> None:
+    """strategy (2026-10-20 · คำขอผู้ใช้): ชื่อกลยุทธ์ที่เปิดไม้ — None = ไม่แสดงบรรทัดนี้ (ผู้เรียกเก่า)"""
     account_tag = "DEMO" if is_demo else "⚠️ REAL"
     rr = abs(tp - entry) / abs(entry - sl) if entry != sl else 0
     send(
         f"🟢 <b>เปิดไม้ใหม่</b> [{account_tag}]\n"
         f"{symbol}  {direction}\n"
+        + (f"กลยุทธ์: <b>{strategy}</b>\n" if strategy else "") +
         f"Entry: {entry:,.3f}\n"
         f"SL: {sl:,.3f}   TP: {tp:,.3f}\n"
         f"R:R: {rr:.2f}   Lot: {lot}\n"

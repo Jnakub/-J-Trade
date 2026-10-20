@@ -201,7 +201,7 @@ def place_order(symbol: str, direction: str, entry: float,
                            strategy=strategy)
 
     notify.notify_order_opened(symbol, direction, result.price, sl, tp, lot,
-                               result.order, is_demo=is_demo_account())
+                               result.order, is_demo=is_demo_account(), strategy=strategy)
     return result.order
 
 
