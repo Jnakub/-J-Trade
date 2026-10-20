@@ -1281,7 +1281,10 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
     # ยังรายงานตามจริง ไม่ใช่เงียบไปเฉยๆ (ดู NEWS_POST_EXIT_ENABLED)
     post_news_no_profit = has_recent_news and pnl_pct <= 0
     post_news_exit      = post_news_no_profit and NEWS_POST_EXIT_ENABLED
-    ge1r             = r_multiple is not None and r_multiple >= BREAKEVEN_TRIGGER_R
+    # ไม้ Sideway ใช้จุดยิง BE ของตัวเองได้ (config.SIDEWAY_BE_TRIGGER_R · None = ค่าเดียวกับทุกกลยุทธ์)
+    be_trigger_r     = (_cfg.SIDEWAY_BE_TRIGGER_R if strategy == "Sideway" and _cfg.SIDEWAY_BE_TRIGGER_R
+                        else BREAKEVEN_TRIGGER_R)
+    ge1r             = r_multiple is not None and r_multiple >= be_trigger_r
     # ge1r = "ถึงเกณฑ์แล้วจริงไหม" (ข้อเท็จจริง ใช้แสดงผลเสมอ)  be_lock = "แล้วจะบังคับ BE ไหม"
     # แยกสองอย่างนี้ออกจากกัน ไม่งั้นตอนปิดสวิตช์ checklist จะยังประกาศว่าขยับ SL ทั้งที่ไม่ได้ขยับ
     be_lock          = ge1r and BREAKEVEN_ENABLED
@@ -1375,9 +1378,9 @@ def analyze_position(pos, as_of=None, ctx: dict = None) -> dict:
                     f"(71% ของไม้ Scoring ถือเกิน 3 วัน — เลขนั้นนับวันปฏิทิน ยังไม่ได้วัดใหม่แบบ"
                     f"วันทำการ) ดู comment ที่ SLOW_TRADE_DAYS"}]
           if SLOW_TRADE_ENABLED else []),
-        {"no": 5, "q": f"กำไร >= {BREAKEVEN_TRIGGER_R:g}R แล้ว? (ระยะกำไร = ระยะ SL)", "answer": ge1r,
+        {"no": 5, "q": f"กำไร >= {be_trigger_r:g}R แล้ว? (ระยะกำไร = ระยะ SL)", "answer": ge1r,
          "action": (f"{BE_DECISION_PREFIX} = {breakeven_str}" if be_lock else
-                    f"ถึง {BREAKEVEN_TRIGGER_R:g}R แล้ว แต่ BREAKEVEN_ENABLED = False — "
+                    f"ถึง {be_trigger_r:g}R แล้ว แต่ BREAKEVEN_ENABLED = False — "
                     f"ปล่อยให้ ATR trailing คุม SL" if ge1r else ""),
          "severity": "yellow",
          "note": "ป้องกัน winner กลายเป็น loser — นี่คือขยับ SL ไม่ใช่การออก"},
