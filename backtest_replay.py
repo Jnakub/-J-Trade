@@ -384,6 +384,11 @@ sideway_enabled = (config.SIDEWAY_ENABLED or "--sideway" in sys.argv) and "--no-
 _pbd = next((a for a in sys.argv if a.startswith("--pb-min-disagree=")), None)
 if _pbd:
     config.PULLBACK_MIN_DISAGREE_BARS = int(_pbd.split("=", 1)[1])
+# --sideway-be=X : ไม้ Sideway ย้าย SL ไปจุดเข้าเมื่อกำไรถึง X R (config.SIDEWAY_BE_TRIGGER_R · ระบบจริง None = 1.5 เท่ากลยุทธ์อื่น)
+#   (คำขอผู้ใช้ 2026-10-20 "กำไรแล้วไม่อยากขาดทุน") · tag _swbeX
+_swbe = next((a for a in sys.argv if a.startswith("--sideway-be=")), None)
+if _swbe:
+    config.SIDEWAY_BE_TRIGGER_R = float(_swbe.split("=", 1)[1])
 # --sideway-min-adx=X : ทับ config.SIDEWAY_MIN_ENTRY_ADX (ระบบจริง 12.5 ตั้งแต่ 2026-10-08 · 0 ตั้งแต่ 2026-10-19) · 0 = ไม่มีตัวกรอง (ของเดิม)
 _swma = next((a for a in sys.argv if a.startswith("--sideway-min-adx=")), None)
 if _swma:
@@ -2626,6 +2631,8 @@ if _swma:
     _tag += f"_swminadx{config.SIDEWAY_MIN_ENTRY_ADX:g}"
 if _pbd:
     _tag += f"_pbdis{config.PULLBACK_MIN_DISAGREE_BARS}"
+if _swbe:
+    _tag += f"_swbe{config.SIDEWAY_BE_TRIGGER_R:g}"
 if live_spread:      # ผลรอบนี้ขึ้นกับเวลาที่รัน — อย่าให้ทับไฟล์ base ที่เทียบข้ามรอบได้
     _tag += "_livespread"
 if no_breakeven:
