@@ -34,8 +34,8 @@ Telegram แจ้ง "🟣 ล็อกกำไร +1.5R" แยกจาก "
 
 🔴 **Sideway (กลยุทธ์ที่ 4) เข้าระบบ 2026-10-02 ตามคำสั่งผู้ใช้ ทั้งที่ตกการทดสอบนอกข้อมูล** — กฎเข้าที่ `sideway.py`
 (บ้านเดียวของ scheduler + replay) · ค่าคงที่/ผลทดสอบที่ `config.SIDEWAY_*` · เข้าเฉพาะ regime ใน NO_TRADE + ADX 4H < 20 ติด ≥ 22 แท่ง
-· ช่องร่วมกับ Scoring · เสี่ยง 2% ต่อไม้เท่ากลยุทธ์อื่น (เดิม 1% · เปลี่ยนวันเดียวกันให้ R หน่วยเดียวกัน)
-· exit_monitor: ไม่มี ATR trailing / TP trailing · ออกเมื่อ ADX 4H ≥ 22 · เพดาน 120 ชม. · BE 1.5R ยังใช้ · ไม่ใช้กฎ TP -> entry
+· ช่องร่วมกับ Scoring · **เสี่ยง 1% ต่อไม้ตั้งแต่ 2026-10-20** (2026-10-02 ถึง 10-19 ใช้ 2% · ลดกลับเพราะยังพิสูจน์ edge ไม่ได้ · `config.SIDEWAY_RISK_PER_TRADE`)
+· exit_monitor: ไม่มี ATR trailing / TP trailing · ออกเมื่อ ADX 4H ≥ 22 · **เพดาน 72 ชม. ตั้งแต่ 2026-10-20** (เดิม 120 · คัดกรองไม่ต่าง) · BE 1.5R ยังใช้ · ไม่ใช้กฎ TP -> entry
 คัดกรองมาราว 40 แบบ (10 symbol × 2 ยุค t 2.64) แต่ **22 symbol ใหม่ได้ avgR −0.029 t −0.54** = fit กับ 10 ตัวเดิม
 รายละเอียดทุกแบบที่ลอง: memory `sideways-strategy-has-no-edge`
 
@@ -63,6 +63,11 @@ replay เต็ม: base เดิม 378 ไม้ +191.46R -> **406 ไม้
 · ผู้ใช้: "เส้น 0.3 ติดไว้ก่อน จูนครั้งหน้า" · เสนอจุดทบทวนเมื่อไม้ Pullback จริงครบ 30 ไม้
 🔴 **2026-10-19 ปิดด่านตำแหน่ง + ไม้เงาแล้ว (`config.PULLBACK_MIN_RANGE_POS` 0.3 -> 0 · คำสั่งผู้ใช้)** — replay 2024-26 −3.51R (|t| 0.62 ·
 ไม้เดิมหาย 0 · Pullback ได้เพิ่ม 12 ไม้ −0.29/ไม้) · ช่วง 2023-24 และค่า 0.2/0.4 ไม่ได้รัน · scheduler ข้ามไม้เงาที่ค้างใน `pullback_ghost.json` เมื่อเป็น 0
+🔴 **2026-10-20 Pullback ต้องให้ Structure 4H สวน Bias มาแล้ว ≥ 6 แท่ง 4H ที่ปิดแล้ว (24 ชม.) (`config.PULLBACK_MIN_DISAGREE_BARS` · คำสั่งผู้ใช้)**
+ที่มา: ไม้ Pullback ที่เข้าภายใน 8 ชม.หลัง Structure เพิ่งพลิกสวน Bias แพ้เต็ม 11/13 = เข้าตอนการย่อเพิ่งเริ่ม · `pullback.disagree_bars`
+replay เทียบระบบ 10-20: 2024-26 555 +208.94 -> 549 +219.36R (+10.41 · |t| 1.19 · 7/10) · 2023-24 207 +43.40 -> 204 +45.11R (+1.70 · |t| 0.32)
+= ดีขึ้นทั้งสองช่วงแต่ noise · **6 เลือกหลังเห็นข้อมูล ยังไม่เช็คที่ราบ 4/8/12** (ผู้ใช้: "ใส่ระบบเลย แล้วเช็คที่ราบทีหลัง") · ถอยกลับ = 0
+· scheduler.log พิมพ์ "Pullback รอ: Structure 4H เพิ่งสวน Bias N แท่ง" ตอนด่านนี้กัน
 🔴 **2026-10-15 Reversal แบบ A เข้าระบบจริง (`config.REV_A_*` · กฎเข้าบ้านเดียว `rev_a.py` · คำสั่งผู้ใช้ · ตกเกณฑ์ + ตกนอกระบบ)**
 กลับตัวตามตำรา: ADX 4H peak ≥ 28.5 โค้งลง + **Bias 1D = Structure 4H** + divergence สวนเทรนด์ -> รอแท่ง 1H ปิดทะลุ high/low 12 แท่ง
 (≤ 48 ชม.) -> **limit order** ที่ระดับนั้น (≤ 24 ชม.) · SL ใต้ low 24 ชม.ก่อนสัญญาณ−10% · TP 0.5 ของขาเดิม (ต้นขา = จุดเริ่มชุด
@@ -221,7 +226,7 @@ Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay
 เช็คด้วย `./run_wine.sh -c "import scoring; print(scoring.__file__)"` · ทางแก้ = ตัวเรียกที่ทำ
 `sys.path.insert(0, os.getcwd())` แล้ว `runpy.run_path(สคริปต์, run_name="__main__")`
 
-เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (129 เคส ณ 2026-10-19 · +ด่าน Pullback ปิด · +Reversal A: กฎ · ยืนยัน · วงจร limit · limit ในเพดานพอร์ต —
+เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (133 เคส ณ 2026-10-20 · +ด่านอายุการสวนของ Pullback · +ด่าน Pullback ปิด · +Reversal A: กฎ · ยืนยัน · วงจร limit · limit ในเพดานพอร์ต —
 รวมช่องถือไม้ของ Breakout ใน `scan_symbol` และเกณฑ์ส่งคำสั่งขยับ SL/TP ของ `execute_decision` ตั้งแต่ 2026-09-28
 · Pullback: กฎเข้า · ช่อง · ทางของ scan_symbol · ไม้เงาบนไฟล์ temp · ด่าน 4e ถึงจุดส่ง order ปลอม ตั้งแต่ 2026-10-13)
 ⚠️ ถ้าจะรันเทสต์กับโค้ดรุ่นเก่า (ตัวเรียก runpy) **ห้าม import scheduler/exit_monitor ก่อนรันไฟล์เทสต์**

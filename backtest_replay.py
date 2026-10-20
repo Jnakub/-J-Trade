@@ -379,6 +379,11 @@ import sideway as _sideway_mod
 # ช่องเดียวกับ Scoring (config.slot_of) · R ของไม้ Sideway = หน่วยความเสี่ยงของตัวเอง (1%) คอลัมน์
 # risk_w = SIDEWAY_RISK_PER_TRADE / RISK_PER_TRADE (0.5) ไว้แปลงเป็น R ของระบบ (2%) ตอนรวมยอด
 sideway_enabled = (config.SIDEWAY_ENABLED or "--sideway" in sys.argv) and "--no-sideway" not in sys.argv
+# --pb-min-disagree=N : Pullback เข้าได้เมื่อ Structure 4H สวน Bias มาแล้ว ≥ N แท่ง 4H ที่ปิดแล้ว (config.PULLBACK_MIN_DISAGREE_BARS ·
+#   ระบบจริง 0 = ไม่มีด่าน · คำขอผู้ใช้ 2026-10-20) · tag _pbdisN
+_pbd = next((a for a in sys.argv if a.startswith("--pb-min-disagree=")), None)
+if _pbd:
+    config.PULLBACK_MIN_DISAGREE_BARS = int(_pbd.split("=", 1)[1])
 # --sideway-be=X : ไม้ Sideway ย้าย SL ไปจุดเข้าเมื่อกำไรถึง X R (config.SIDEWAY_BE_TRIGGER_R · ระบบจริง None = 1.5 เท่ากลยุทธ์อื่น)
 #   (คำขอผู้ใช้ 2026-10-20 "กำไรแล้วไม่อยากขาดทุน") · tag _swbeX
 _swbe = next((a for a in sys.argv if a.startswith("--sideway-be=")), None)
@@ -1573,7 +1578,8 @@ def revnew_candidate(t, check_signal=False, i=None):
         return _b
     _d, _ = pullback.pullback_direction(_r, _b, adx_rule=rev_new_adx_rule, adx_min=rev_new_adx_min,
                                         require_key_level=regime_check.KEY_LEVEL_REQUIRED,
-                                        require_divergence=not pullback_no_div)
+                                        require_divergence=not pullback_no_div,
+                                        min_disagree_bars=config.PULLBACK_MIN_DISAGREE_BARS)
     if _d is None:
         return None
     if rev_new_shadow:                     # ด่านตำแหน่งอยู่หลังสุด (ก่อนเปิดไม้) — ตรงนี้ดูแค่ไม้เงา
@@ -2623,6 +2629,8 @@ if cap_reentry_days:
     _tag += f"_capre{cap_reentry_days:g}"
 if _swma:
     _tag += f"_swminadx{config.SIDEWAY_MIN_ENTRY_ADX:g}"
+if _pbd:
+    _tag += f"_pbdis{config.PULLBACK_MIN_DISAGREE_BARS}"
 if _swbe:
     _tag += f"_swbe{config.SIDEWAY_BE_TRIGGER_R:g}"
 if live_spread:      # ผลรอบนี้ขึ้นกับเวลาที่รัน — อย่าให้ทับไฟล์ base ที่เทียบข้ามรอบได้
