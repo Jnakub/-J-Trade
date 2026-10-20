@@ -27,7 +27,7 @@ from config import (
     SCORING_NEEDS_STRUCTURE_MATCH, REVERSAL_NEEDS_CHOCH,
     BREAKOUT_ENABLED, BREAKOUT_TP_FIB_RATIO, slot_of, TP_TO_ENTRY_ON_OPPOSITE, TP_TO_ENTRY_REVERSAL_TRIGGERS,
     BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
-    PULLBACK_ENABLED, REVERSAL_ENABLED, PULLBACK_ADX_RULE, PULLBACK_MIN_RANGE_POS,
+    PULLBACK_ENABLED, REVERSAL_ENABLED, PULLBACK_ADX_RULE, PULLBACK_MIN_RANGE_POS, PULLBACK_MIN_DISAGREE_BARS,
     PULLBACK_TP_FIB_RATIO, PULLBACK_FALLBACK_RR, PULLBACK_MIN_RR,
     REV_A_ENABLED, REV_A_CONFIRM_HOURS, REV_A_LIMIT_HOURS, REV_A_BREAK_BARS,
 )
@@ -702,9 +702,12 @@ def scan_symbol(symbol: str) -> None:
                 _bias_rn, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
                 pb_dir, _pb_why = pullback.pullback_direction(
                     regime_info, _bias_rn, adx_rule=PULLBACK_ADX_RULE,
-                    require_key_level=regime_check.KEY_LEVEL_REQUIRED)
+                    require_key_level=regime_check.KEY_LEVEL_REQUIRED,
+                    min_disagree_bars=PULLBACK_MIN_DISAGREE_BARS)
                 if pb_dir:
                     print(f"  [{symbol}] Pullback {pb_dir} — {_pb_why}")
+                elif "เพิ่งสวน" in _pb_why:     # ด่านอายุการสวน (2026-10-20) — พิมพ์ไว้ให้ตามดูใน scheduler.log
+                    print(f"  [{symbol}] Pullback รอ: {_pb_why}")
 
         # Sideway (config.SIDEWAY_*): เข้าได้เฉพาะรอบที่ regime ห้ามเทรดและ ADX 4H < ADX_CHOPPY
         #   = Reversal (REVERSAL-READY ไม่อยู่ใน NO_TRADE · Pullback ข้างบน) มาก่อนเสมอตามคำสั่งผู้ใช้ 2026-10-02
