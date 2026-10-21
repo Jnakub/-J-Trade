@@ -337,7 +337,13 @@ REV_A_ENABLED       = True
 REV_A_ADX_MIN_PEAK  = 28.5
 REV_A_CONFIRM_HOURS = 48
 REV_A_BREAK_BARS    = 12
-REV_A_LIMIT_HOURS   = 24
+REV_A_LIMIT_HOURS   = 24     # ใช้เฉพาะ REV_A_ENTRY = "limit"
+# REV_A_ENTRY — เข้าไม้ตอนยืนยันยังไง: "market" = ส่ง market ทันทีที่แท่ง 1H ยืนยันปิด (R:R คิดจากราคาตลาดตอนส่ง)
+#   "limit" = ตั้ง limit ที่ระดับที่ถูกทะลุ ค้าง REV_A_LIMIT_HOURS (2026-10-15 ถึง 10-20)
+# 🔴 2026-10-21 limit -> market (คำสั่งผู้ใช้ "อยากเข้าทันทีที่ยืนยัน") · replay --rev-a-market **เท่าเดิมทั้งสองช่วง**:
+#    2024-26 −1.88R (|t| 0.14 · Reversal +1.00 -> +1.06/ไม้ · 35 -> 32 ไม้) · 2023-24 −0.39R · ระบบจริงไม่มี pending order อีก
+#    (limit ที่ค้างตอน deploy ยังถูกดูแลด้วยโค้ดเดิมจนจบ) · ถอยกลับ = "limit"
+REV_A_ENTRY         = "market"
 REV_A_EXT_BACK_HOURS = 24
 REV_A_SL_BUFFER     = 0.1
 REV_A_TP_FIB        = 0.5

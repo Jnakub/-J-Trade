@@ -25,7 +25,7 @@
 | **Scoring** | regime TREND + Bias 1D = ทิศไม้ | swing − 2×ATR (exec) / Fib ×1.618 · R:R ≥ 1.5 · TP ≤ 18 ATR | ช่อง Scoring · 2% | — |
 | **Breakout** | REVERSAL-READY ที่ถูกพลิก (Reversal Short ตอนเทรนด์ 1D = Long) = **Long อย่างเดียวโดยโครงสร้าง** · ข้ามด่าน peak ADX | เหมือน Scoring | ช่อง Reversal · 2% | 09-30 |
 | **Pullback** (`pullback.py`) | Bias 1D **สวน** Structure 4H มาแล้ว **≥ 6 แท่ง 4H** + ADX 4H ไม่ลง + divergence ทิศไม้ · ทุก regime | `reversal.compute_reversal_entry` · TP Fib ×3 · สำรอง 1.5R · R:R ≥ 1.5 | ช่อง Reversal · 2% | **10-20** ด่าน 6 แท่ง · 10-19 ปิดด่านตำแหน่ง + ไม้เงา (0.3 -> 0) |
-| **Reversal A** (`rev_a.py`) | ADX 4H peak ≥ 28.5 โค้งลง + Bias 1D **=** Structure 4H + divergence สวนเทรนด์ -> แท่ง 1H ปิดทะลุ 12 แท่ง (≤ 48 ชม.) -> **limit** ที่ระดับนั้น (≤ 24 ชม.) | SL ก้น 24 ชม. −10% ของระยะ / TP 0.5 ของขาเดิม (≤ 4 swing) · R:R ≥ 1.5 | ช่อง Reversal · 2% · journal = "Reversal" | 10-16 · **ทดสอบ market + TP 1.0 อยู่ 10-20** |
+| **Reversal A** (`rev_a.py`) | ADX 4H peak ≥ 28.5 โค้งลง + Bias 1D **=** Structure 4H + divergence สวนเทรนด์ -> แท่ง 1H ปิดทะลุ 12 แท่ง (≤ 48 ชม.) -> **market ทันที** (`REV_A_ENTRY` · R:R คิดจากราคาตลาด) | SL ก้น 24 ชม. −10% ของระยะ / TP 0.5 ของขาเดิม (≤ 4 swing) · R:R ≥ 1.5 | ช่อง Reversal · 2% · journal = "Reversal" · Telegram "Reversal A" | **10-21 limit -> market** (เท่าเดิมทั้งสองช่วง) · TP 1.0 แพ้ทั้งสองช่วง |
 | **Sideway** (`sideway.py`) | regime NO_TRADE + ADX 4H < 20 ติด ≥ 22 แท่ง · ขอบกรอบ P90/P10 · โซน 15% | TP กลางกรอบ · ออกเมื่อ ADX ≥ 22 / **72 ชม.** | ช่อง Scoring · **1%** | 10-20 เสี่ยง 1% + 72 ชม. · 10-19 ถอด ADX ≥ 12.5 |
 
 ลำดับใน scan: ช่อง Reversal (Pullback/Reversal A/Breakout · `config.slot_of`) มาก่อน Sideway · ไม้ Reversal ใหม่ไม่ย้าย TP ไม้อื่น
@@ -41,7 +41,7 @@
 
 **ด่านระดับ symbol/พอร์ต:** เพดานความเสี่ยงรวม `MAX_PORTFOLIO_RISK_R` 6R (12%) · กลุ่ม CRYPTO 3R · daily loss 6% (ห้ามเปิดใหม่ ไม่ปิดของค้าง)
 · cooldown หลัง TP 3 ชม. · reject cooldown 24 ชม. · ไม้ใหม่สวนทิศไม้เก่าที่ขาดทุน -> ย้าย TP ไม้เก่าไป entry (`TP_TO_ENTRY_ON_OPPOSITE` · อยู่ใน scheduler ไม่อยู่ใน `--rules`)
-· limit ของ Reversal A ที่ค้างนับในเพดานพอร์ต · ⚠️ base ทุกตัวไม่นับเพดานพอร์ต (replay รันทีละ symbol · วัดได้ที่ `backtest_portfolio` เท่านั้น)
+· limit ที่ค้าง (เฉพาะ REV_A_ENTRY = "limit") นับในเพดานพอร์ต · ⚠️ base ทุกตัวไม่นับเพดานพอร์ต (replay รันทีละ symbol · วัดได้ที่ `backtest_portfolio` เท่านั้น)
 
 **Symbol (10):** BTC · XAU · ETH · USDJPY · US500 · EUR · UKOIL · HK50 · GBPCHF · AUDNZD (`config.SYMBOLS` · เพิ่มใหม่ = เช็คลิสต์ 8 ข้อที่ config)
 
@@ -60,7 +60,7 @@
 |---|---|---|
 | ไม้ **Sideway** จริง (ไม่มี edge นอกข้อมูล · 22 symbol ใหม่ t −0.54) | เกณฑ์ที่เสนอ (ผู้ใช้ยังไม่ยืนยัน): < 0 ปิด · 0-0.2 คง 1% · > 0.2 คิดเรื่อง 2% | ครบ 40 ไม้ |
 | ไม้ **Pullback** จริง + บรรทัด "Pullback รอ:" (ด่าน 6 แท่ง) ใน scheduler.log · 6 เลือกหลังเห็นข้อมูล **ยังไม่เช็คที่ราบ 4/8/12** | ต่อไม้ backtest +0.24-0.49 | ครบ 30 ไม้ |
-| ไม้ **Reversal A** จริง + บรรทัด "Reversal A" ใน log | +0.5 (ในระบบ) vs 0 (นอกระบบ 57 symbol) | — |
+| ไม้ **Reversal A** จริง + บรรทัด "Reversal A" ใน log · ไม้ชนะ = เด้งครึ่งขาใน 4-7 วัน (Bias 1D ไม่เคยพลิกตามระหว่างถือ 0/48) | +0.5 (ในระบบ) vs 0 (นอกระบบ 57 symbol · ยังไม่ทดสอบแบบ market) | — |
 | Structure k 3.2 / N / R2_MIN = ยอดแหลม in-sample · **ห้ามแตะจนมีไม้ใหม่ 40-80 ไม้** (~2027-03 ถึง 09) | ไม้หลัง 2026-09-21 เท่านั้น | 2027 |
 | Breakout เข้าระบบทั้งที่ตกเกณฑ์ 3/4 (09-21) · TP 1.618 vs 2.618 ไม่ต่าง (อย่าจูนแกนนี้อีก) | — | — |
 
@@ -145,7 +145,7 @@ Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay
 เช็คด้วย `./run_wine.sh -c "import scoring; print(scoring.__file__)"` · ทางแก้ = ตัวเรียกที่ทำ
 `sys.path.insert(0, os.getcwd())` แล้ว `runpy.run_path(สคริปต์, run_name="__main__")`
 
-เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (133 เคส ณ 2026-10-20 · +ด่านอายุการสวนของ Pullback · +ด่าน Pullback ปิด · +Reversal A: กฎ · ยืนยัน · วงจร limit · limit ในเพดานพอร์ต —
+เทสต์: `./run_wine.sh test_exit_labels.py` (26 เคส) · `./run_wine.sh test_portfolio_risk.py` (137 เคส ณ 2026-10-21 · +Reversal A market · +ด่านอายุการสวนของ Pullback · +ด่าน Pullback ปิด · +Reversal A: กฎ · ยืนยัน · วงจร limit · limit ในเพดานพอร์ต —
 รวมช่องถือไม้ของ Breakout ใน `scan_symbol` และเกณฑ์ส่งคำสั่งขยับ SL/TP ของ `execute_decision` ตั้งแต่ 2026-09-28
 · Pullback: กฎเข้า · ช่อง · ทางของ scan_symbol · ไม้เงาบนไฟล์ temp · ด่าน 4e ถึงจุดส่ง order ปลอม ตั้งแต่ 2026-10-13)
 ⚠️ ถ้าจะรันเทสต์กับโค้ดรุ่นเก่า (ตัวเรียก runpy) **ห้าม import scheduler/exit_monitor ก่อนรันไฟล์เทสต์**

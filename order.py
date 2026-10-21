@@ -137,7 +137,9 @@ def place_order(symbol: str, direction: str, entry: float,
                 sl: float, tp: float, lot: float,
                 comment: str = "auto-trader",
                 strategy: str = "Scoring",
-                pinned_swing: float = None, pinned_atr_entry: float = None) -> int:
+                pinned_swing: float = None, pinned_atr_entry: float = None,
+                label: str = None) -> int:
+    # label = ชื่อกลยุทธ์ที่โชว์ใน Telegram ถ้าต่างจาก strategy ที่ journal ใช้ (Reversal A จด "Reversal" · 2026-10-21)
     # 2026-08-09: บันทึก journal ในนี้เสมอ (ดูท้ายฟังก์ชัน) แทนที่จะปล่อยให้ผู้เรียกแยกไปเรียก
     # journal.log_trade_open() เอง — เดิม scheduler.py/bot.py ต่างก็เรียกแยกหลัง place_order()
     # สำเร็จ ทำให้ไม้ที่เข้าจริงผ่านทางอื่น (เช่น dry-run test script ที่ดันผ่านเกณฑ์จริงแล้ว
@@ -201,7 +203,7 @@ def place_order(symbol: str, direction: str, entry: float,
                            strategy=strategy)
 
     notify.notify_order_opened(symbol, direction, result.price, sl, tp, lot,
-                               result.order, is_demo=is_demo_account(), strategy=strategy)
+                               result.order, is_demo=is_demo_account(), strategy=label or strategy)
     return result.order
 
 

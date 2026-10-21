@@ -805,8 +805,10 @@ _ra_calls = []
 _ra_state = {"positions": [], "orders": [555]}
 
 
-def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0, breakout_close=101.0):
-    """รัน scheduler.rev_a_step("XAUUSDm") หนึ่งรอบด้วยแท่งปลอม n_closed แท่งที่ปิดแล้ว · คืน (สถานะหลังรอบ, ข้อความ)"""
+def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0, breakout_close=101.0,
+            entry_mode="limit", tick_px=101.0):
+    """รัน scheduler.rev_a_step("XAUUSDm") หนึ่งรอบด้วยแท่งปลอม n_closed แท่งที่ปิดแล้ว · คืน (สถานะหลังรอบ, ข้อความ)
+    entry_mode: วงจร limit (เดิม · ยังดูแล limit ที่ค้างตอน deploy) ทดสอบด้วย "limit" · ระบบจริงตั้งแต่ 2026-10-21 = market"""
     _ra_calls.clear()
     if state is not None:
         scheduler._rev_a_save({"XAUUSDm": state} if state else {})
@@ -835,6 +837,10 @@ def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0,
         (scheduler.notify, "send"): lambda *a, **k: True,
         (scheduler.notify, "notify_order_opened"): lambda *a, **k: None,
         (scheduler, "is_demo_account"): lambda: True,
+        (scheduler, "REV_A_ENTRY"): entry_mode,
+        (scheduler, "place_order"): lambda *a, **k: (_ra_calls.append(("market",) + a + (k.get("strategy"), k.get("label"))),
+                                                     777)[1],
+        (scheduler.mt5, "symbol_info_tick"): lambda s: SimpleNamespace(ask=tick_px, bid=tick_px),
     }
     saved = {k: getattr(*k) for k in patches}
     for (obj, name), fn in patches.items():
@@ -842,7 +848,7 @@ def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0,
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
-            scheduler.rev_a_step("XAUUSDm", set(occupied))
+            scheduler.rev_a_step("XAUUSDm", occupied if isinstance(occupied, set) else set(occupied))
     finally:
         for (obj, name), fn in saved.items():
             setattr(obj, name, fn)
@@ -897,6 +903,23 @@ _st, _ = ra_scan(32, state=_pend)
 ra_check("order หายไปเอง ไม่มี deal -> ลบแถว journal + ล้าง limit", (_st is None or "pend" not in _st)
          and ("unjournal", 555) in _ra_calls, _ra_calls)
 _ra_state["orders"] = [555]
+
+print("\nReversal A — เข้า market ตอนยืนยัน (REV_A_ENTRY = market · ระบบจริงตั้งแต่ 2026-10-21):")
+_w150 = {**_watch, "watch": {**_watch["watch"], "leg": 150.0}}
+_st, _ = ra_scan(31, state=_w150, entry_mode="market", tick_px=101.0)
+_mk = [c for c in _ra_calls if c[0] == "market"]
+ra_check("ยืนยัน -> market Long @ 101 / SL 89 / TP 120 · journal Reversal",
+         _mk == [("market", "XAUUSDm", "Long", 101.0, 89.0, 120.0, 0.1, "Reversal", "Reversal A")]
+         and not any(c[0] == "limit" for c in _ra_calls) and _st is None, _ra_calls)
+_occ = set()
+_st, _ = ra_scan(31, state=_w150, entry_mode="market", tick_px=101.0, occupied=_occ)
+ra_check("เข้าแล้ว -> ช่อง Reversal ถูกจองในรอบนี้ (กันกลยุทธ์อื่นซ้อน)", _occ == {"Reversal"}, _occ)
+_st, _out = ra_scan(31, state=_w150, entry_mode="market", tick_px=104.0)
+ra_check("ราคาตลาดวิ่งไป 104 -> R:R 1.07 < 1.5 -> ไม่เข้า (R:R คิดจากราคาจริง)",
+         not any(c[0] == "market" for c in _ra_calls) and "ไม่เข้า" in _out, _ra_calls)
+_st, _out = ra_scan(31, state=_w150, entry_mode="market", tick_px=101.0, occupied={"Reversal"})
+ra_check("ช่อง Reversal มีไม้แล้ว -> ไม่เข้า ไม่ตั้ง limit",
+         not any(c[0] in ("market", "limit") for c in _ra_calls) and "ช่อง Reversal" in _out, _ra_calls)
 _saved_ra_file = scheduler._REV_A_FILE
 
 
