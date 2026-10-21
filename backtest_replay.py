@@ -947,7 +947,10 @@ rev_a_own_slot = "--rev-a-own-slot" in sys.argv
 #      market + TP 1.0: 2024-26 −17.12 · 2023-24 −5.90
 #      Bias 1D ไม่เคยพลิกตามระหว่างถือไม้ Reversal A เลย (0/48 · พลิก median 24-65 วันหลังเข้า · ไม้ TP ถือ 4-7 วัน)
 #      = ไม้ที่ชนะคือเด้งครึ่งขา ไม่ใช่เทรนด์กลับ (ส่วนเทรนด์กลับจริง Scoring/Pullback เก็บหลัง Bias พลิก)
-rev_a_market = "--rev-a-market" in sys.argv
+# 🔴 2026-10-21 default ตาม config.REV_A_ENTRY (ระบบจริง = market) · --rev-a-limit = แบบเดิม (limit ที่ระดับยืนยัน)
+#   tag: ติด _mkt เฉพาะตอนสั่ง --rev-a-market ตรงๆ (ไฟล์ผลชุดทดลอง 10-20) · ติด _limit ตอนสั่ง --rev-a-limit
+rev_a_market = ("--rev-a-market" in sys.argv
+                or (config.REV_A_ENTRY == "market" and "--rev-a-limit" not in sys.argv))
 # ต้นขาแบบ swing (เดิมคือธง --rev-a-swing · default ตั้งแต่ 2026-10-15 ดูข้างล่าง): ต้นขาเดิมจาก swing จริงบน 4H แทน high/low สุดขั้วในหน้าต่าง 120 แท่ง 1H
 #   ต้นขา (Long) = จุดเริ่มของชุด lower high: ไล่ swing high ก่อนก้นของ divergence (l2) ย้อนหลังทีละตัว ตราบที่ตัวก่อนหน้า
 #   สูงกว่าตัวถัดมา -> ตัวสูงสุดของชุด = จุดที่ขาลงเริ่ม (Short กลับด้าน: ชุด higher low) · ไม่มีตัวเลขให้เลือก · ไม่ติดขอบหน้าต่าง
@@ -2716,8 +2719,10 @@ if pullback_no_div:
 if rev_a:
     _tag += "_reva" + "".join(f"{k}{_ra_cfg[k]:g}" for k, d in (("cw", 48), ("bk", 12), ("rw", 24), ("tpf", 0.5), ("rr", 1.5), ("deep", 0), ("tpx", 0))
                               if _ra_cfg[k] != d)
-    if rev_a_market:
+    if "--rev-a-market" in sys.argv:
         _tag += "_mkt"
+    if "--rev-a-limit" in sys.argv:
+        _tag += "_limit"
     if rev_a_own_slot:
         _tag += "_ownslot"
     if not rev_a_swing:
