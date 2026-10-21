@@ -24,6 +24,9 @@ One-position-at-a-time แยกอิสระต่อ ratio (แต่ละ 
 ใช้: python tools/backtest_tp_sweep.py <SYMBOL> [DAYS=360] [ratios คั่นด้วย , เช่น 1.0,1.272,1.618,2.0]
      python tools/backtest_tp_sweep.py XAUUSDm 360 1.0,1.272,1.414,1.618,2.0
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import sys
 from datetime import datetime, timedelta
 

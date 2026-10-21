@@ -24,6 +24,9 @@ MIN_RR_HARD_BLOCK = เปลี่ยนชุดไม้ ลัดด้ว�
 ใช้:  ./run_wine.sh tools/tp_headroom.py            # MULT=2.0 (ค่าที่เคยทดลอง)
       ./run_wine.sh tools/tp_headroom.py --mult=3
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import os
 import sys
 
@@ -41,7 +44,7 @@ _args = [a for a in sys.argv[1:] if not a.startswith("--")]
 connect()
 out, skipped = [], 0
 for symbol in (_args or SYMBOLS):
-    path = f"replay_trades_{symbol}.csv"
+    path = f"results/replay_trades_{symbol}.csv"
     if not os.path.exists(path):
         print(f"  ข้าม {symbol}: ไม่มี {path}")
         continue

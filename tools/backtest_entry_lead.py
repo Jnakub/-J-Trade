@@ -10,9 +10,11 @@ force=True ข้าม hard block R:R/SL ไว้ ไม่งั้นไม�
 ข้อสรุปและกลไกอยู่ที่ config.MAX_RUNUP_24H_R — **สายนี้ปิดแล้ว** สคริปต์เก็บไว้เพื่อวัดซ้ำ
 เมื่อโครงสร้าง TP เปลี่ยน (กลไกที่ทำให้แพ้คือ fib ยังไม่มีขาให้ฉายตอนเข้าเร็ว)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/ ไม่อยู่ใน sys.path ของ python ใน wine (._pth) — ให้ import เครื่องมือข้างเคียงได้
 from datetime import timedelta
 
 import pandas as pd
@@ -85,7 +87,7 @@ for k, b in base.iterrows():
 
 mt5.shutdown()
 d = pd.DataFrame(rows)
-d.to_csv(f"entry_lead_{symbol}.csv", index=False)
+d.to_csv(f"results/entry_lead_{symbol}.csv", index=False)
 
 print(f"\n=== {symbol} ===")
 print(control_check(d))

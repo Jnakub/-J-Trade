@@ -8,6 +8,9 @@ replay ไม่ได้เก็บไว้ (มีแค่ entry/exit) — 
 
 ใช้:  ./run_wine.sh tools/news_paths.py     ->  news_paths.csv
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import warnings; warnings.filterwarnings("ignore")
 import pandas as pd
 from mt5_connect import connect
@@ -17,7 +20,7 @@ from scoring import get_ohlcv
 connect()
 rows = []
 for sym in SYMBOLS:
-    tr = pd.read_csv(f"replay_trades_{sym}.csv", parse_dates=["time", "exit_time"])
+    tr = pd.read_csv(f"results/replay_trades_{sym}.csv", parse_dates=["time", "exit_time"])
     h1 = get_ohlcv(sym, MT5_TIMEFRAMES["1H"], bars=20000)[["time", "close"]]
     h1 = h1.set_index("time").close
     for i, t in enumerate(tr.itertuples()):
@@ -33,6 +36,6 @@ for sym in SYMBOLS:
         }))
     print(f"{sym:<9} {len(tr):>3} ไม้")
 out = pd.concat(rows, ignore_index=True)
-out.to_csv("news_paths.csv", index=False)
+out.to_csv("results/news_paths.csv", index=False)
 print(f"\nเขียน news_paths.csv — {len(out):,} แถว "
       f"({out.groupby(['symbol','trade']).ngroups} ไม้)")

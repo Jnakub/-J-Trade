@@ -25,6 +25,9 @@ entry_features.py — คัดกรอง "ตัวแปร ณ ตอนเ
 
 ใช้:  ./run_wine.sh tools/entry_features.py          (ต้องมี mfe_trades.csv จาก backtest_mfe.py ก่อน)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import sys
 
 import numpy as np
@@ -39,7 +42,7 @@ DEAD_MFE = 0.5      # "ไม่เคยไปไหน" = MFE ต่ำกว�
 GOOD_MFE = 1.0      # "ทำงานได้" = MFE ตั้งแต่นี้ขึ้นไป (ช่วงกลางถือเป็นกลาง ไม่นับทั้งสองฝั่ง)
 RUNUP_BARS = 24     # หน้าต่างเดียวกับ config.MAX_RUNUP_24H_R
 
-mfe = pd.read_csv("mfe_trades.csv", parse_dates=["time", "exit_time"])
+mfe = pd.read_csv("results/mfe_trades.csv", parse_dates=["time", "exit_time"])
 connect()
 
 rows = []
@@ -134,5 +137,5 @@ for ratio, dR, f, lab, n, nd, ng in best[:5]:
 print(f"\n⚠️ คัดกรอง {len(FEATURES)} ตัวแปร x 2 ทิศ = {len(FEATURES)*2} การทดสอบ — ตัวที่ดูดีที่สุด")
 print("   เป็นผลของการเลือกเองเสมอ ต้อง permutation test ก่อนเชื่อ (ดูเคส Reversal-FX ที่ได้")
 print("   |t| 2.51 แต่ p = 0.606) และตัวที่ผ่านต้องยืนยันด้วย backtest_replay เต็มอีกชั้น")
-df.to_csv("entry_features.csv", index=False)
+df.to_csv("results/entry_features.csv", index=False)
 print("\nเขียน entry_features.csv แล้ว")

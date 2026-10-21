@@ -1,12 +1,14 @@
 """
 test_fvg.py — เทสต์ fvg.find_fvgs ด้วยแท่งปลอมที่รู้คำตอบ (ไม่แตะ MT5 · รันบน Mac ได้: python3 tools/test_fvg.py)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import os
 import sys
 
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/ ไม่อยู่ใน sys.path ของ python ใน wine (._pth) — ให้ import เครื่องมือข้างเคียงได้
 
 import fvg
 

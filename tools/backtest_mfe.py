@@ -20,6 +20,9 @@ backtest_mfe.py — วัด "กำไรสูงสุดที่เคย�
       ./run_wine.sh tools/backtest_mfe.py BTCUSDm XAUUSDm # เฉพาะบางตัว
       ./run_wine.sh tools/backtest_mfe.py --tag=_slotper  # อ่านไฟล์ผลรอบที่ติด tag แทนรอบปกติ
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import os
 import sys
 
@@ -42,7 +45,7 @@ def files_for(symbols):
     """default = config.SYMBOLS เท่านั้น ไม่ใช่ glob ทุกไฟล์ที่เจอ — replay_trades_*.csv ของ symbol
     ที่ถูกถอดออกจากระบบไปแล้ว (เช่น XRPUSDm) ยังค้างอยู่ในโฟลเดอร์ และเป็นไฟล์เก่าคนละรอบโค้ด
     การ glob จึงเอาไม้ของระบบที่ไม่มีอยู่จริงมาปนกับผลปัจจุบันเงียบๆ"""
-    return [(s, f"replay_trades_{s}{TAG}.csv") for s in (symbols or SYMBOLS)]
+    return [(s, f"results/replay_trades_{s}{TAG}.csv") for s in (symbols or SYMBOLS)]
 
 
 def excursions(df, trades):
@@ -136,6 +139,6 @@ for r in worst.itertuples():
           f"{r.MFE:>+6.2f}R{r.R:>+6.2f}R  {r.how}")
 print(f"{'=' * 78}")
 
-out = f"mfe_trades{TAG}.csv"
+out = f"results/mfe_trades{TAG}.csv"
 t.to_csv(out, index=False)
 print(f"  เขียนไม้ทั้งหมดพร้อม MFE/MAE ลง {out}")

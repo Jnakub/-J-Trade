@@ -21,9 +21,11 @@ control จะไม่ตรงกับไฟล์และเทียบอ
 
 ชุด trend (กฎ trend invalidation — กฎเดียวในระบบที่ตัดได้ถึง 100% และมีผลเฉพาะ Scoring)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/ ไม่อยู่ใน sys.path ของ python ใน wine (._pth) — ให้ import เครื่องมือข้างเคียงได้
 
 import pandas as pd
 import MetaTrader5 as mt5
@@ -229,7 +231,7 @@ for k, b in base.iterrows():
 
 mt5.shutdown()
 d = pd.DataFrame(rows)
-d.to_csv(f"exit_rules_{SET}_{symbol}.csv", index=False)
+d.to_csv(f"results/exit_rules_{SET}_{symbol}.csv", index=False)
 
 print(f"\n=== {symbol} [{SET}] ===")
 print(control_check(d))

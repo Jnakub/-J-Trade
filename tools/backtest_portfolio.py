@@ -5,9 +5,9 @@ backtest_replay.py เดินทีละ symbol ตามด่านจร�
 ไฟล์นี้เอา output ของ replay ทั้ง 7 ตัวมาต่อเป็นเส้นเวลาเดียว แล้วถามว่าเพดานความเสี่ยง
 รวมระดับพอร์ตจะบล็อกไม้ไหนทิ้งบ้าง และราคาของมันกี่ R
 
-    python3 tools/backtest_portfolio.py                    # ตารางเปรียบเทียบเพดานทุกระดับ
-    python3 tools/backtest_portfolio.py --cap=3 --group=2  # ดูค่าที่ตั้งไว้จริงใน config
-    python3 tools/backtest_portfolio.py --daily            # MAX_DAILY_LOSS ระดับพอร์ต (replay เห็นแค่ต่อ symbol)
+    ./run_wine.sh tools/backtest_portfolio.py                    # ตารางเปรียบเทียบเพดานทุกระดับ
+    ./run_wine.sh tools/backtest_portfolio.py --cap=3 --group=2  # ดูค่าที่ตั้งไว้จริงใน config
+    ./run_wine.sh tools/backtest_portfolio.py --daily            # MAX_DAILY_LOSS ระดับพอร์ต (replay เห็นแค่ต่อ symbol)
 
 ⚠️ **ตัวเลข ΔR ที่ได้คือขอบบนของต้นทุน ไม่ใช่ต้นทุนจริง**
 ไฟล์นี้ไม่ได้ replay ใหม่ — มันหยิบไม้ที่ replay รายตัวสร้างไว้แล้วมาคัดออก ไม้ที่ถูก
@@ -20,6 +20,9 @@ backtest_replay.py เดินทีละ symbol ตามด่านจร�
 ของแต่ละไม้สร้างจาก replay_cuts_*.csv (ปิดบางส่วน) + คอลัมน์ be_time ของ replay_trades_*.csv
 (ไม้ที่ขยับ SL ไป breakeven แล้ว = เสี่ยง 0 · คอลัมน์นี้มีตั้งแต่ 2026-09-28 ไฟล์ที่เก่ากว่าจะถูกเตือน)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import csv
 import sys
 import datetime
@@ -47,7 +50,7 @@ def load():
     _no_be_col = set()     # symbol ที่ไฟล์ replay ยังไม่มีคอลัมน์ be_time (รุ่นก่อน 2026-09-28)
     for sym in SYMBOLS:
         try:
-            fh = open(f"replay_trades_{sym}{TAG}.csv")
+            fh = open(f"results/replay_trades_{sym}{TAG}.csv")
         except FileNotFoundError:
             sys.exit(f"ไม่มี replay_trades_{sym}{TAG}.csv — รัน backtest_replay.py {sym} ก่อน")
         for row in csv.DictReader(fh):
@@ -67,7 +70,7 @@ def load():
     cuts = defaultdict(list)
     for sym in SYMBOLS:
         try:
-            fh = open(f"replay_cuts_{sym}{TAG}.csv")
+            fh = open(f"results/replay_cuts_{sym}{TAG}.csv")
         except FileNotFoundError:
             print(f"  ! ไม่มี replay_cuts_{sym}{TAG}.csv — ไม้ของ {sym} จะถูกคิดเป็น 1R เต็ม"
                   f" ตลอดอายุไม้ (รัน replay ด้วย --log-cuts เพื่อให้แม่นขึ้น)")

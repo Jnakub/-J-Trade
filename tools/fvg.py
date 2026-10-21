@@ -8,6 +8,9 @@ fvg.py — Fair Value Gap (FVG) — 2026-10-19 · คำขอผู้ใช้
   Bearish FVG : high แท่งที่ 3 < low แท่งที่ 1  -> ช่อง = high แท่งที่ 3 .. low แท่งที่ 1
 Timeframe: แท่ง 1D (คำขอผู้ใช้) · ไส้แตะกันพอดี (เท่ากัน) ไม่นับเป็นช่อง · ผู้เรียกส่งเฉพาะแท่งที่ปิดแล้ว (ตัดแท่งที่ยังวิ่งอยู่ออกเอง)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import pandas as pd
 
 from indicators import merge_sunday   # บ้านจริงอยู่ indicators.py (Bias ตัวจริงใช้ด้วย) · re-export ให้ fvg.merge_sunday ใช้ได้เหมือนเดิม

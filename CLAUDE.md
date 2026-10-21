@@ -125,7 +125,7 @@ Market Watch บน VPS ไม่ต้องทำมือ (`connect()` ใส
 - `mt5setup.exe /auto` ค้างเงียบ — ต้องกด Next ผ่าน VNC
 - `TZ=Asia/Bangkok` ใน service ทำ Python ใน wine ได้เวลาเพี้ยน 6 ชม. (06:57 ตอนเครื่อง 12:57) — timezone มาจาก `timedatectl` ของเครื่องผ่าน wine เอง
 - MT5 ลงใหม่ไม่มี symbol ใน Market Watch -> 5/10 ตัว `[-4] Not found` เงียบๆ — แก้ที่ `mt5_connect.connect()` (`symbol_select`)
-- ไฟล์สำหรับ Windows VPS (`vps/*.bat`, `install_tasks.ps1`) ทำไว้ก่อนรู้ว่า Hostinger ไม่มี Windows — ยังไม่เคยใช้จริง
+- ไฟล์สำหรับ Windows VPS (`vps/*.bat` · `install_tasks.ps1` · `vps/README.md`) ไม่เคยใช้จริง — ลบแล้ว 2026-10-21 (กู้ได้จาก git)
 
 ---
 
@@ -141,7 +141,9 @@ Market Watch บน VPS ไม่ต้องทำมือ (`connect()` ใส
 `python3 script.py` ตรงๆ ใช้ได้เฉพาะสคริปต์ที่อ่าน CSV อย่างเดียว ไม่ต่อ MT5
 
 **โครงไฟล์ (ตั้งแต่ 2026-10-21):** โฟลเดอร์หลัก = โค้ดระบบจริงที่ scheduler/exit_monitor ใช้ + เทสต์ของมัน (VPS เรียกตามชื่อนี้ ห้ามย้าย)
-· `tools/` = เครื่องมือ backtest/วิเคราะห์ทั้งหมด (`./run_wine.sh tools/<ชื่อ>.py` · run_wine.sh cd ไปโฟลเดอร์หลักเสมอ ไฟล์ผลจึงยังลงโฟลเดอร์หลัก)
+· `tools/` = เครื่องมือ backtest/วิเคราะห์ทั้งหมด (`./run_wine.sh tools/<ชื่อ>.py` · run_wine.sh cd ไปโฟลเดอร์หลักเสมอ)
+· `results/` = ไฟล์ผลของเครื่องมือทั้งหมด (replay_trades/replay_cuts/mfe_trades/exit_rules/... ~4,000 ไฟล์ · ไม่อยู่ใน git) — เครื่องมือเขียน/อ่านที่นี่เอง
+· โฟลเดอร์หลักเหลือไฟล์ข้อมูลแค่ state ของบอทจริง (trades_log.csv · cuts_log.csv · *.json) ซึ่งฉบับจริงอยู่บน VPS
 · tools/ ไม่อยู่ใน sys.path ของ python ใน wine (`._pth`) — เครื่องมือที่ import เครื่องมือข้างเคียงต้องมีบรรทัด `sys.path.insert(0, dirname(__file__))` (มีแล้วใน replay/exit_rules/entry_lead/blocked_value/test_fvg)
 · ไฟล์ตายที่ลบแล้ว 2026-10-21 (กู้ได้จาก git): bot.py · dashboard.py · test_dashboard.py · backtest_exit_compare.py · div_why.py · entry_structure.py · keylevel.py
 
@@ -370,7 +372,7 @@ vs ตรงกัน 137 ไม้ (+0.174R) · ผลต่าง 0.064R/ไ�
 ## เครื่องมือ — ตัวไหนตอบอะไรได้
 
 🔴 **ประวัติ base ทุกรุ่น (2026-09-16 ถึง 10-14) + บล็อกประกอบ ย้ายไป HISTORY.md แล้ว** · base ปัจจุบันอยู่ที่ "สถานะระบบ" ด้านบน
-base อยู่ที่ `replay_trades_<sym>_<tag>.csv` — **สร้างใหม่ได้เสมอ อย่าเชื่อตัวเลขที่จำมา ให้เปิดไฟล์ดู** · อย่า glob ทุกไฟล์ ใช้ `config.SYMBOLS`
+base อยู่ที่ `results/replay_trades_<sym>_<tag>.csv` — **สร้างใหม่ได้เสมอ อย่าเชื่อตัวเลขที่จำมา ให้เปิดไฟล์ดู** · อย่า glob ทุกไฟล์ ใช้ `config.SYMBOLS`
 
 🔴 **รัน base ครั้งถัดไปใส่ `--end=` เสมอ** และใส่ค่าเดียวกันทุกรอบที่จะเทียบกัน — โปรเซสที่เริ่ม
 พร้อมกันเคยได้ปลายหน้าต่างต่างกัน 5 ชม. เพราะ terminal ยัง sync แท่งไม่เสร็จ

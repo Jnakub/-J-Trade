@@ -23,6 +23,9 @@ backtest_trend_flip_ksweep.py — ขั้นตอน E: หา k* ที่�
 ใช้: python tools/backtest_trend_flip_ksweep.py <SYMBOL> <BARS> 1D
      python tools/backtest_trend_flip_ksweep.py BTCUSDm 3000 1D
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import sys
 
 import MetaTrader5 as mt5

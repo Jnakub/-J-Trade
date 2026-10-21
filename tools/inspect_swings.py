@@ -16,6 +16,9 @@ find_swing_highs/lows เฉยๆ (3, 3, 0.0) ซึ่งไม่ตรงก
    (ที่ต้องมี override เป็น arg เพราะการแก้ swing.py ไปมาระหว่างดู = เสี่ยงลืมค่าค้างไว้
     ในไฟล์ที่ระบบจริงอ่าน)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import sys
 
 import MetaTrader5 as mt5
