@@ -531,6 +531,16 @@ def rn_check(label, over, bias, want, rule="nofall"):
     return ok
 
 
+for _nm in ("Retracement", "Reversal"):   # 2026-10-21 Reversal A เปลี่ยนชื่อ — ไม้เก่าใน trades_log ยังชื่อ Reversal
+    _ok = _config.slot_of(_nm) == "Reversal"
+    print(f"  [{'ok  ' if _ok else 'FAIL'}] {'config.slot_of(' + _nm + ') == Reversal':52} -> {_config.slot_of(_nm)}")
+    results.append(_ok)
+import exit_monitor as _em_t  # noqa: E402
+for _nm in ("Retracement", "Reversal"):
+    _r = _em_t.check_trend_invalidation("XAUUSDm", "Long", pd.Timestamp("2026-10-01"), _nm)
+    _ok = _r["active"] is False and "ข้าม" in _r["reason"]
+    print(f"  [{'ok  ' if _ok else 'FAIL'}] {'trend check ข้ามไม้ ' + _nm:52} -> {_r['reason']}")
+    results.append(_ok)
 _ok = _config.slot_of("Pullback") == "Reversal"
 print(f"\n  [{'ok  ' if _ok else 'FAIL'}] {'config.slot_of(Pullback) == Reversal (ช่องร่วม Breakout)':52} -> {_config.slot_of('Pullback')}")
 results.append(_ok)
@@ -870,7 +880,7 @@ ra_check("รอบเดียวกันซ้ำ -> ยังไม่เช
 _st, _ = ra_scan(31)
 ra_check("แท่งถัดไปปิดทะลุ -> ตั้ง limit Long 100 / SL 89 / TP 120",
          [c for c in _ra_calls if c[0] == "limit"] == [("limit", "XAUUSDm", "Long", 100.0, 89.0, 120.0, 0.1)]
-         and ("journal", "Reversal") in _ra_calls and _st.get("pend", {}).get("exp_bar") == _t(54), _ra_calls)
+         and ("journal", "Retracement") in _ra_calls and _st.get("pend", {}).get("exp_bar") == _t(54), _ra_calls)
 _pend = dict(_st)
 _st, _ = ra_scan(32, state=_pend)
 ra_check("limit ค้าง ไม่มีด่านปิด -> ไม่ทำอะไร", _st == _pend and not _ra_calls, _ra_calls)
@@ -908,8 +918,8 @@ print("\nReversal A — เข้า market ตอนยืนยัน (REV_A_E
 _w150 = {**_watch, "watch": {**_watch["watch"], "leg": 150.0}}
 _st, _ = ra_scan(31, state=_w150, entry_mode="market", tick_px=101.0)
 _mk = [c for c in _ra_calls if c[0] == "market"]
-ra_check("ยืนยัน -> market Long @ 101 / SL 89 / TP 120 · journal Reversal",
-         _mk == [("market", "XAUUSDm", "Long", 101.0, 89.0, 120.0, 0.1, "Reversal", "Reversal A")]
+ra_check("ยืนยัน -> market Long @ 101 / SL 89 / TP 120 · journal Retracement",
+         _mk == [("market", "XAUUSDm", "Long", 101.0, 89.0, 120.0, 0.1, "Retracement", None)]
          and not any(c[0] == "limit" for c in _ra_calls) and _st is None, _ra_calls)
 ra_check("ขนาดไม้คิดที่ความเสี่ยง 1% (REV_A_RISK_PER_TRADE · 2026-10-21)", ("risk", 0.01) in _ra_calls, _ra_calls)
 _occ = set()

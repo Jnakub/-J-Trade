@@ -1724,7 +1724,7 @@ def close_pos(pos, key, t, r, how):
     if use_cost:
         r -= cost_pct / 100 * pos["entry"] / abs(pos["entry"] - pos["sl0"])   # spread ขาเข้า+ออก ~1 ครั้ง
     _w = (_SIDEWAY_W if pos.get("strategy") == "Sideway"
-          else _REVA_W if pos.get("strategy") == "Reversal" and pos.get("regime") == "REV-A" else 1.0)
+          else _REVA_W if pos.get("strategy") == config.REV_A_STRATEGY else 1.0)
     rec = {**pos, "exit_time": t, "R": r, "how": how, "risk_w": _w}
     daily_r[t.date()] = daily_r.get(t.date(), 0.0) + r * _w   # daily loss นับเป็น R ของระบบ (2%)
     last_close_time = t
@@ -1879,7 +1879,7 @@ for n, row in enumerate(clock.to_dict("records")):
                 if tp_cap_atr and _atr:
                     _tp = min(_tp, _e + _atr * tp_cap_atr) if _lg else max(_tp, _e - _atr * tp_cap_atr)
                 _pos = {"time": now, "direction": _p["dir"], "entry": _e, "sl": _sl, "sl0": _sl,
-                        "tp": _tp, "tp0": _tp, "tp_fib": _p["tp"], "strategy": "Reversal", "regime": "REV-A",
+                        "tp": _tp, "tp0": _tp, "tp_fib": _p["tp"], "strategy": config.REV_A_STRATEGY, "regime": "REV-A",
                         "booked": 0.0, "rem": 1.0, "cuts": 0,
                         "pinned_swing": (_sl + scoring.EXEC_SL_ATR_MULT * _atr) if _lg
                         else (_sl - scoring.EXEC_SL_ATR_MULT * _atr),
@@ -2383,7 +2383,7 @@ for n, row in enumerate(clock.to_dict("records")):
                 _r = ((entry - _p["entry"]) if _pl else (_p["entry"] - entry)) / abs(_p["entry"] - _p["sl0"])
                 trades.append(close_pos(_p, _k, now, _p["booked"] + _p["rem"] * _r, "REVERSE"))
     if tp_entry_on_opposite and strategy != "Sideway" \
-            and not (tp_entry_no_rev and strategy in ("Reversal", "Pullback")):   # ไม่ใช้กับไม้ Sideway ทั้งสองทาง (ผู้ใช้ 2026-10-02)
+            and not (tp_entry_no_rev and strategy in ("Reversal", "Pullback", config.REV_A_STRATEGY)):   # ไม่ใช้กับไม้ Sideway ทั้งสองทาง (ผู้ใช้ 2026-10-02)
         for _k, _p in list(positions.items()):
             if _k != slot_of(strategy) and _p["direction"] != direction and _p["strategy"] != "Sideway":
                 _pl = _p["direction"] == "Long"
