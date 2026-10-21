@@ -832,7 +832,7 @@ def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0,
         (journal, "check_tp_cooldown"): lambda s, h: (True, "OK"),
         (scheduler, "check_portfolio_risk"): lambda s, b: (True, ""),
         (scheduler, "get_account_balance"): lambda: BALANCE,
-        (scheduler, "calculate_lot_size"): lambda *a, **k: (0.1, None),
+        (scheduler, "calculate_lot_size"): lambda *a, **k: (_ra_calls.append(("risk", a[-1])), (0.1, None))[1],
         (scheduler, "clamp_lot"): lambda s, l: l,
         (scheduler.notify, "send"): lambda *a, **k: True,
         (scheduler.notify, "notify_order_opened"): lambda *a, **k: None,
@@ -911,6 +911,7 @@ _mk = [c for c in _ra_calls if c[0] == "market"]
 ra_check("ยืนยัน -> market Long @ 101 / SL 89 / TP 120 · journal Reversal",
          _mk == [("market", "XAUUSDm", "Long", 101.0, 89.0, 120.0, 0.1, "Reversal", "Reversal A")]
          and not any(c[0] == "limit" for c in _ra_calls) and _st is None, _ra_calls)
+ra_check("ขนาดไม้คิดที่ความเสี่ยง 1% (REV_A_RISK_PER_TRADE · 2026-10-21)", ("risk", 0.01) in _ra_calls, _ra_calls)
 _occ = set()
 _st, _ = ra_scan(31, state=_w150, entry_mode="market", tick_px=101.0, occupied=_occ)
 ra_check("เข้าแล้ว -> ช่อง Reversal ถูกจองในรอบนี้ (กันกลยุทธ์อื่นซ้อน)", _occ == {"Reversal"}, _occ)
