@@ -16,6 +16,9 @@ replay_trades_<symbol>.csv) แล้วจำลองแค่ช่วงท�
 ตัวตรวจว่าเครื่องนี้ตรงกับ replay: จำลองไม้เดิมด้วยพารามิเตอร์ที่บันทึกไว้แล้วเทียบ R กับไฟล์
 (2026-09-13: ตรงกัน 202/202 ไม้ 7 symbol)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 from datetime import timedelta
 
 import pandas as pd
@@ -118,7 +121,7 @@ class TradeSim:
 def load_trades(symbol: str, strategy: str = None, tag: str = "") -> pd.DataFrame:
     """tag = ส่วนท้ายชื่อไฟล์ผลของ backtest_replay (เช่น "_1rkeep100_hwkeep100") — ต้องเลือกไฟล์
     ที่สร้างด้วยค่าคงที่ชุดเดียวกับที่ระบบใช้อยู่ ไม่งั้น control จะไม่ตรงกับไฟล์"""
-    t = pd.read_csv(f"replay_trades_{symbol}{tag}.csv", parse_dates=["time"])
+    t = pd.read_csv(f"results/replay_trades_{symbol}{tag}.csv", parse_dates=["time"])
     return t[t.strategy == strategy].reset_index(drop=True) if strategy else t
 
 

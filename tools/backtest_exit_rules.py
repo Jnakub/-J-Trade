@@ -11,7 +11,7 @@ control จะไม่ตรงกับไฟล์และเทียบอ
 ปิดกฎเดียวกฎที่เหลือรับช่วงตัดแทนทันที การวัดทีละตัวจึงประเมินค่าของกฎต่ำกว่าจริงอย่างเป็นระบบ
 (BTC: ปิดทีละตัวรวมกัน +0.33R แต่ปิดพร้อมกัน +1.86R)
 
-ใช้: ./run_wine.sh backtest_exit_rules.py BTCUSDm [--set=sizing|trend] [--base=_tag]
+ใช้: ./run_wine.sh tools/backtest_exit_rules.py BTCUSDm [--set=sizing|trend] [--base=_tag]
 
 ชุด sizing (กฎปิดบางส่วน) — วัดแล้ว 2026-09-13 บน base ก่อนแก้ 7 symbol 202 ไม้:
   hot100 +0.57R (บวก 3/7 = noise) · 1r100 +1.91R (5/7) · hw100 +1.12R (5/7) ·
@@ -21,6 +21,10 @@ control จะไม่ตรงกับไฟล์และเทียบอ
 
 ชุด trend (กฎ trend invalidation — กฎเดียวในระบบที่ตัดได้ถึง 100% และมีผลเฉพาะ Scoring)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
+import os
 import sys
 
 import pandas as pd
@@ -227,7 +231,7 @@ for k, b in base.iterrows():
 
 mt5.shutdown()
 d = pd.DataFrame(rows)
-d.to_csv(f"exit_rules_{SET}_{symbol}.csv", index=False)
+d.to_csv(f"results/exit_rules_{SET}_{symbol}.csv", index=False)
 
 print(f"\n=== {symbol} [{SET}] ===")
 print(control_check(d))

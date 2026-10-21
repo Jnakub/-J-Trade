@@ -13,8 +13,11 @@ calc_adx เป็น EWM (causal) ค่าที่จุดเดิมจึ
 ⚠️ เห็นเฉพาะไม้ที่ **ผ่านด่านมาแล้ว** — ตอบได้แค่ "ในกลุ่มที่เข้าได้ ทิศแยกผลได้ไหม"
    ตอบไม่ได้ว่า "ถ้าปล่อยให้ ADX ต่ำกว่า 22 เข้าด้วยจะเป็นยังไง" (นั่นต้อง replay เต็ม)
 
-ใช้:  ./run_wine.sh adx_dir_at_entry.py
+ใช้:  ./run_wine.sh tools/adx_dir_at_entry.py
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import os
 import sys
 
@@ -27,7 +30,7 @@ import regime_check as rc
 connect()
 rows = []
 for symbol in SYMBOLS:
-    path = f"replay_trades_{symbol}.csv"
+    path = f"results/replay_trades_{symbol}.csv"
     if not os.path.exists(path):
         print(f"  ข้าม {symbol}: ไม่มี {path}")
         continue

@@ -21,9 +21,12 @@ One-position-at-a-time แยกอิสระต่อ ratio (แต่ละ 
 แบ่ง 2 หน้าต่างเวลาไม่ทับกัน (IN-sample = ช่วงหลังสุด, OOS = ช่วงก่อนหน้า) กัน overfit
 เหมือนที่ใช้ตอน sweep MIN_SL_DISTANCE_PCT/MAX_TP_DISTANCE_PCT (ดู config.py)
 
-ใช้: python backtest_tp_sweep.py <SYMBOL> [DAYS=360] [ratios คั่นด้วย , เช่น 1.0,1.272,1.618,2.0]
-     python backtest_tp_sweep.py XAUUSDm 360 1.0,1.272,1.414,1.618,2.0
+ใช้: python tools/backtest_tp_sweep.py <SYMBOL> [DAYS=360] [ratios คั่นด้วย , เช่น 1.0,1.272,1.618,2.0]
+     python tools/backtest_tp_sweep.py XAUUSDm 360 1.0,1.272,1.414,1.618,2.0
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import sys
 from datetime import datetime, timedelta
 
@@ -149,7 +152,7 @@ def summarize(label: str, trades: list[dict]) -> dict:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python backtest_tp_sweep.py <SYMBOL> [DAYS=360] [ratios คั่นด้วย ,]")
+        print("Usage: python tools/backtest_tp_sweep.py <SYMBOL> [DAYS=360] [ratios คั่นด้วย ,]")
         sys.exit(1)
     symbol = sys.argv[1]
     days   = int(sys.argv[2]) if len(sys.argv) > 2 else 360

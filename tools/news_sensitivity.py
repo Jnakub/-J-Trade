@@ -57,12 +57,15 @@
    ⚠️ สิ่งเดียวที่วัดไม่ได้คือ **slippage ของโบรกตอนข่าว** (OHLC ไม่บอก) — ไม้จริงที่โดน SL
       มีแค่ 2 ไม้ n น้อยเกินจะดู
 
-ใช้:  ./run_wine.sh news_sensitivity.py
-      ต้องมี news_paths.csv จาก ./run_wine.sh news_paths.py ก่อน
+ใช้:  ./run_wine.sh tools/news_sensitivity.py
+      ต้องมี news_paths.csv จาก ./run_wine.sh tools/news_paths.py ก่อน
       (ตัวมันเองอ่าน CSV อย่างเดียว ไม่แตะ MT5 — แต่ต้องผ่าน wine เพราะ `from config import
        SYMBOLS` ลากเอา MetaTrader5 มาด้วย และ config คือแหล่งเดียวของ SYMBOLS ห้าม glob
        ไฟล์ replay_trades_*.csv แทน — ของ symbol ที่ถอดออกแล้วยังค้างอยู่)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import numpy as np
 import pandas as pd
 
@@ -86,10 +89,10 @@ def to_hours(x) -> np.ndarray:
     ซึ่งเป็น ns เสมอ ก็เลยอยู่คนละหน่วยกับ T โดยไม่มีใครรู้"""
     return np.asarray(x, dtype="datetime64[s]").astype("int64") / 3600.0
 
-paths = pd.read_csv("news_paths.csv", parse_dates=["entry_time", "t"])
+paths = pd.read_csv("results/news_paths.csv", parse_dates=["entry_time", "t"])
 trades = []
 for sym in SYMBOLS:
-    tr = pd.read_csv(f"replay_trades_{sym}.csv", parse_dates=["time", "exit_time"])
+    tr = pd.read_csv(f"results/replay_trades_{sym}.csv", parse_dates=["time", "exit_time"])
     tr["symbol"], tr["trade"] = sym, range(len(tr))
     trades.append(tr)
 trades = pd.concat(trades, ignore_index=True)

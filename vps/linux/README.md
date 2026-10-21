@@ -1,6 +1,6 @@
 # รันบอทบน Ubuntu VPS (Hostinger) — ผ่าน wine
 
-ใช้ทางนี้เมื่อ VPS เป็น Linux (Hostinger ไม่มี Windows) · ถ้าเป็น Windows VPS ใช้ `vps/README.md` แทน
+ใช้ทางนี้เมื่อ VPS เป็น Linux (Hostinger ไม่มี Windows) · ชุดไฟล์สำหรับ Windows VPS เดิม (`vps/*.bat` · `install_tasks.ps1` · `vps/README.md`) ลบแล้ว 2026-10-21 เพราะไม่เคยใช้ — กู้ได้จาก git
 ใช้ได้ทั้ง Ubuntu 24.04 และ 26.04 — ถ้า WineHQ ยังไม่มีแพ็กเกจให้รุ่นนั้น setup.sh จะใช้ wine ของ Ubuntu แทนเอง
 หลักการเหมือนบน Mac ทุกอย่าง: MT5 + Python 3.11 **ฝั่ง Windows** รันใน wine (`MetaTrader5` import
 จาก python ของ Linux ไม่ได้ เหมือนฝั่ง mac) ต่างแค่ VPS ไม่มีจอ จึงใช้จอเสมือน Xvfb `:99`
@@ -10,7 +10,7 @@
 | `setup.sh` | ติดตั้งทั้งหมดครั้งเดียว (root): timezone UTC+7 · wine · Xvfb · user `trader` · clone repo · Python 3.11 + MT5 ใน wine |
 | `jtrade-xvfb.service` | จอเสมือน `:99` |
 | `jtrade-mt5.service` | MT5 terminal (ตายแล้วเริ่มใหม่ใน 30 วิ) |
-| `jtrade@.service` | บอท: `jtrade@scheduler` · `jtrade@exit_monitor` (ตายแล้วเริ่มใหม่ใน 60 วิ — แทน `start_bot.bat`) |
+| `jtrade@.service` | บอท: `jtrade@scheduler` · `jtrade@exit_monitor` (ตายแล้วเริ่มใหม่ใน 60 วิ) |
 | `run.sh` | เทียบเท่า `run_wine.sh` — รันสคริปต์อื่น เช่น `--rules` หรือเทสต์ |
 | `vnc.sh` | เปิดหน้าจอ MT5 ให้ดูจาก Mac (ฟังแค่ localhost — เข้าผ่าน ssh tunnel เท่านั้น) |
 

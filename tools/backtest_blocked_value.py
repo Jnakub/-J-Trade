@@ -27,8 +27,12 @@
                         (XAU +5.58 · ETH +5.38 · EUR +1.20 · USDJPY −0.37 · US500 −2.05 ·
                          GBP −2.30 · BTC −3.65)
 
-ใช้: ./run_wine.sh backtest_blocked_value.py BTCUSDm [--min-age=72]
+ใช้: ./run_wine.sh tools/backtest_blocked_value.py BTCUSDm [--min-age=72]
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
+import os
 import sys
 
 import pandas as pd
@@ -49,7 +53,7 @@ TAG = _t.split("=", 1)[1] if _t else ""
 _a = next((a for a in sys.argv if a.startswith("--min-age=")), None)
 MIN_AGE = float(_a.split("=", 1)[1]) if _a else 0.0
 
-b = pd.read_csv(f"replay_blocked_{symbol}{TAG}.csv", parse_dates=["time", "ไม้ที่ครองช่องอยู่"])
+b = pd.read_csv(f"results/replay_blocked_{symbol}{TAG}.csv", parse_dates=["time", "ไม้ที่ครองช่องอยู่"])
 b = b.sort_values("time").reset_index(drop=True)
 if MIN_AGE:
     b["_age"] = (b.time - b["ไม้ที่ครองช่องอยู่"]).dt.total_seconds() / 3600
@@ -79,7 +83,7 @@ for _, s in b.iterrows():
 
 mt5.shutdown()
 d = pd.DataFrame(rows)
-d.to_csv(f"blocked_value_{symbol}{'_age'+str(int(MIN_AGE)) if MIN_AGE else ''}.csv", index=False)
+d.to_csv(f"results/blocked_value_{symbol}{'_age'+str(int(MIN_AGE)) if MIN_AGE else ''}.csv", index=False)
 
 print(f"\n=== {symbol} — ค่าของช่อง" + (f" (เริ่มนับหลังช่องถูกครอง {MIN_AGE:g} ชม.)" if MIN_AGE else "ที่สอง") + " ===")
 if not len(d):

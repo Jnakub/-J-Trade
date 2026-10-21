@@ -159,13 +159,13 @@ def get_asset_class(symbol: str) -> str | None:
 # 📜 ประวัติเก่าของ SYMBOLS (เพิ่ม ETH/XRP/USDJPY 2026-08): HISTORY.md § "config.py — SYMBOLS (เพิ่ม ETH/XRP/USDJPY 2026-08)"
 # 🔴 เช็คลิสต์ตอนเพิ่ม symbol ใหม่ (ทุกช่องต้องตั้งค่า ไม่งั้นได้ default ที่อาจไม่เหมาะ):
 #   1. scoring.TREND_FLIP_K        — รัน backtest_trend_flip_ksweep.py หา k (ไม่มี = bias None = SKIP ตลอด)
-#      🔴 **ต้องส่ง `1D` ต่อท้าย**: `./run_wine.sh backtest_trend_flip_ksweep.py <SYM> 3000 1D`
+#      🔴 **ต้องส่ง `1D` ต่อท้าย**: `./run_wine.sh tools/backtest_trend_flip_ksweep.py <SYM> 3000 1D`
 #      default ของมันคือ 4H แต่ระบบเรียก compute_trend_regime บน 1D เท่านั้น (2026-09-19)
 #   2. swing.swing_vol_multiplier  — default 1.9x
 #   3. swing.swing_wick_ratio_min  — default 0.5
 #      🔴 **วิธีทำข้อ 2+3 (คำสั่งผู้ใช้ 2026-09-19): รัน 2 ค่านี้แล้วเอาตารางให้ผู้ใช้เลือก**
-#         ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.45 1.5
-#         ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.5  1.6
+#         ./run_wine.sh tools/inspect_swings.py <SYM> 4H 400 0.45 1.5
+#         ./run_wine.sh tools/inspect_swings.py <SYM> 4H 400 0.5  1.6
 #         (arg 4 = wick · arg 5 = vol · ทับค่าชั่วคราวโดยไม่แตะ swing.py)
 #         **อย่าไล่จูนเองทีละค่า** — ผู้ใช้จะจูนต่อจากสองตารางนี้เอง
 #         เหตุผล: ตารางบอกได้แค่ "จุดเยอะขึ้น" ไม่ได้บอกว่าอันไหนทำเงิน (เคส UKOILm 2026-09-19

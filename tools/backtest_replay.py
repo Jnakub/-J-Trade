@@ -143,7 +143,11 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
      --same-scan-reentry  ไม้ที่ broker ปิด (SL/BE/TP) คืนช่องในรอบสแกนนั้นเลย = ตรงกับ scheduler
                  ที่อ่าน positions_get ตอนสแกน (tag _samescan · ที่มาดูตรงที่ parse ธง)
 """
+import os as _os, sys as _sys  # noqa: E401
+_sys.path[:0] = [_os.path.dirname(_os.path.abspath(__file__)),                     # tools/ (wine ._pth ไม่ใส่โฟลเดอร์สคริปต์ให้)
+                 _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))]   # โฟลเดอร์หลัก (python3 บน Mac ไม่เห็นเอง)
 import re
+import os
 import sys
 from datetime import timedelta
 
@@ -936,6 +940,12 @@ _ra_cfg = {k: float(next((a.split("=")[1] for a in sys.argv if a.startswith(f"--
 #     · ไม้ใหม่ 7 ไม้ −1.70 (ชนะ 2/7) = ชุดเดียวกับที่หลุดเข้ามาตอน tpf 0.618 · Breakout ถูกเบียด 1 ไม้ −1.42
 #     => ทุกการคลายด่าน R:R (TP ไกล / เข้าลึก) ดึงไม้ขาเดิมสั้นชุดเดิมเข้ามา
 rev_a_own_slot = "--rev-a-own-slot" in sys.argv
+#   🔻 ผล 2026-10-21 (คำถามผู้ใช้ "ถ้าปลดล็อกช่อง" · market · เทียบ _c1020p*_reva_mkt) — **ไม่เอา: แย่ลงทั้งสองช่วง**
+#      2024-26: 548 +217.47 -> 569 +198.84R (−18.63 · ดีขึ้น 1/10) · Reversal A 32 +1.06/ไม้ -> 48 +0.38/ไม้
+#        ไม้ Reversal A ที่ได้เพิ่ม 16 ไม้ −0.47/ไม้ = สัญญาณสวนเทรนด์ที่เกิดตอน Pullback/Breakout (ตามเทรนด์) ถืออยู่
+#        ช่องร่วมกันไม้พวกนี้ไว้มากกว่าที่ตัวนับ "ช่องไม่ว่าง" (8 ครั้ง) บอก เพราะตอนช่องเต็มระบบไม่หาสัญญาณเลย
+#        direct 4 ไม้ −8.26 (|t| 2.59 · ไม้เดิมที่ผลเปลี่ยนเพราะมีไม้สวนเปิดซ้อน)
+#      2023-24: 203 +44.72 -> 208 +44.11R (−0.60) · ได้เพิ่ม 5 ไม้ −0.12/ไม้
 # --rev-a-market : เข้า market ทันทีที่แท่ง 1H ยืนยันปิด (ราคาปิดแท่งนั้น) แทน limit ที่ระดับยืนยัน · R:R คิดจากราคาเข้าจริง
 #   ที่มา 2026-10-20 ผู้ใช้: "อยากเข้าทันทีที่ยืนยัน" (ไม่รอราคาย่อมาทดสอบ) · tag _mkt
 #   🔻 ผล 2026-10-21 (เทียบ _c1020b*_pbdis6_reva) — **เท่าเดิมทั้งสองช่วง**
@@ -1901,7 +1911,8 @@ for n, row in enumerate(clock.to_dict("records")):
                     _ra["watch"] = None; ra_stats["ยืนยัน"] += 1
                     if "--rev-a-debug" in sys.argv:                # บันทึกอย่างเดียว
                         print(f"  [revA] {now} {_wt['dir']} lvl {_cf['lvl']:.5g} ext {_cf['ext']:.5g} leg {_cf['leg']:.5g} "
-                              f"tp {_cf['tp']:.5g} sl {_cf['sl']:.5g} rr {_cf['rr']:.2f} {_cf['why']}")
+                              f"tp {_cf['tp']:.5g} sl {_cf['sl']:.5g} rr {_cf['rr']:.2f} {_cf['why']}"
+                              f" | entry {_cf['entry']:.6g} sig {clock['time'].iloc[max(0, _wt['i_sig'] - 1)]}")
                     if _cf["ok"] and rev_a_market:
                         _ra_fill({"dir": _wt["dir"], "lvl": _cf["entry"], "sl": _cf["sl"], "tp": _cf["tp"]}, _mk=True)
                     elif _cf["ok"]:
@@ -2461,7 +2472,7 @@ if t.empty:
     print(f"{'=' * 78}")
     if log_reasons:   # ไม่มีไม้ปิดก็ยังมีเหตุผลรายรอบให้ดู (เคส GBPCHF หน้าต่าง 45 วัน) — tag เฉพาะ --tag
         _ut = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tag=")), "")
-        pd.DataFrame(reason_log).to_csv(f"replay_reasons_{symbol}{'_' + _ut if _ut else ''}.csv", index=False)
+        pd.DataFrame(reason_log).to_csv(f"results/replay_reasons_{symbol}{'_' + _ut if _ut else ''}.csv", index=False)
     sys.exit(0)
 
 # นิยาม "ชนะ" — 2026-09-20 เปลี่ยนจาก `R > 0` เป็น `R > WIN_THRESHOLD_R` ตามคำสั่งผู้ใช้
@@ -2768,23 +2779,23 @@ if log_cuts:
                  "price", "R_ตอนตัด", "ตัดไป", "เหลือ", "base_keep", "stage_keep", "กฎที่ยิง",
                  "ชม.ที่ถือมา", "final"]   # ใช้แค่ตอนไม่มี cut — ตอนมี cut คอลัมน์มาจาก dict ใน step_position
     (pd.DataFrame(cut_log) if cut_log else pd.DataFrame(columns=_cut_cols)).to_csv(
-        f"replay_cuts_{symbol}{_tag}.csv", index=False)
-    print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง replay_cuts_{symbol}{_tag}.csv")
+        f"results/replay_cuts_{symbol}{_tag}.csv", index=False)
+    print(f"  เขียน log การปิดบางส่วน {len(cut_log)} ครั้งลง results/replay_cuts_{symbol}{_tag}.csv")
 if log_reasons:
-    pd.DataFrame(reason_log).to_csv(f"replay_reasons_{symbol}{_tag}.csv", index=False)
+    pd.DataFrame(reason_log).to_csv(f"results/replay_reasons_{symbol}{_tag}.csv", index=False)
     print(f"  เขียนเหตุผลที่ไม่เข้า {len(reason_log)} บรรทัดลง replay_reasons_{symbol}{_tag}.csv")
 if log_blocked:
-    pd.DataFrame(blocked_log).to_csv(f"replay_blocked_{symbol}{_tag}.csv", index=False)
+    pd.DataFrame(blocked_log).to_csv(f"results/replay_blocked_{symbol}{_tag}.csv", index=False)
     print(f"  เขียนสัญญาณเงา {len(blocked_log)} รอบลง replay_blocked_{symbol}{_tag}.csv "
           f"(รอบที่ผ่านทุกด่านแต่ช่องไม่ว่าง)")
 if log_rr_blocked:
-    pd.DataFrame(rr_blocked_log).to_csv(f"replay_rrblocked_{symbol}{_tag}.csv", index=False)
+    pd.DataFrame(rr_blocked_log).to_csv(f"results/replay_rrblocked_{symbol}{_tag}.csv", index=False)
     print(f"  เขียนรอบที่ Reversal ติด R:R {len(rr_blocked_log)} รอบลง replay_rrblocked_{symbol}{_tag}.csv")
 if limit_rr:
-    pd.DataFrame(limit_log).to_csv(f"replay_limits_{symbol}{_tag}.csv", index=False)
+    pd.DataFrame(limit_log).to_csv(f"results/replay_limits_{symbol}{_tag}.csv", index=False)
     print(f"  เขียน limit order {len(limit_log)} ตัวลง replay_limits_{symbol}{_tag}.csv")
-t.to_csv(f"replay_trades_{symbol}{_tag}.csv", index=False)
+t.to_csv(f"results/replay_trades_{symbol}{_tag}.csv", index=False)
 if entry_limit or entry_limit_atr or entry_oco_atr:
     print(f"  --entry-limit {entry_limit:g}R/{entry_limit_atr:g}ATR: {entry_limit_stats}")
-    pd.DataFrame(entry_limit_missed).to_csv(f"replay_limitmissed_{symbol}{_tag}.csv", index=False)
-print(f"  เขียนไม้ทั้งหมดลง replay_trades_{symbol}{_tag}.csv")
+    pd.DataFrame(entry_limit_missed).to_csv(f"results/replay_limitmissed_{symbol}{_tag}.csv", index=False)
+print(f"  เขียนไม้ทั้งหมดลง results/replay_trades_{symbol}{_tag}.csv")
