@@ -144,7 +144,9 @@ scheduler.scan_symbol() เป๊ะ เพื่อให้ตัวเลข�
                  ที่อ่าน positions_get ตอนสแกน (tag _samescan · ที่มาดูตรงที่ parse ธง)
 """
 import re
+import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/ ไม่อยู่ใน sys.path ของ python ใน wine (._pth) — ให้ import เครื่องมือข้างเคียงได้
 from datetime import timedelta
 
 import pandas as pd
@@ -1907,7 +1909,8 @@ for n, row in enumerate(clock.to_dict("records")):
                     _ra["watch"] = None; ra_stats["ยืนยัน"] += 1
                     if "--rev-a-debug" in sys.argv:                # บันทึกอย่างเดียว
                         print(f"  [revA] {now} {_wt['dir']} lvl {_cf['lvl']:.5g} ext {_cf['ext']:.5g} leg {_cf['leg']:.5g} "
-                              f"tp {_cf['tp']:.5g} sl {_cf['sl']:.5g} rr {_cf['rr']:.2f} {_cf['why']}")
+                              f"tp {_cf['tp']:.5g} sl {_cf['sl']:.5g} rr {_cf['rr']:.2f} {_cf['why']}"
+                              f" | entry {_cf['entry']:.6g} sig {clock['time'].iloc[max(0, _wt['i_sig'] - 1)]}")
                     if _cf["ok"] and rev_a_market:
                         _ra_fill({"dir": _wt["dir"], "lvl": _cf["entry"], "sl": _cf["sl"], "tp": _cf["tp"]}, _mk=True)
                     elif _cf["ok"]:

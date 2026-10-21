@@ -1,7 +1,12 @@
 """
-test_fvg.py — เทสต์ fvg.find_fvgs ด้วยแท่งปลอมที่รู้คำตอบ (ไม่แตะ MT5 · รันบน Mac ได้: python3 test_fvg.py)
+test_fvg.py — เทสต์ fvg.find_fvgs ด้วยแท่งปลอมที่รู้คำตอบ (ไม่แตะ MT5 · รันบน Mac ได้: python3 tools/test_fvg.py)
 """
+import os
+import sys
+
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/ ไม่อยู่ใน sys.path ของ python ใน wine (._pth) — ให้ import เครื่องมือข้างเคียงได้
 
 import fvg
 

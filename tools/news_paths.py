@@ -6,7 +6,7 @@ replay ไม่ได้เก็บไว้ (มีแค่ entry/exit) — 
 ใช้ close ของแท่ง 1H ที่ปิดล่าสุด = ตัวเดียวกับที่ analyze_position ใช้เป็น "ราคาปัจจุบัน"
 ตอน as_of (ดู docstring ของมัน) ไม่ใช่ high/low
 
-ใช้:  ./run_wine.sh news_paths.py     ->  news_paths.csv
+ใช้:  ./run_wine.sh tools/news_paths.py     ->  news_paths.csv
 """
 import warnings; warnings.filterwarnings("ignore")
 import pandas as pd

@@ -135,23 +135,28 @@ Market Watch บน VPS ไม่ต้องทำมือ (`connect()` ใส
 ต้องรันผ่าน wine:
 
 ```bash
-./run_wine.sh backtest_replay.py BTCUSDm 730
+./run_wine.sh tools/backtest_replay.py BTCUSDm 730
 ```
 
 `python3 script.py` ตรงๆ ใช้ได้เฉพาะสคริปต์ที่อ่าน CSV อย่างเดียว ไม่ต่อ MT5
 
+**โครงไฟล์ (ตั้งแต่ 2026-10-21):** โฟลเดอร์หลัก = โค้ดระบบจริงที่ scheduler/exit_monitor ใช้ + เทสต์ของมัน (VPS เรียกตามชื่อนี้ ห้ามย้าย)
+· `tools/` = เครื่องมือ backtest/วิเคราะห์ทั้งหมด (`./run_wine.sh tools/<ชื่อ>.py` · run_wine.sh cd ไปโฟลเดอร์หลักเสมอ ไฟล์ผลจึงยังลงโฟลเดอร์หลัก)
+· tools/ ไม่อยู่ใน sys.path ของ python ใน wine (`._pth`) — เครื่องมือที่ import เครื่องมือข้างเคียงต้องมีบรรทัด `sys.path.insert(0, dirname(__file__))` (มีแล้วใน replay/exit_rules/entry_lead/blocked_value/test_fvg)
+· ไฟล์ตายที่ลบแล้ว 2026-10-21 (กู้ได้จาก git): bot.py · dashboard.py · test_dashboard.py · backtest_exit_compare.py · div_why.py · entry_structure.py · keylevel.py
+
 🔴 **ธรรมเนียมการวัดตอนนี้ (ตั้งแต่ 2026-10-16) — ค่าใหม่ต้องดีขึ้นทั้งสองช่วง**
 | ช่วง | คำสั่ง (ต่อ symbol · รัน 10 ตัวพร้อมกัน) | ใช้ทำอะไร |
 |---|---|---|
-| 2024-26 | `backtest_replay.py <sym> 730 --end=2026-09-24T00:00 --tag=<ชื่อ>1016 --rev-a` | ช่วงที่ค่าทั้งหมดถูกจูน = in-sample |
-| 2023-24 | `backtest_replay.py <sym> 300 --end=2024-09-24T00:00 --tag=<ชื่อ>2324 --rev-a` | ไม่เคยใช้จูน (MT5 1H ย้อนได้แค่ ~ปลาย 2023 · BTC/ETH บางส่วนไม่มี) |
+| 2024-26 | `tools/backtest_replay.py <sym> 730 --end=2026-09-24T00:00 --tag=<ชื่อ>1016 --rev-a` | ช่วงที่ค่าทั้งหมดถูกจูน = in-sample |
+| 2023-24 | `tools/backtest_replay.py <sym> 300 --end=2024-09-24T00:00 --tag=<ชื่อ>2324 --rev-a` | ไม่เคยใช้จูน (MT5 1H ย้อนได้แค่ ~ปลาย 2023 · BTC/ETH บางส่วนไม่มี) |
 🔴 **ต้องใส่ `--rev-a` ทุกรอบ** — replay ไม่อ่าน `config.REV_A_ENABLED` ลืมแล้วได้ base ที่ไม่มี Reversal A **โดยไม่มี error**
 (เกิดจริง 2026-10-19 ต้องลบผลทิ้งแล้วรันใหม่) · สวิตช์ทดลองติด tag ต่อท้ายชื่อไฟล์เอง base จึงไม่ถูกทับ
 · ช่วง 2023-24 มีไม้แค่ ~200 ไม้ = noise กว้าง ใช้เป็น "ต้องไม่แย่ลง" มากกว่า "พิสูจน์ว่าดีขึ้น"
 
 🔴 **รันให้เร็วขึ้น 6-7 เท่าโดยไม่แตะโค้ด: รันทุก symbol พร้อมกัน** (เครื่อง 10 core · แต่ละ
 symbol เป็นโปรเซสแยกที่อ่าน MT5 อย่างเดียวและเขียนคนละไฟล์ · MT5 รับ 7 การเชื่อมต่อพร้อมกันได้)
-`for s in ...; do ( ./run_wine.sh backtest_replay.py $s 730 > /tmp/$s.log 2>&1 ) & done; wait`
+`for s in ...; do ( ./run_wine.sh tools/backtest_replay.py $s 730 > /tmp/$s.log 2>&1 ) & done; wait`
 1.5 ชม. -> ~15 นาที  ⚠️ ต้อง redirect log แยกไฟล์ ไม่งั้น output ปนกันอ่านไม่ได้
 (วัดแล้ว 2026-09-18 ว่าเวลาหมดไปกับ `get_regime` 103 ms/ครั้ง × 4,380 ครั้ง ≈ 7.5 นาที/symbol
 — ข้างในคือ `check_key_level` 40 · `check_divergence` 24 · `check_structure` 22 ms
@@ -162,7 +167,7 @@ symbol เป็นโปรเซสแยกที่อ่าน MT5 อย�
 
 🔴 **รันจาก git worktree: โมดูลที่ import มาจาก checkout หลัก ไม่ใช่จาก worktree** (เจอ 2026-09-25)
 Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay\Desktop\-J-Trade` ไว้ใน sys.path
-และโหมด `._pth` **ไม่ใส่โฟลเดอร์ของสคริปต์ให้** => `./run_wine.sh backtest_replay.py` ใน worktree
+และโหมด `._pth` **ไม่ใส่โฟลเดอร์ของสคริปต์ให้** => `./run_wine.sh tools/backtest_replay.py` ใน worktree
 รันสคริปต์ตัวบนสุดจาก worktree แต่ `scoring`/`config`/`exit_monitor`/... มาจาก checkout หลัก
 **แก้โมดูลใน worktree แล้วรัน = วัดโค้ดเดิมโดยไม่มี error ใดๆ** (`PYTHONPATH` ใช้ไม่ได้ในโหมดนี้)
 เช็คด้วย `./run_wine.sh -c "import scoring; print(scoring.__file__)"` · ทางแก้ = ตัวเรียกที่ทำ
@@ -175,7 +180,7 @@ Python ใน wine มี `C:\Python311\python311._pth` ปัก `Z:\Users\jjay
 — logger จะติด file handler ก่อนที่เทสต์กันไว้ แล้วข้อความจากไม้ปลอมไปปน `logs/*.log` ของบอทจริง
 (เกิดแล้ว 2026-09-28 09:36:17: scheduler.log 22 บรรทัด · exit_monitor.log 2 บรรทัด — เคส "ไม่แตะ log จริง" ฟ้อง FAIL)
 
-`test_dashboard.py` รันไม่ได้ (ไม่มี pytest ทั้ง Mac และ wine) — ความสำคัญต่ำ `dashboard.py` ไม่แตะการซื้อขาย
+`test_dashboard.py` / `dashboard.py` ลบแล้ว 2026-10-21 (รันไม่ได้ · ไม่มีใครใช้ · กู้ได้จาก git)
 📜 รายละเอียดเดิม: HISTORY.md § "CLAUDE.md — test_dashboard.py"
 
 👉 สิ่งที่คุ้มกว่าถ้าจะเพิ่มเทสต์: **ผูกเครื่องมือวัดเข้ากับ output จริงของโค้ดที่มันอ่าน**

@@ -27,9 +27,11 @@
                         (XAU +5.58 · ETH +5.38 · EUR +1.20 · USDJPY −0.37 · US500 −2.05 ·
                          GBP −2.30 · BTC −3.65)
 
-ใช้: ./run_wine.sh backtest_blocked_value.py BTCUSDm [--min-age=72]
+ใช้: ./run_wine.sh tools/backtest_blocked_value.py BTCUSDm [--min-age=72]
 """
+import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/ ไม่อยู่ใน sys.path ของ python ใน wine (._pth) — ให้ import เครื่องมือข้างเคียงได้
 
 import pandas as pd
 import MetaTrader5 as mt5

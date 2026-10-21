@@ -5,13 +5,13 @@ wick_ratio_min ของ symbol ใหม่ (เช่น US500m) — left/righ
 find_sl_from_structure (4, 4, 0.22) เพราะเป็นค่าที่ใช้เทรดจริง ไม่ใช้ default ของ
 find_swing_highs/lows เฉยๆ (3, 3, 0.0) ซึ่งไม่ตรงกับพฤติกรรมจริงของระบบ
 
-ใช้: python inspect_swings.py <SYMBOL> [TIMEFRAME=4H] [BARS=400] [WICK] [VOL]
-     python inspect_swings.py US500m 4H 400
-     python inspect_swings.py UKOILm 4H 400 0.45 1.5    # ทับค่าชั่วคราว ไม่แตะ swing.py
+ใช้: python tools/inspect_swings.py <SYMBOL> [TIMEFRAME=4H] [BARS=400] [WICK] [VOL]
+     python tools/inspect_swings.py US500m 4H 400
+     python tools/inspect_swings.py UKOILm 4H 400 0.45 1.5    # ทับค่าชั่วคราว ไม่แตะ swing.py
 
 🔴 **เพิ่ม asset ใหม่ ให้รัน 2 ค่านี้เสมอแล้วเอาตารางให้ผู้ใช้เลือก** (คำสั่งผู้ใช้ 2026-09-19):
-     ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.45 1.5
-     ./run_wine.sh inspect_swings.py <SYM> 4H 400 0.5  1.6
+     ./run_wine.sh tools/inspect_swings.py <SYM> 4H 400 0.45 1.5
+     ./run_wine.sh tools/inspect_swings.py <SYM> 4H 400 0.5  1.6
    ไม่ต้องไล่จูนเองทีละค่า — ผู้ใช้จะจูนต่อจากสองตารางนี้เอง
    (ที่ต้องมี override เป็น arg เพราะการแก้ swing.py ไปมาระหว่างดู = เสี่ยงลืมค่าค้างไว้
     ในไฟล์ที่ระบบจริงอ่าน)

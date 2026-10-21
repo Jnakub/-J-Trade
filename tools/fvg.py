@@ -92,7 +92,7 @@ def fvg_bias(symbol: str, df_1d: pd.DataFrame, streak: int = BIAS_STREAK) -> tup
 
 
 if __name__ == "__main__":
-    # ดูช่องล่าสุดของ symbol จริง: ./run_wine.sh fvg.py XAUUSDm (ค่าเริ่มต้น 1D 300 แท่ง · ใส่ 4H/1H ต่อท้ายได้)
+    # ดูช่องล่าสุดของ symbol จริง: ./run_wine.sh tools/fvg.py XAUUSDm (ค่าเริ่มต้น 1D 300 แท่ง · ใส่ 4H/1H ต่อท้ายได้)
     import sys
     from mt5_connect import connect
     from bars import get_bars

@@ -5,9 +5,9 @@ backtest_replay.py เดินทีละ symbol ตามด่านจร�
 ไฟล์นี้เอา output ของ replay ทั้ง 7 ตัวมาต่อเป็นเส้นเวลาเดียว แล้วถามว่าเพดานความเสี่ยง
 รวมระดับพอร์ตจะบล็อกไม้ไหนทิ้งบ้าง และราคาของมันกี่ R
 
-    python3 backtest_portfolio.py                    # ตารางเปรียบเทียบเพดานทุกระดับ
-    python3 backtest_portfolio.py --cap=3 --group=2  # ดูค่าที่ตั้งไว้จริงใน config
-    python3 backtest_portfolio.py --daily            # MAX_DAILY_LOSS ระดับพอร์ต (replay เห็นแค่ต่อ symbol)
+    python3 tools/backtest_portfolio.py                    # ตารางเปรียบเทียบเพดานทุกระดับ
+    python3 tools/backtest_portfolio.py --cap=3 --group=2  # ดูค่าที่ตั้งไว้จริงใน config
+    python3 tools/backtest_portfolio.py --daily            # MAX_DAILY_LOSS ระดับพอร์ต (replay เห็นแค่ต่อ symbol)
 
 ⚠️ **ตัวเลข ΔR ที่ได้คือขอบบนของต้นทุน ไม่ใช่ต้นทุนจริง**
 ไฟล์นี้ไม่ได้ replay ใหม่ — มันหยิบไม้ที่ replay รายตัวสร้างไว้แล้วมาคัดออก ไม้ที่ถูก

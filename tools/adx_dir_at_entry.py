@@ -13,7 +13,7 @@ calc_adx เป็น EWM (causal) ค่าที่จุดเดิมจึ
 ⚠️ เห็นเฉพาะไม้ที่ **ผ่านด่านมาแล้ว** — ตอบได้แค่ "ในกลุ่มที่เข้าได้ ทิศแยกผลได้ไหม"
    ตอบไม่ได้ว่า "ถ้าปล่อยให้ ADX ต่ำกว่า 22 เข้าด้วยจะเป็นยังไง" (นั่นต้อง replay เต็ม)
 
-ใช้:  ./run_wine.sh adx_dir_at_entry.py
+ใช้:  ./run_wine.sh tools/adx_dir_at_entry.py
 """
 import os
 import sys

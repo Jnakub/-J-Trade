@@ -4,13 +4,15 @@
 แม้แต่ไม้เดียว** — SL/TP คิดใหม่ตามเวลานั้นจริงด้วย compute_entry(as_of=t−N, force=True)
 force=True ข้าม hard block R:R/SL ไว้ ไม่งั้นไม้ที่เข้าเร็วขึ้นบางไม้จะหายไป = เพิ่มตัวแปร
 
-ใช้: ./run_wine.sh backtest_entry_lead.py BTCUSDm [--leads=4,8,12] [--days=730]
+ใช้: ./run_wine.sh tools/backtest_entry_lead.py BTCUSDm [--leads=4,8,12] [--days=730]
 
 ผลรอบแรก (2026-09-13, 7 symbol 177 ไม้): ΔR −4.20 / −16.38 / −23.20 ที่ 4/8/12 ชม.
 ข้อสรุปและกลไกอยู่ที่ config.MAX_RUNUP_24H_R — **สายนี้ปิดแล้ว** สคริปต์เก็บไว้เพื่อวัดซ้ำ
 เมื่อโครงสร้าง TP เปลี่ยน (กลไกที่ทำให้แพ้คือ fib ยังไม่มีขาให้ฉายตอนเข้าเร็ว)
 """
+import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/ ไม่อยู่ใน sys.path ของ python ใน wine (._pth) — ให้ import เครื่องมือข้างเคียงได้
 from datetime import timedelta
 
 import pandas as pd

@@ -20,8 +20,8 @@ backtest_trend_flip_ksweep.py — ขั้นตอน E: หา k* ที่�
 เจอกับตัวเอง 2026-09-19 ตอนตั้ง HK50m: 4H ให้ FalseFlip 2.1% ส่วน 1D ให้ 0% ทุกค่า k
 (default ไม่ถูกแก้เป็น 1D เพราะจะทำให้ตัวเลขเก่าที่จดไว้ในไฟล์อื่นอ่านไม่ตรงกับคำสั่งที่เขียนไว้)
 
-ใช้: python backtest_trend_flip_ksweep.py <SYMBOL> <BARS> 1D
-     python backtest_trend_flip_ksweep.py BTCUSDm 3000 1D
+ใช้: python tools/backtest_trend_flip_ksweep.py <SYMBOL> <BARS> 1D
+     python tools/backtest_trend_flip_ksweep.py BTCUSDm 3000 1D
 """
 import sys
 

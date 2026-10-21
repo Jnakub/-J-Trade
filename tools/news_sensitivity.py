@@ -57,8 +57,8 @@
    ⚠️ สิ่งเดียวที่วัดไม่ได้คือ **slippage ของโบรกตอนข่าว** (OHLC ไม่บอก) — ไม้จริงที่โดน SL
       มีแค่ 2 ไม้ n น้อยเกินจะดู
 
-ใช้:  ./run_wine.sh news_sensitivity.py
-      ต้องมี news_paths.csv จาก ./run_wine.sh news_paths.py ก่อน
+ใช้:  ./run_wine.sh tools/news_sensitivity.py
+      ต้องมี news_paths.csv จาก ./run_wine.sh tools/news_paths.py ก่อน
       (ตัวมันเองอ่าน CSV อย่างเดียว ไม่แตะ MT5 — แต่ต้องผ่าน wine เพราะ `from config import
        SYMBOLS` ลากเอา MetaTrader5 มาด้วย และ config คือแหล่งเดียวของ SYMBOLS ห้าม glob
        ไฟล์ replay_trades_*.csv แทน — ของ symbol ที่ถอดออกแล้วยังค้างอยู่)

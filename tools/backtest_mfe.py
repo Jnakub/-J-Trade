@@ -16,9 +16,9 @@ backtest_mfe.py — วัด "กำไรสูงสุดที่เคย�
 เทียบกันได้ไม่ต้องแก้ และ MFE นับจากราคาเต็มไม้เสมอ ไม่ลดตามการปิดบางส่วน = "ถ้าถือเต็มไม้ไว้
 เฉยๆ จะเคยได้เท่าไหร่" ซึ่งเป็นเพดานที่กฎ exit ควรถูกวัดเทียบ
 
-ใช้:  ./run_wine.sh backtest_mfe.py                 # ทุก symbol ใน config.SYMBOLS
-      ./run_wine.sh backtest_mfe.py BTCUSDm XAUUSDm # เฉพาะบางตัว
-      ./run_wine.sh backtest_mfe.py --tag=_slotper  # อ่านไฟล์ผลรอบที่ติด tag แทนรอบปกติ
+ใช้:  ./run_wine.sh tools/backtest_mfe.py                 # ทุก symbol ใน config.SYMBOLS
+      ./run_wine.sh tools/backtest_mfe.py BTCUSDm XAUUSDm # เฉพาะบางตัว
+      ./run_wine.sh tools/backtest_mfe.py --tag=_slotper  # อ่านไฟล์ผลรอบที่ติด tag แทนรอบปกติ
 """
 import os
 import sys

@@ -23,7 +23,7 @@ entry_features.py — คัดกรอง "ตัวแปร ณ ตอนเ
    -> ด่านต้องตัด **dead:good >= 1.09:1** ถึงจะเสมอตัว ขณะที่อัตราส่วนฐานคือ 0.57:1
    = ต้องเก่งกว่าการสุ่ม **1.93 เท่า**  ตัวไหนไม่ถึงเส้นนี้ไม่ต้องเอาไปรัน replay
 
-ใช้:  ./run_wine.sh entry_features.py          (ต้องมี mfe_trades.csv จาก backtest_mfe.py ก่อน)
+ใช้:  ./run_wine.sh tools/entry_features.py          (ต้องมี mfe_trades.csv จาก backtest_mfe.py ก่อน)
 """
 import sys
 

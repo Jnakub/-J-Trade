@@ -21,8 +21,8 @@ MIN_RR_HARD_BLOCK = เปลี่ยนชุดไม้ ลัดด้ว�
    หายไป และไม่หัก spread รอบสอง ตัวเลขจริงต้อง replay เต็มเท่านั้น ที่นี่ใช้ตัดสินแค่ว่า
    "คุ้มจะไปรัน replay ไหม"
 
-ใช้:  ./run_wine.sh tp_headroom.py            # MULT=2.0 (ค่าที่เคยทดลอง)
-      ./run_wine.sh tp_headroom.py --mult=3
+ใช้:  ./run_wine.sh tools/tp_headroom.py            # MULT=2.0 (ค่าที่เคยทดลอง)
+      ./run_wine.sh tools/tp_headroom.py --mult=3
 """
 import os
 import sys

@@ -2800,3 +2800,4 @@ gap ที่เกิน 0.5R ทุกครั้งมีตลาดปิ�
 - 2026-10-21 CLAUDE.md: base ปัจจุบันเป็นไฟล์ market (548 +217.47 / 203 +44.72 · เพิ่มคอลัมน์ R ถ่วง 1%) · แถว Reversal A · ชี้ skill find-trade-asset · เตือนว่าตาราง 3e ล้าสมัย
 - 2026-10-21 จัด CLAUDE.md รอบสอง: เพิ่มสารบัญ · ย้ายบล็อก "รันพร้อมกัน" ไปหัวข้อรันยังไง · WR ไปหัวข้อกับดัก · ย้ายเคสตัวอย่าง/ตาราง 3e ทุกรุ่น/รายละเอียดกฎข่าว B มาที่นี่
 - 2026-10-21 จัดโค้ดระบบจริง 7 ไฟล์: ย้าย comment ประวัติ ~1,430 บรรทัดมาที่นี่ (exit_monitor · regime_check · scheduler · scoring · swing · bars · reversal) · AST ทุกไฟล์เท่าเดิม
+- 2026-10-21 โครงไฟล์: ย้ายเครื่องมือ 17 ไฟล์ไป tools/ · ลบไฟล์ตาย 7 ไฟล์ (bot · dashboard · test_dashboard · backtest_exit_compare · div_why · entry_structure · keylevel — ผล keylevel อยู่ memory key-level-has-no-edge)
