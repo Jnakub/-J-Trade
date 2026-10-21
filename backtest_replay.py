@@ -930,6 +930,18 @@ _ra_cfg = {k: float(next((a.split("=")[1] for a in sys.argv if a.startswith(f"--
 #     · ไม้ใหม่ 7 ไม้ −1.70 (ชนะ 2/7) = ชุดเดียวกับที่หลุดเข้ามาตอน tpf 0.618 · Breakout ถูกเบียด 1 ไม้ −1.42
 #     => ทุกการคลายด่าน R:R (TP ไกล / เข้าลึก) ดึงไม้ขาเดิมสั้นชุดเดิมเข้ามา
 rev_a_own_slot = "--rev-a-own-slot" in sys.argv
+# --rev-a-market : เข้า market ทันทีที่แท่ง 1H ยืนยันปิด (ราคาปิดแท่งนั้น) แทน limit ที่ระดับยืนยัน · R:R คิดจากราคาเข้าจริง
+#   ที่มา 2026-10-20 ผู้ใช้: "อยากเข้าทันทีที่ยืนยัน" (ไม่รอราคาย่อมาทดสอบ) · tag _mkt
+#   🔻 ผล 2026-10-21 (เทียบ _c1020b*_pbdis6_reva) — **เท่าเดิมทั้งสองช่วง**
+#      2024-26: 549 +219.36 -> 548 +217.47R (−1.88 · churn |t| 0.14 · 4/10) · Reversal 35 +1.00/ไม้ -> 32 +1.06/ไม้
+#        (R:R คิดจากราคาปิดแท่งยืนยัน ห่าง SL กว่า limit -> ด่าน R:R ตัดเพิ่ม 207 -> 238 ครั้ง · แต่ไม่มี limit หมดอายุ 9 ครั้ง)
+#      2023-24: 204 +45.11 -> 203 +44.72R (−0.39 · |t| 0.05) · Reversal 13 +0.21 -> 12 +0.20/ไม้
+#   ผู้ใช้ "เทรนด์กลับทั้งหมด" = --rev-a-tpx=1 (TP ที่ต้นขาเดิม · ด่าน R:R ยังคิดที่ 0.5) — **แย่ลงทั้งสองช่วง**
+#      limit + TP 1.0: 2024-26 −8.72 (direct 15 ไม้ −9.66 |t| 1.19 · Reversal +1.00 -> +0.67/ไม้ · TP 18 -> 5 ไม้) · 2023-24 −4.41
+#      market + TP 1.0: 2024-26 −17.12 · 2023-24 −5.90
+#      Bias 1D ไม่เคยพลิกตามระหว่างถือไม้ Reversal A เลย (0/48 · พลิก median 24-65 วันหลังเข้า · ไม้ TP ถือ 4-7 วัน)
+#      = ไม้ที่ชนะคือเด้งครึ่งขา ไม่ใช่เทรนด์กลับ (ส่วนเทรนด์กลับจริง Scoring/Pullback เก็บหลัง Bias พลิก)
+rev_a_market = "--rev-a-market" in sys.argv
 # ต้นขาแบบ swing (เดิมคือธง --rev-a-swing · default ตั้งแต่ 2026-10-15 ดูข้างล่าง): ต้นขาเดิมจาก swing จริงบน 4H แทน high/low สุดขั้วในหน้าต่าง 120 แท่ง 1H
 #   ต้นขา (Long) = จุดเริ่มของชุด lower high: ไล่ swing high ก่อนก้นของ divergence (l2) ย้อนหลังทีละตัว ตราบที่ตัวก่อนหน้า
 #   สูงกว่าตัวถัดมา -> ตัวสูงสุดของชุด = จุดที่ขาลงเริ่ม (Short กลับด้าน: ชุด higher low) · ไม่มีตัวเลขให้เลือก · ไม่ติดขอบหน้าต่าง
@@ -1830,38 +1842,42 @@ for n, row in enumerate(clock.to_dict("records")):
     if rev_a:
         _cw, _bk, _rw = int(_ra_cfg["cw"]), int(_ra_cfg["bk"]), int(_ra_cfg["rw"])
         _ras = "RevA" if rev_a_own_slot else slot_of("Reversal")
+        def _ra_fill(_p, _mk=False):
+            """limit ถูกเติม (หรือ --rev-a-market เข้าที่ราคาปิดแท่งยืนยัน = ไม่เช็ค SL ในแท่งเดียวกัน)"""
+            _lg = _p["dir"] == "Long"
+            _cd = COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)
+            if (_ras in _occupied
+                    or daily_r.get(now.date(), 0.0) <= -max_daily_loss_r
+                    or (_cd and last_close_time is not None and (now - last_close_time) < timedelta(hours=_cd))
+                    or (tp_cd and last_tp_close_time is not None
+                        and (now - last_tp_close_time) < timedelta(hours=tp_cd))):
+                ra_stats["เติมแต่ช่อง/ด่านไม่ว่าง"] += 1
+            else:
+                _w = clock.iloc[max(0, n - 40):n + 1]
+                _atr = float(_calc_atr_ra(_w, 14).iloc[-1])
+                _sl, _tp, _e = _p["sl"], _p["tp"], _p["lvl"]
+                if tp_cap_atr and _atr:
+                    _tp = min(_tp, _e + _atr * tp_cap_atr) if _lg else max(_tp, _e - _atr * tp_cap_atr)
+                _pos = {"time": now, "direction": _p["dir"], "entry": _e, "sl": _sl, "sl0": _sl,
+                        "tp": _tp, "tp0": _tp, "tp_fib": _p["tp"], "strategy": "Reversal", "regime": "REV-A",
+                        "booked": 0.0, "rem": 1.0, "cuts": 0,
+                        "pinned_swing": (_sl + scoring.EXEC_SL_ATR_MULT * _atr) if _lg
+                        else (_sl - scoring.EXEC_SL_ATR_MULT * _atr),
+                        "pinned_atr_entry": _atr}
+                ra_stats["เข้าไม้"] += 1
+                _occupied.add(_ras)
+                if not _mk and ((bar["low"] <= _sl) if _lg else (bar["high"] >= _sl)):
+                    ra_stats["เติมแล้วโดน SL แท่งเดียวกัน"] += 1
+                    trades.append(close_pos(_pos, _ras, now, -1.0, "SL"))
+                else:
+                    positions[_ras] = _pos
         if _ra["pend"] is not None:
             _p = _ra["pend"]; _lg = _p["dir"] == "Long"
             if n > _p["exp"]:
                 _ra["pend"] = None; ra_stats["limit หมดอายุ"] += 1
             elif (bar["low"] <= _p["lvl"]) if _lg else (bar["high"] >= _p["lvl"]):
                 _ra["pend"] = None
-                _cd = COOLDOWN_HOURS_BY_SYMBOL.get(symbol, 0)
-                if (_ras in _occupied
-                        or daily_r.get(now.date(), 0.0) <= -max_daily_loss_r
-                        or (_cd and last_close_time is not None and (now - last_close_time) < timedelta(hours=_cd))
-                        or (tp_cd and last_tp_close_time is not None
-                            and (now - last_tp_close_time) < timedelta(hours=tp_cd))):
-                    ra_stats["เติมแต่ช่อง/ด่านไม่ว่าง"] += 1
-                else:
-                    _w = clock.iloc[max(0, n - 40):n + 1]
-                    _atr = float(_calc_atr_ra(_w, 14).iloc[-1])
-                    _sl, _tp, _e = _p["sl"], _p["tp"], _p["lvl"]
-                    if tp_cap_atr and _atr:
-                        _tp = min(_tp, _e + _atr * tp_cap_atr) if _lg else max(_tp, _e - _atr * tp_cap_atr)
-                    _pos = {"time": now, "direction": _p["dir"], "entry": _e, "sl": _sl, "sl0": _sl,
-                            "tp": _tp, "tp0": _tp, "tp_fib": _p["tp"], "strategy": "Reversal", "regime": "REV-A",
-                            "booked": 0.0, "rem": 1.0, "cuts": 0,
-                            "pinned_swing": (_sl + scoring.EXEC_SL_ATR_MULT * _atr) if _lg
-                            else (_sl - scoring.EXEC_SL_ATR_MULT * _atr),
-                            "pinned_atr_entry": _atr}
-                    ra_stats["เข้าไม้"] += 1
-                    _occupied.add(_ras)
-                    if (bar["low"] <= _sl) if _lg else (bar["high"] >= _sl):
-                        ra_stats["เติมแล้วโดน SL แท่งเดียวกัน"] += 1
-                        trades.append(close_pos(_pos, _ras, now, -1.0, "SL"))
-                    else:
-                        positions[_ras] = _pos
+                _ra_fill(_p)
         if _ra["watch"] is not None and _ra["pend"] is None:
             _wt = _ra["watch"]; _lg = _wt["dir"] == "Long"
             if n > _wt["exp"]:
@@ -1869,13 +1885,16 @@ for n, row in enumerate(clock.to_dict("records")):
             elif n >= _wt["i_sig"]:
                 _cf = rev_a_mod.confirm(clock, n, _wt["i_sig"], _wt["dir"], _wt.get("leg"),   # leg None = --rev-a-window
                                     tp_fib=_ra_cfg["tpf"], min_rr=_ra_cfg["rr"], deep=_ra_cfg["deep"],
-                                    tp_exec=_ra_cfg["tpx"], bk=_bk)
+                                    tp_exec=_ra_cfg["tpx"], bk=_bk,
+                                    entry_px=float(bar["close"]) if rev_a_market else None)
                 if _cf is not None:
                     _ra["watch"] = None; ra_stats["ยืนยัน"] += 1
                     if "--rev-a-debug" in sys.argv:                # บันทึกอย่างเดียว
                         print(f"  [revA] {now} {_wt['dir']} lvl {_cf['lvl']:.5g} ext {_cf['ext']:.5g} leg {_cf['leg']:.5g} "
                               f"tp {_cf['tp']:.5g} sl {_cf['sl']:.5g} rr {_cf['rr']:.2f} {_cf['why']}")
-                    if _cf["ok"]:
+                    if _cf["ok"] and rev_a_market:
+                        _ra_fill({"dir": _wt["dir"], "lvl": _cf["entry"], "sl": _cf["sl"], "tp": _cf["tp"]}, _mk=True)
+                    elif _cf["ok"]:
                         _ra["pend"] = {"dir": _wt["dir"], "lvl": _cf["entry"], "sl": _cf["sl"], "tp": _cf["tp"],
                                        "exp": n + _rw}
                     else:
@@ -2688,6 +2707,8 @@ if pullback_no_div:
 if rev_a:
     _tag += "_reva" + "".join(f"{k}{_ra_cfg[k]:g}" for k, d in (("cw", 48), ("bk", 12), ("rw", 24), ("tpf", 0.5), ("rr", 1.5), ("deep", 0), ("tpx", 0))
                               if _ra_cfg[k] != d)
+    if rev_a_market:
+        _tag += "_mkt"
     if rev_a_own_slot:
         _tag += "_ownslot"
     if not rev_a_swing:

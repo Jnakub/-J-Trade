@@ -79,12 +79,14 @@ def swing_leg(regime_info: dict, symbol: str, long_: bool) -> float | None:
 
 def confirm(h1: pd.DataFrame, i_conf: int, i_sig: int, direction: str, leg: float | None,
             tp_fib: float = REV_A_TP_FIB, min_rr: float = REV_A_MIN_RR,
-            deep: float = 0.0, tp_exec: float = 0.0, bk: int | None = None) -> dict | None:
+            deep: float = 0.0, tp_exec: float = 0.0, bk: int | None = None,
+            entry_px: float | None = None) -> dict | None:
     """เช็คแท่ง 1H ที่ปิดแล้ว index i_conf ว่ายืนยันการกลับตัวไหม — None = ยังไม่ยืนยัน
     h1: แท่ง 1H เรียงเวลา (คอลัมน์ high/low/close · index 0..n) · i_sig = แท่งแรกที่นับว่า "หลังสัญญาณ"
     leg: ต้นขาจาก swing_leg · None = แบบหน้าต่าง LEG_WINDOW_BARS (replay --rev-a-window)
     คืน dict: ok (ผ่าน R:R + ระดับถูกฝั่ง) · entry (ราคา limit) · sl · tp · rr · lvl · ext · leg
-    deep / tp_exec / bk มีไว้ให้ replay (--rev-a-deep / --rev-a-tpx / --rev-a-bk) · ระบบจริงใช้ค่า default"""
+    deep / tp_exec / bk มีไว้ให้ replay (--rev-a-deep / --rev-a-tpx / --rev-a-bk) · ระบบจริงใช้ค่า default
+    entry_px: เข้า market ที่ราคานี้แทน limit ที่ระดับยืนยัน (replay --rev-a-market · R:R คิดจากราคานี้)"""
     bk = bk or REV_A_BREAK_BARS
     if i_conf < bk:
         return None
@@ -104,7 +106,8 @@ def confirm(h1: pd.DataFrame, i_conf: int, i_sig: int, direction: str, leg: floa
     sl = ext - REV_A_SL_BUFFER * d if long_ else ext + REV_A_SL_BUFFER * d
     tp = ext + tp_fib * (leg - ext) if long_ else ext - tp_fib * (ext - leg)
     ok = d > 0 and ((lvl > ext and tp > lvl) if long_ else (lvl < ext and tp < lvl))
-    e = lvl - deep * (lvl - ext)
+    e = entry_px if entry_px is not None else lvl - deep * (lvl - ext)
+    ok = ok and ((tp > e > sl) if long_ else (tp < e < sl))
     rr = abs(tp - e) / abs(e - sl) if ok else 0.0
     out = {"lvl": lvl, "ext": ext, "leg": leg, "entry": e, "sl": sl, "tp": tp, "rr": rr}
     if not ok or rr < min_rr:
