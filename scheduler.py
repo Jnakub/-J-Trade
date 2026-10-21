@@ -29,7 +29,7 @@ from config import (
     BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
     PULLBACK_ENABLED, REVERSAL_ENABLED, PULLBACK_ADX_RULE, PULLBACK_MIN_RANGE_POS, PULLBACK_MIN_DISAGREE_BARS,
     PULLBACK_TP_FIB_RATIO, PULLBACK_FALLBACK_RR, PULLBACK_MIN_RR,
-    REV_A_ENABLED, REV_A_CONFIRM_HOURS, REV_A_LIMIT_HOURS, REV_A_BREAK_BARS, REV_A_ENTRY, REV_A_RISK_PER_TRADE,
+    REV_A_ENABLED, REV_A_CONFIRM_HOURS, REV_A_LIMIT_HOURS, REV_A_BREAK_BARS, REV_A_ENTRY, REV_A_RISK_PER_TRADE, REV_A_STRATEGY,
 )
 from mt5_connect import connect, get_account_balance, mt5_now, is_demo_account
 from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias, EXEC_SL_ATR_MULT
@@ -227,7 +227,7 @@ def rev_a_cancel_pending(symbol: str, reason: str) -> None:
     if cancel_pending(p["ticket"]):
         journal.remove_unfilled(p["ticket"])
         _rev_a_set(symbol, None)
-        print(f"  [{symbol}] Reversal A: ยกเลิก limit #{p['ticket']} — {reason}")
+        print(f"  [{symbol}] Retracement: ยกเลิก limit #{p['ticket']} — {reason}")
         log.info(f"[{symbol}] rev-a cancel #{p['ticket']} {reason}")
 
 
@@ -258,7 +258,7 @@ def rev_a_step(symbol: str, occupied: set) -> None:
         return
     h1 = get_ohlcv(symbol, MT5_TIMEFRAMES["1H"], bars=REV_A_CONFIRM_HOURS + 120)
     if h1 is None or len(h1) < REV_A_CONFIRM_HOURS + 60:
-        print(f"  [{symbol}] Reversal A: ดึงแท่ง 1H ไม่พอ — ข้ามรอบนี้")
+        print(f"  [{symbol}] Retracement: ดึงแท่ง 1H ไม่พอ — ข้ามรอบนี้")
         return
     h1 = h1.iloc[:-1].reset_index(drop=True)                 # ตัดแท่งที่ยังไม่ปิด
     last_t = h1["time"].iloc[-1]
@@ -267,16 +267,16 @@ def rev_a_step(symbol: str, occupied: set) -> None:
     p = st.get("pend")
     if p:
         if mt5.positions_get(ticket=p["ticket"]):
-            print(f"  [{symbol}] Reversal A: limit #{p['ticket']} ถูกเติมแล้ว ({p['direction']} @ {p['entry']})")
+            print(f"  [{symbol}] Retracement: limit #{p['ticket']} ถูกเติมแล้ว ({p['direction']} @ {p['entry']})")
             notify.notify_order_opened(symbol, p["direction"], p["entry"], p["sl"], p["tp"], p["lot"],
-                                       p["ticket"], is_demo=is_demo_account(), strategy="Reversal A (limit)")
+                                       p["ticket"], is_demo=is_demo_account(), strategy=f"{REV_A_STRATEGY} (limit)")
             _rev_a_set(symbol, None)
             st = {}
         elif not mt5.orders_get(ticket=p["ticket"]):
             # ไม่มีทั้ง order และ position: เติมแล้วปิดไปในชั่วโมงเดียว (journal reconcile จัดการเอง) หรือถูกลบจากที่อื่น
             if not mt5.history_deals_get(position=p["ticket"]):
                 journal.remove_unfilled(p["ticket"])
-            print(f"  [{symbol}] Reversal A: limit #{p['ticket']} ไม่ค้างแล้ว — ล้างสถานะ")
+            print(f"  [{symbol}] Retracement: limit #{p['ticket']} ไม่ค้างแล้ว — ล้างสถานะ")
             _rev_a_set(symbol, None)
             st = {}
         else:
@@ -294,7 +294,7 @@ def rev_a_step(symbol: str, occupied: set) -> None:
                            _parse_iso(w.get("checked_to")))
         idx = h1.index[h1["time"] == sig_t] if sig_t is not None else []
         if exp is None or chk is None or last_t > exp or not len(idx):
-            print(f"  [{symbol}] Reversal A: ไม่ยืนยันภายใน {REV_A_CONFIRM_HOURS} ชม. — ทิ้งสัญญาณ {w.get('direction')}")
+            print(f"  [{symbol}] Retracement: ไม่ยืนยันภายใน {REV_A_CONFIRM_HOURS} ชม. — ทิ้งสัญญาณ {w.get('direction')}")
             w = None
         elif last_t == sig_t:
             return                                           # สัญญาณเพิ่งเกิดรอบนี้ — เริ่มเช็คแท่งถัดไป (replay i_sig = n+1)
@@ -304,7 +304,7 @@ def rev_a_step(symbol: str, occupied: set) -> None:
             # replay จะยืนยันที่แท่งนั้น (ระดับ/limit คนละชุด) -> ทิ้งสัญญาณ ไม่ตั้งย้อนหลัง
             skipped = [j for j in range(i_sig, i_conf) if h1["time"].iloc[j] > chk]
             if any(rev_a.confirm(h1, j, i_sig, w["direction"], w.get("leg")) is not None for j in skipped):
-                print(f"  [{symbol}] Reversal A: ยืนยันไปแล้วระหว่างที่สแกนหลุด — ทิ้งสัญญาณ {w['direction']}")
+                print(f"  [{symbol}] Retracement: ยืนยันไปแล้วระหว่างที่สแกนหลุด — ทิ้งสัญญาณ {w['direction']}")
                 w = None
             else:
                 px = None
@@ -312,7 +312,7 @@ def rev_a_step(symbol: str, occupied: set) -> None:
                     tick = mt5.symbol_info_tick(symbol)
                     px = (tick.ask if w["direction"] == "Long" else tick.bid) if tick else None
                     if not px:
-                        print(f"  [{symbol}] Reversal A: อ่านราคาตลาดไม่ได้ — ข้ามรอบนี้ (ยังเฝ้าอยู่)")
+                        print(f"  [{symbol}] Retracement: อ่านราคาตลาดไม่ได้ — ข้ามรอบนี้ (ยังเฝ้าอยู่)")
                         return
                 cf = rev_a.confirm(h1, i_conf, i_sig, w["direction"], w.get("leg"), entry_px=px)
                 if cf is None:
@@ -322,7 +322,7 @@ def rev_a_step(symbol: str, occupied: set) -> None:
                 if cf["ok"]:
                     rev_a_place(symbol, w["direction"], cf, h1, last_t, occupied)
                     return
-                print(f"  [{symbol}] Reversal A {w['direction']}: ยืนยันแล้วแต่ไม่เข้า — {cf['why']} "
+                print(f"  [{symbol}] Retracement {w['direction']}: ยืนยันแล้วแต่ไม่เข้า — {cf['why']} "
                       f"(ระดับ {cf['lvl']:.5f} · ก้น {cf['ext']:.5f} · ต้นขา {cf['leg']:.5f} · TP {cf['tp']:.5f})")
                 w = None
         _rev_a_set(symbol, None)                             # สัญญาณจบ -> หาสัญญาณใหม่ต่อในรอบเดียวกันได้ (ตรง replay)
@@ -336,12 +336,12 @@ def rev_a_step(symbol: str, occupied: set) -> None:
             return
         leg = rev_a.swing_leg(regime_info, symbol, direction == "Long")
         if leg is None:
-            print(f"  [{symbol}] Reversal A {direction}: {why} แต่หาต้นขา (swing) ไม่ได้ — ทิ้ง")
+            print(f"  [{symbol}] Retracement {direction}: {why} แต่หาต้นขา (swing) ไม่ได้ — ทิ้ง")
             return
         _rev_a_set(symbol, {"watch": {"direction": direction, "sig_bar": last_t.isoformat(),
                                       "exp_bar": (last_t + timedelta(hours=REV_A_CONFIRM_HOURS)).isoformat(),
                                       "checked_to": last_t.isoformat(), "leg": leg}})
-        print(f"  [{symbol}] Reversal A: สัญญาณ {direction} — {why} · ต้นขา {leg:.5f} · "
+        print(f"  [{symbol}] Retracement: สัญญาณ {direction} — {why} · ต้นขา {leg:.5f} · "
               f"รอปิดทะลุ {REV_A_BREAK_BARS} แท่ง 1H ภายใน {REV_A_CONFIRM_HOURS} ชม.")
         log.info(f"[{symbol}] rev-a signal {direction} leg={leg}")
 
@@ -357,7 +357,7 @@ def rev_a_place(symbol: str, direction: str, cf: dict, h1, last_t, occupied: set
         balance = get_account_balance()
         ok, why = check_portfolio_risk(symbol, balance)
         if not ok:
-            print(f"  [{symbol}] Reversal A: ไม่ตั้ง limit — {why}")
+            print(f"  [{symbol}] Retracement: ไม่ตั้ง limit — {why}")
             return
         entry, sl, tp = cf["entry"], cf["sl"], cf["tp"]
         atr = float(calc_atr(h1.iloc[-41:], 14).iloc[-1])   # ATR1H ชุดเดียวกับ replay (41 แท่ง · period 14)
@@ -368,17 +368,17 @@ def rev_a_place(symbol: str, direction: str, cf: dict, h1, last_t, occupied: set
         ticket = place_limit_order(symbol, direction, entry, sl, tp, lot)
         pin = sl + EXEC_SL_ATR_MULT * atr if direction == "Long" else sl - EXEC_SL_ATR_MULT * atr
         journal.log_trade_open(symbol, direction, entry, sl, tp, lot, ticket,
-                               pinned_swing=pin, pinned_atr_entry=atr, strategy="Reversal")
+                               pinned_swing=pin, pinned_atr_entry=atr, strategy=REV_A_STRATEGY)
         _rev_a_set(symbol, {"pend": {"ticket": ticket, "direction": direction, "entry": entry, "sl": sl,
                                      "tp": tp, "lot": lot,
                                      "exp_bar": (last_t + timedelta(hours=REV_A_LIMIT_HOURS)).isoformat()}})
-        print(f"  [{symbol}] Reversal A {direction}: ตั้ง limit #{ticket} @ {entry:.5f}  SL {sl:.5f}  "
+        print(f"  [{symbol}] Retracement {direction}: ตั้ง limit #{ticket} @ {entry:.5f}  SL {sl:.5f}  "
               f"TP {tp:.5f}  R:R {cf['rr']:.2f}  lot {lot}  (ค้างไม่เกิน {REV_A_LIMIT_HOURS} ชม.)")
-        notify.send(f"🟠 <b>Reversal A ตั้ง limit</b>\n{symbol}  {direction}\nLimit: {entry:,.5f}\n"
+        notify.send(f"🟠 <b>{REV_A_STRATEGY} ตั้ง limit</b>\n{symbol}  {direction}\nLimit: {entry:,.5f}\n"
                     f"SL: {sl:,.5f}   TP: {tp:,.5f}\nR:R: {cf['rr']:.2f}   Lot: {lot}\nOrder: #{ticket}")
         log.info(f"[{symbol}] rev-a limit #{ticket} {direction} @ {entry} sl={sl} tp={tp} lot={lot}")
     except Exception as exc:
-        print(f"  [{symbol}] Reversal A: ตั้ง limit ไม่สำเร็จ — {exc}")
+        print(f"  [{symbol}] Retracement: ตั้ง limit ไม่สำเร็จ — {exc}")
         log.error(f"[{symbol}] rev-a place ERROR", exc_info=True)
 
 
@@ -388,12 +388,12 @@ def _rev_a_market(symbol: str, direction: str, cf: dict, h1, occupied: set) -> N
     try:
         why = _rev_a_blocked(symbol, occupied)
         if why:
-            print(f"  [{symbol}] Reversal A {direction}: ยืนยันแล้วแต่ไม่เข้า — {why}")
+            print(f"  [{symbol}] Retracement {direction}: ยืนยันแล้วแต่ไม่เข้า — {why}")
             return
         balance = get_account_balance()
         ok, why = check_portfolio_risk(symbol, balance)
         if not ok:
-            print(f"  [{symbol}] Reversal A {direction}: ยืนยันแล้วแต่ไม่เข้า — {why}")
+            print(f"  [{symbol}] Retracement {direction}: ยืนยันแล้วแต่ไม่เข้า — {why}")
             return
         entry, sl, tp = cf["entry"], cf["sl"], cf["tp"]
         atr = float(calc_atr(h1.iloc[-41:], 14).iloc[-1])
@@ -402,15 +402,15 @@ def _rev_a_market(symbol: str, direction: str, cf: dict, h1, occupied: set) -> N
         lot, _ = calculate_lot_size(symbol, entry, sl, balance, REV_A_RISK_PER_TRADE)
         lot = clamp_lot(symbol, lot)
         pin = sl + EXEC_SL_ATR_MULT * atr if direction == "Long" else sl - EXEC_SL_ATR_MULT * atr
-        print(f"  [{symbol}] Reversal A {direction}: ยืนยันแล้ว -> market @ ~{entry:.5f}  SL {sl:.5f}  "
+        print(f"  [{symbol}] Retracement {direction}: ยืนยันแล้ว -> market @ ~{entry:.5f}  SL {sl:.5f}  "
               f"TP {tp:.5f}  R:R {cf['rr']:.2f}  lot {lot}")
-        ticket = place_order(symbol, direction, entry, sl, tp, lot, strategy="Reversal",
-                             pinned_swing=pin, pinned_atr_entry=atr, label="Reversal A")
+        ticket = place_order(symbol, direction, entry, sl, tp, lot, strategy=REV_A_STRATEGY,
+                             pinned_swing=pin, pinned_atr_entry=atr)
         log.info(f"[{symbol}] rev-a market #{ticket} {direction} @ {entry} sl={sl} tp={tp} lot={lot}")
         if ticket and isinstance(occupied, set):
             occupied.add(slot_of("Reversal"))          # รอบนี้ห้ามกลยุทธ์อื่นเข้าช่อง Reversal ซ้ำ (replay: _occupied.add)
     except Exception as exc:
-        print(f"  [{symbol}] Reversal A: ส่ง market ไม่สำเร็จ — {exc}")
+        print(f"  [{symbol}] Retracement: ส่ง market ไม่สำเร็จ — {exc}")
         log.error(f"[{symbol}] rev-a market ERROR", exc_info=True)
 print = tee_print(log)   # เขียนทุกอย่างที่ print ลง logs/scheduler.log ด้วย (ดู logger_setup.py)
 
@@ -606,8 +606,8 @@ def scan_symbol(symbol: str) -> None:
     try:
         rev_a_step(symbol, occupied)
     except Exception as exc:
-        print(f"  [{symbol}] Reversal A ERROR — {exc}")
-        log.error(f"[{symbol}] Reversal A ERROR", exc_info=True)
+        print(f"  [{symbol}] Retracement ERROR — {exc}")
+        log.error(f"[{symbol}] Retracement ERROR", exc_info=True)
 
     if positions:
         if not SLOT_PER_STRATEGY:
@@ -996,7 +996,7 @@ def scan_symbol(symbol: str) -> None:
             # ไม้นี้ครองช่อง Reversal แล้ว -> limit ของแบบ A ที่ค้างจะเติมไม่ได้ (replay: "เติมแต่ช่องไม่ว่าง")
             rev_a_cancel_pending(symbol, f"ช่อง Reversal ถูกไม้ {strategy} #{ticket} ใช้แล้ว")
         if TP_TO_ENTRY_ON_OPPOSITE and ticket and strategy != "Sideway" \
-                and (strategy not in ("Reversal", "Pullback") or TP_TO_ENTRY_REVERSAL_TRIGGERS):   # ดู config (Pullback ทำตาม Reversal = ตอนวัด)
+                and (strategy not in ("Reversal", "Pullback", REV_A_STRATEGY) or TP_TO_ENTRY_REVERSAL_TRIGGERS):   # ดู config (Pullback ทำตาม Reversal = ตอนวัด)
             _tp_to_entry_on_opposite(symbol, direction, ticket)
 
     except ValueError as exc:

@@ -422,9 +422,9 @@ def check_trend_invalidation(symbol: str, direction: str, entry_time: pd.Timesta
     """คืน {"active", "consec_break", "keep_pct", "reason"} — keep_pct = % lot ที่ควรเหลือ
     (100 = ปกติ, 75/50 = เตือนภัยบางส่วน, 0 = invalidated เต็มรูปแบบ)
     strategy == 'Reversal' -> ข้าม check นี้ทั้งหมด (active=False เสมอ ไม่มีทาง invalidate)"""
-    if strategy == "Reversal":
+    if strategy in ("Reversal", _cfg.REV_A_STRATEGY):      # Retracement = Reversal A เปลี่ยนชื่อ 2026-10-21
         return {"active": False, "consec_break": 0, "keep_pct": 100,
-                "reason": "ข้าม — ไม้ Reversal เข้าสวน trend โดยดีไซน์อยู่แล้ว"}
+                "reason": f"ข้าม — ไม้ {strategy} เข้าสวน trend โดยดีไซน์อยู่แล้ว"}
     if strategy == "Sideway":
         return {"active": False, "consec_break": 0, "keep_pct": 100,
                 "reason": "ข้าม — ไม้ Sideway ไม่ได้อิง trend 1D (ออกเมื่อ ADX ≥ SIDEWAY_EXIT_ADX แทน)"}

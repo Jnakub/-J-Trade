@@ -684,7 +684,8 @@ def slot_of(strategy: str) -> str:
     if strategy == "Sideway":
         return "Scoring"
     # 2026-10-13: Pullback (เดิมคือ "Reversal ใหม่") ใช้ช่อง Reversal ด้วย — ตรงกับตอนวัดใน replay
-    return "Reversal" if strategy in ("Breakout", "Pullback") else strategy
+    # 2026-10-21: Retracement (Reversal A เปลี่ยนชื่อ) ใช้ช่อง Reversal เหมือนเดิม
+    return "Reversal" if strategy in ("Breakout", "Pullback", REV_A_STRATEGY) else strategy
 
 
 
@@ -809,7 +810,7 @@ PULLBACK_MIN_RR = 1.5
 
 
 # ====================================================================================================
-# 9. Reversal A (ใช้อยู่)
+# 9. Retracement — เดิม Reversal A (ใช้อยู่ · เด้งสวนเทรนด์หลังแรงหมด เก็บครึ่งขา · ชื่อในโค้ดยัง REV_A_*)
 # ====================================================================================================
 # ---------------------------------------------------------------------------
 # REV_A_* — Reversal แบบ A (กลับตัวตามตำรา · เข้าระบบ 2026-10-15 ตามคำสั่งผู้ใช้ · กฎทั้งหมดที่ rev_a.py)
@@ -829,6 +830,12 @@ PULLBACK_MIN_RR = 1.5
 # 👉 ต้องตามดู: ไม้ Reversal จริงหลัง 2026-10-15 — ต่อไม้ใกล้ +0.5 (ในระบบ) หรือใกล้ 0 (นอกระบบ)
 #   ปิดกลยุทธ์ = REV_A_ENABLED = False (scheduler ยกเลิก limit ที่ค้างให้เองรอบถัดไป)
 REV_A_ENABLED       = True
+# REV_A_STRATEGY — ชื่อกลยุทธ์ที่ journal/Telegram/log ใช้ (2026-10-21 ผู้ใช้: "Reversal A" -> "Retracement")
+#   นิยาม (ผู้ใช้ยืนยัน 2026-10-21): เด้งสวนเทรนด์หลังแรงหมด เก็บราวครึ่งขา — ไม่ได้เดาว่าเทรนด์จะกลับ
+#   (Bias 1D พลิกตามระหว่างถือ 0/48 ไม้ · หลัง TP ราคากลับถึงจุดเข้า 16/24 ใน 10 วัน)
+#   ไม้ที่เปิดก่อนวันนี้ใน trades_log ยังชื่อ "Reversal" — slot_of / exit_monitor รู้จักทั้งสองชื่อ
+#   ชื่อในโค้ด (REV_A_* · rev_a.py · ธง --rev-a · rev_a_state.json) คงเดิมโดยตั้งใจ
+REV_A_STRATEGY      = "Retracement"
 REV_A_ADX_MIN_PEAK  = 28.5
 REV_A_CONFIRM_HOURS = 48
 REV_A_BREAK_BARS    = 12

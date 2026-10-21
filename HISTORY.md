@@ -2802,3 +2802,4 @@ gap ที่เกิน 0.5R ทุกครั้งมีตลาดปิ�
 - 2026-10-21 จัดโค้ดระบบจริง 7 ไฟล์: ย้าย comment ประวัติ ~1,430 บรรทัดมาที่นี่ (exit_monitor · regime_check · scheduler · scoring · swing · bars · reversal) · AST ทุกไฟล์เท่าเดิม
 - 2026-10-21 โครงไฟล์: ย้ายเครื่องมือ 17 ไฟล์ไป tools/ · ลบไฟล์ตาย 7 ไฟล์ (bot · dashboard · test_dashboard · backtest_exit_compare · div_why · entry_structure · keylevel — ผล keylevel อยู่ memory key-level-has-no-edge)
 - 2026-10-21 ย้ายไฟล์ผลของเครื่องมือ ~3,950 ไฟล์จากโฟลเดอร์หลักไป results/ (เครื่องมือ 12 ไฟล์อ่าน/เขียนที่นั่น) · ลบชุดไฟล์ Windows VPS (vps/*.bat · install_tasks.ps1 · vps/README.md · .gitattributes)
+- 2026-10-21 Reversal A เปลี่ยนชื่อเป็น **Retracement** (ผู้ใช้ · นิยาม = เด้งสวนเทรนด์หลังแรงหมด เก็บครึ่งขา) · journal/Telegram/log ใช้ชื่อใหม่ (`config.REV_A_STRATEGY`) · ไม้เก่าใน trades_log ยัง "Reversal" — slot_of / trend check รู้จักทั้งสองชื่อ · ชื่อในโค้ด (REV_A_* · rev_a.py · --rev-a) คงเดิม
