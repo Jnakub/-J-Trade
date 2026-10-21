@@ -32,32 +32,8 @@ EXEC_SL_ATR_MULT = 2.0
 ENFORCE_BIAS_MATCH = True
 
 
-# k สำหรับ trend_flip bias ต่อ symbol — มาจาก k-sweep บน 1D (backtest_trend_flip_ksweep.py
-# <SYMBOL> 3000 1D, ~7 ปีข้อมูล) เลือกจาก FalseFlip ต่ำสุดในกลุ่มที่เร็วกว่า EMA cross จริง:
-#   BTCUSDm: k=0.20  FalseFlip=0/58 (0%)   เร็วกว่า EMA cross เฉลี่ย 9.5 แท่ง  (matched 14 คู่)
-#   XAUUSDm: k=0.40  FalseFlip=0/37 (0%)   เร็วกว่า EMA cross เฉลี่ย 12.4 แท่ง (matched 12 คู่)
-#   ETHUSDm: k=0.40  FalseFlip=0/53 (0%)   เร็วกว่า EMA cross เฉลี่ย 7.8 แท่ง   (matched 19 คู่)
-#            (2026-08-02: k<0.40 ยังมี false flip 2-3 ครั้ง — 0.40 คือจุดแรกที่ 0%)
-#   XRPUSDm: k=0.20  FalseFlip=0/64 (0%)   เร็วกว่า EMA cross เฉลี่ย 8.2 แท่ง   (matched 18 คู่)
-# (ครั้งแรกที่ทำ XAU ใช้ sample เล็กแค่ 2 คู่เทียบได้ k ไม่น่าเชื่อถือ — รันซ้ำด้วยข้อมูลยาวขึ้น
-# แล้วได้ผลที่มั่นใจได้มากกว่านี้ 2026-07-27) symbol ที่ไม่มีในนี้จะได้ bias=None (SKIP ทุกครั้ง
-# ใน Scoring — ไม่มี EMA50/200 fallback แล้วตั้งแต่ 2026-08-01) จนกว่าจะมีคน sweep หา k ให้
-#
-# 2026-08-09: เพิ่ม USDJPYm (k=0.20, FalseFlip=0/62=0%, เร็วกว่า EMA cross เฉลี่ย 16.6 แท่ง,
-# matched 24 คู่) — sweep ซ้ำ BTC/XAU/ETH/XRP ด้วยข้อมูลสดพร้อมกัน (methodology เดิมเป๊ะ: 1D,
-# 3000 แท่ง) ยืนยันว่าทั้ง 4 ตัวยังได้ค่าเดิมเป๊ะทุกตัว ไม่ต้องปรับ — พร้อมกับแก้บั๊กเกณฑ์เลือก
-# k* ใน backtest_trend_flip_ksweep.py (เดิมเลือกจาก false_n ดิบ ไม่ใช่ false_pct — ดู git log)
-#
-# 2026-08-12: เพิ่ม US500m (S&P500, k=0.20, FalseFlip=1/71=1.4%, เร็วกว่า EMA cross เฉลี่ย
-# 10.6 แท่ง, matched 22 คู่) — รัน sweep ผ่าน Wine (MT5 for Mac) 2999 แท่ง 4H ต่างจาก symbol
-# อื่นตรงที่ไม่มี k ไหนได้ FalseFlip 0% เลย (ต่ำสุดคือ 1.4% เท่ากันที่ k=0.20/0.25/0.30) เลือก
-# 0.20 ตามเกณฑ์อัตโนมัติของสคริปต์ (FalseFlip ต่ำสุด + lag ยังติดลบ) — sample แค่ ~500 วัน
-# (3000 แท่ง 4H) ยังไม่ได้สั่นสะเทือนช่วงเวลายาวเหมือน symbol อื่น ควรเฝ้าดูผลเทรดจริงและพร้อม
-# ปรับ/ปิดถ้า false flip เกิดถี่กว่าที่ backtest ชี้
-#
-# 2026-08-17: เพิ่ม EURUSDm (k=0.20, FalseFlip=0/67=0%, เร็วกว่า EMA cross เฉลี่ย 5.2 แท่ง,
-# matched 18 คู่) และ GBPUSDm (k=0.20, FalseFlip=1/78=1.3%, เร็วกว่า EMA cross เฉลี่ย 4.6 แท่ง,
-# matched 21 คู่ — เหมือนเคส US500m ไม่ได้ 0% แต่ต่ำสุดในกลุ่มที่ทดสอบ 0.20-0.60) sweep 2999 แท่ง 4H
+# TREND_FLIP_K เดิมมาจาก k-sweep บน 1D ราย symbol (FalseFlip ต่ำสุด · 0.20-0.40) · 🔴 ตั้งแต่ 2026-10-18 k = 0 ทุก symbol (ดูบล็อกที่ TREND_FLIP_K)
+# 📜 ผลวัด/ประวัติเดิม: HISTORY.md § "scoring.py — TREND_FLIP_K k-sweep ราย symbol (2026-07..08)"
 # TREND_FLIP_WINDOW — fractal swing ของ trend_flip รอยืนยันกี่วัน (i−N..i+N) = ตัวกำหนดความหน่วงของ Bias 1D
 # 5 = พฤติกรรมระบบจริง (trend_flip.DEFAULT_WINDOW) · ทดลองด้วย backtest_replay --bias-window=N (2026-10-11)
 # คัดกรองรายวัน 3 ยุค (ผลตอบแทน 10 วัน × ทิศ Bias): window 7 ≥ 5 ทุกยุคแต่ต่างนิดเดียว (+0.161/+0.154 · −0.016/−0.030 · +0.122/+0.053)
