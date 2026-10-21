@@ -29,7 +29,7 @@ from config import (
     BREAKOUT_IGNORES_MIN_PEAK, SIDEWAY_ENABLED, SIDEWAY_RISK_PER_TRADE,
     PULLBACK_ENABLED, REVERSAL_ENABLED, PULLBACK_ADX_RULE, PULLBACK_MIN_RANGE_POS, PULLBACK_MIN_DISAGREE_BARS,
     PULLBACK_TP_FIB_RATIO, PULLBACK_FALLBACK_RR, PULLBACK_MIN_RR,
-    REV_A_ENABLED, REV_A_CONFIRM_HOURS, REV_A_LIMIT_HOURS, REV_A_BREAK_BARS, REV_A_ENTRY,
+    REV_A_ENABLED, REV_A_CONFIRM_HOURS, REV_A_LIMIT_HOURS, REV_A_BREAK_BARS, REV_A_ENTRY, REV_A_RISK_PER_TRADE,
 )
 from mt5_connect import connect, get_account_balance, mt5_now, is_demo_account
 from scoring import compute_entry, calc_rr, get_ohlcv, get_trend_bias, EXEC_SL_ATR_MULT
@@ -363,7 +363,7 @@ def rev_a_place(symbol: str, direction: str, cf: dict, h1, last_t, occupied: set
         atr = float(calc_atr(h1.iloc[-41:], 14).iloc[-1])   # ATR1H ชุดเดียวกับ replay (41 แท่ง · period 14)
         if TP_MAX_ATR and atr:
             tp = min(tp, entry + atr * TP_MAX_ATR) if direction == "Long" else max(tp, entry - atr * TP_MAX_ATR)
-        lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
+        lot, _ = calculate_lot_size(symbol, entry, sl, balance, REV_A_RISK_PER_TRADE)
         lot = clamp_lot(symbol, lot)
         ticket = place_limit_order(symbol, direction, entry, sl, tp, lot)
         pin = sl + EXEC_SL_ATR_MULT * atr if direction == "Long" else sl - EXEC_SL_ATR_MULT * atr
@@ -399,7 +399,7 @@ def _rev_a_market(symbol: str, direction: str, cf: dict, h1, occupied: set) -> N
         atr = float(calc_atr(h1.iloc[-41:], 14).iloc[-1])
         if TP_MAX_ATR and atr:
             tp = min(tp, entry + atr * TP_MAX_ATR) if direction == "Long" else max(tp, entry - atr * TP_MAX_ATR)
-        lot, _ = calculate_lot_size(symbol, entry, sl, balance, RISK_PER_TRADE)
+        lot, _ = calculate_lot_size(symbol, entry, sl, balance, REV_A_RISK_PER_TRADE)
         lot = clamp_lot(symbol, lot)
         pin = sl + EXEC_SL_ATR_MULT * atr if direction == "Long" else sl - EXEC_SL_ATR_MULT * atr
         print(f"  [{symbol}] Reversal A {direction}: ยืนยันแล้ว -> market @ ~{entry:.5f}  SL {sl:.5f}  "

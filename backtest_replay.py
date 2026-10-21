@@ -389,6 +389,7 @@ _swma = next((a for a in sys.argv if a.startswith("--sideway-min-adx=")), None)
 if _swma:
     config.SIDEWAY_MIN_ENTRY_ADX = float(_swma.split("=", 1)[1])
 _SIDEWAY_W = config.SIDEWAY_RISK_PER_TRADE / config.RISK_PER_TRADE
+_REVA_W = config.REV_A_RISK_PER_TRADE / config.RISK_PER_TRADE    # ไม้ strategy "Reversal" = Reversal A (Reversal เดิมปิดแล้ว)
 # --struct-reg : เปลี่ยน check_structure จาก "เทียบ swing high/low" เป็น "ความชัน regression + R²"
 # ดูเหตุผล/พารามิเตอร์เต็มที่ regime_check.check_structure_reg — พารามิเตอร์ (N ราย symbol จาก
 # คลื่นราคา x2 · R2_MIN 0.5) **ประกาศไว้ก่อนรัน ห้ามขยับหลังเห็นผล**
@@ -1704,7 +1705,8 @@ def close_pos(pos, key, t, r, how):
     global last_close_time, last_tp_close_time
     if use_cost:
         r -= cost_pct / 100 * pos["entry"] / abs(pos["entry"] - pos["sl0"])   # spread ขาเข้า+ออก ~1 ครั้ง
-    _w = _SIDEWAY_W if pos.get("strategy") == "Sideway" else 1.0
+    _w = (_SIDEWAY_W if pos.get("strategy") == "Sideway"
+          else _REVA_W if pos.get("strategy") == "Reversal" and pos.get("regime") == "REV-A" else 1.0)
     rec = {**pos, "exit_time": t, "R": r, "how": how, "risk_w": _w}
     daily_r[t.date()] = daily_r.get(t.date(), 0.0) + r * _w   # daily loss นับเป็น R ของระบบ (2%)
     last_close_time = t
