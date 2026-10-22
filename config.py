@@ -683,7 +683,7 @@ def slot_of(strategy: str) -> str:
     # ความเสี่ยงต่อ symbol ไม่เพิ่ม) · ช่วงทดสอบ ~20% ของไม้ sideway เกิดตอนไม้ Scoring ยังค้าง
     if strategy == "Sideway":
         return "Scoring"
-    if strategy == "Breakout":
+    if strategy in ("Breakout", "NewBreakout"):   # NewBreakout = ทดลองใน replay เท่านั้น (--new-breakout · 2026-10-23)
         return BREAKOUT_SLOT
     # 2026-10-13: Pullback (เดิมคือ "Reversal ใหม่") ใช้ช่อง Reversal ด้วย — ตรงกับตอนวัดใน replay
     # 2026-10-21: Retracement (Reversal A เปลี่ยนชื่อ) ใช้ช่อง Reversal เหมือนเดิม
