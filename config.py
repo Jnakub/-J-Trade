@@ -683,9 +683,11 @@ def slot_of(strategy: str) -> str:
     # ความเสี่ยงต่อ symbol ไม่เพิ่ม) · ช่วงทดสอบ ~20% ของไม้ sideway เกิดตอนไม้ Scoring ยังค้าง
     if strategy == "Sideway":
         return "Scoring"
+    if strategy == "Breakout":
+        return BREAKOUT_SLOT
     # 2026-10-13: Pullback (เดิมคือ "Reversal ใหม่") ใช้ช่อง Reversal ด้วย — ตรงกับตอนวัดใน replay
     # 2026-10-21: Retracement (Reversal A เปลี่ยนชื่อ) ใช้ช่อง Reversal เหมือนเดิม
-    return "Reversal" if strategy in ("Breakout", "Pullback", REV_A_STRATEGY) else strategy
+    return "Reversal" if strategy in ("Pullback", REV_A_STRATEGY) else strategy
 
 
 
@@ -701,7 +703,7 @@ def slot_of(strategy: str) -> str:
 #   คิด SL/TP ทาง scoring.compute_entry (แบบ Scoring) ไม่ใช่ Reversal เพราะไม้ที่ได้คือการ
 #   เทรดต่อเนื่องตามเทรนด์ 1D ไม่ใช่การกลับตัว
 #   ข้ามด่าน CHoCH (CHoCH ถามว่าโครงสร้างเดิมพังหรือยัง = คำถามของการกลับตัว)
-#   ใช้ **ช่องถือไม้ร่วมกับ Reversal** ไม่ใช่ช่องที่สาม (backtest_replay.slot_of ทำแบบเดียวกัน)
+#   ช่องถือไม้: เดิมร่วมกับ Reversal · ตั้งแต่ 2026-10-22 ร่วมกับ Scoring (config.BREAKOUT_SLOT)
 #
 # 🔴 หลักฐาน — วัด replay เต็ม 8 symbol 730 วัน **3 รอบ ตกเกณฑ์ทั้ง 3 รอบ**
 #   รอบ 3 (2026-09-21 · TP fib 2.618): 32 ไม้ +11.40R avgR +0.356 WR 53% |t| 1.22
@@ -740,6 +742,15 @@ BREAKOUT_ENABLED      = True
 #   ไม้เพิ่ม 31 ไม้ = เพดานพอร์ต 6R บล็อกมากขึ้น (replay มองไม่เห็น ยังไม่ได้วัดด้วย backtest_portfolio)
 #   ผู้ใช้เลือกหลังเห็นผลครบ · ตามดูพร้อม BREAKOUT_ENABLED · ถอยกลับ: ตั้ง False ที่เดียว
 BREAKOUT_IGNORES_MIN_PEAK = True
+# ── ช่องถือไม้ของ Breakout (config.slot_of) — "Reversal" (ระบบจริง) / "Scoring" (ทดลอง 2026-10-22 คำสั่งผู้ใช้) ──
+# ที่มา: ไม้ Breakout 61/124 ซ้อนไม้ Scoring symbol+ทิศเดียวกัน (สองช่วง base) = เสี่ยง 4% บนการเคลื่อนไหวเดียว
+#   (corr R 0.78) · และ Breakout ≈ เข้า Long สุ่มด้วยเรขาคณิตเดียวกัน (สุ่ม +0.11/+0.38 vs BO +0.39/+0.37 · t 1.33)
+#   ช่อง Scoring = ห้ามซ้อน Scoring/Sideway ใน symbol เดียวกัน · ช่อง Reversal ว่างให้ Pullback/Retracement มากขึ้น
+#   คาดไว้ก่อนรัน: ไม้ซ้อนที่หายเป็นกลุ่มที่ดีที่สุด (Scoring ถืออยู่ก่อน 49 ไม้ +0.6/ไม้) -> R อาจลด แลกความเสี่ยงซ้อน
+# 🔴 2026-10-22 เปลี่ยนเป็น "Scoring" ในระบบจริงตามคำสั่งผู้ใช้ **ก่อนวัด replay** (ยังไม่มีตัวเลขผลรวม)
+#   วัดย้อนหลังได้ด้วย backtest_replay --breakout-slot=Reversal (= ระบบก่อนเปลี่ยน · tag _boslotReversal) เทียบกับ base ใหม่
+#   ถอยกลับ: ตั้ง "Reversal" ที่เดียว
+BREAKOUT_SLOT = "Scoring"
 
 # 2026-09-07: Reversal ฝั่ง Short เข้าได้เฉพาะตอนเทรนด์ 1D (get_trend_bias) เป็น Short ด้วย
 # 📜 ประวัติเก่าของ REVERSAL_SHORT_NEEDS_1D_TREND (ที่มา 2026-09-07): HISTORY.md § "config.py — REVERSAL_SHORT_NEEDS_1D_TREND (ที่มา 2026-09-07)"

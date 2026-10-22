@@ -13,12 +13,37 @@
 > 🔴 **แก้ค่าในระบบจริงทีไร ให้แก้ตาราง "สถานะระบบ" ข้างล่างด้วย** แล้วจดเหตุผล/ตัวเลขที่ค่าคงที่ + บรรทัดใน HISTORY.md
 
 
-**สารบัญ:** [สถานะระบบ](#-สถานะระบบ-ณ-2026-10-21) (กลยุทธ์ · กฎ exit · base · สิ่งที่ต้องตามดู) ·
+**สารบัญ:** [งานค้าง/กำลังรัน](#-งานค้าง--กำลังรัน-ณ-2026-10-22-เช้า--เขียนไว้ก่อนผู้ใช้-reset-session) · [สถานะระบบ](#-สถานะระบบ-ณ-2026-10-21) (กลยุทธ์ · กฎ exit · base · สิ่งที่ต้องตามดู) ·
 [VPS](#-ระบบจริงรันบน-vps--ไม่ใช่บน-mac-ตั้งแต่-2026-10-03-1300-07) (deploy · คำสั่งประจำ) ·
 [รันยังไง](#รันยังไง) (wine · ธรรมเนียมสองช่วง · รันพร้อมกัน · เทสต์) ·
 [กติกาการวัด](#-กติกาการวัด--อ่านก่อนเชื่อตัวเลขใดๆ) (noise · direct/churn · ตัวหน่วง vs ตัวกรอง) ·
 [เครื่องมือ](#เครื่องมือ--ตัวไหนตอบอะไรได้) · [แหล่งความจริงเดียว](#แหล่งความจริงเดียว--อย่าคัดลอกค่าไปไว้ที่อื่น) ·
 [กับดัก](#กับดักที่เจอแล้ว) · [เขียนโค้ด](#เขียนโค้ดในนี้ยังไง) · [ไอเดียที่ยังไม่เริ่ม](#ไอเดียที่ยังไม่ได้เริ่ม--อย่าเข้าใจว่ามีอยู่ในโค้ดแล้ว)
+
+---
+
+## 🔴 งานค้าง / กำลังรัน (ณ 2026-10-22 เช้า · เขียนไว้ก่อนผู้ใช้ reset session)
+
+**หยุดกลางทาง (ผู้ใช้สั่ง 2026-10-22 09:37): เช็คที่ราบด่าน Pullback** (`PULLBACK_MIN_DISAGREE_BARS` ระบบจริง 6 · เลือกหลังเห็นข้อมูล 2026-10-20 · ยังไม่เคยเช็คเพื่อนบ้าน)
+- สคริปต์ `tools/run_pb_plateau.sh` · ค่า 0 / 4 / 8 / 12 ทั้งสองช่วง (8 ชุด × 10 symbol) · **เสร็จแค่ `pbdis0` ช่วง 2023-24 ครบ 10 ตัว** + `pbdis4` 2023-24 บางส่วน 7 ตัว (ขาด AUDNZD/BTC/ETH — ต้องรันใหม่)
+  · ผลเบื้องต้น 0 vs 6 (2023-24): 206 ไม้ +43.01 vs 203 +44.72 (ΔR −1.70 · churn |t| 0.32 = noise) · ยังตัดสินไม่ได้ตามเกณฑ์
+  · รันต่อ: แก้สคริปต์ให้ข้ามชุดที่เสร็จแล้ว (ชุด 2023-24 ~30 นาที · 2024-26 ~2 เท่า)
+- ⚠️ ชื่อไฟล์จริงคือ `_c1022P{2324,1016}_pbdis{N}_reva` (ไม่ใช่ `_reva_pbdis{N}`) · tag ที่ใช้กับ compare_runs = `c1022P2324_pbdis0_reva`
+- ความคืบหน้า: `cat results/plateau_logs/status.log` — ทุกบรรทัดต้อง `auth fail: 0 · regime error: 0` · มี `DONE` = ครบ
+  ถ้า auth fail > 0 = MT5 บน Mac หลุด (`Authorization failed`) ชุดนั้นใช้ไม่ได้ → เช็ค `./run_wine.sh -c "from mt5_connect import connect; connect()"` แล้วรันเฉพาะชุดที่ตายใหม่
+- ไฟล์ผล: `results/replay_trades_<sym>_c1022P{2324,1016}_pbdis{0,4,8,12}_reva.csv` · ค่า 6 = base ปัจจุบัน `_c1020p{2324,1016}_reva_mkt` (โค้ดเดียวกัน)
+- เทียบ: `python3 tools/compare_runs.py c1022P2324_pbdis0_reva c1022P2324_pbdis4_reva` (ทำทุกค่า × ทั้งสองช่วง · เทียบกับ 0 และกับ 6)
+  ⚠️ ไฟล์ใหม่ติดป้าย `Retracement` ส่วน base เก่าติด `Reversal` (เปลี่ยนชื่อ 2026-10-21 · ไม้ตรงกันทุกไม้) — compare จับคู่ด้วยเวลา/ทิศ ไม่กระทบ
+- **เกณฑ์ (ตั้งไว้ก่อนเห็นผล):** 6 เป็น "ที่ราบ" ถ้า 4 และ 8 ดีกว่า 0 ทั้งสองช่วงและต่างจาก 6 ไม่เกิน noise → คง 6
+  · ถ้า 4/8 แย่กว่า 0 หรือทิศสลับกัน = 6 บังเอิญ → **เสนอผู้ใช้**กลับเป็น 0 (ผู้ใช้ตัดสิน) · อ้างอิง: 6 vs 0 แบบ limit (10-20) +10.41 / +1.70R
+- หลังได้ผล: จดตารางที่ comment `config.PULLBACK_MIN_DISAGREE_BARS` + บรรทัด HISTORY.md + memory `reversal-entry-from-scratch-2026-10-11`
+
+**รอผู้ใช้:** merge [PR #42](https://github.com/Jnakub/-J-Trade/pull/42) (บันทึกผล Retracement ต้นขา ≤2/3 × R:R 1.0 · comment อย่างเดียว ไม่ต้อง deploy)
+· ยืนยันเกณฑ์ตัดสิน Sideway จากไม้จริง (ตาราง "ต้องตามดู" ข้างล่าง)
+**ทำแล้ว 2026-10-21/22:** Retracement (เดิม Reversal A) เข้า market + เสี่ยง 1% + เปลี่ยนชื่อ — **deploy บน VPS แล้ว 2026-10-22**
+· จัดระเบียบ repo (tools/ · results/ · config 11 หมวด · comment ประวัติย้ายไป HISTORY.md) · วัด Retracement ครบทุกแกนแล้ว (ดู memory `reversal-a-is-a-retracement-trade`)
+**ค้างแต่ไม่ด่วน:** Retracement ทดสอบนอกระบบ 57 symbol แบบ market (ตัดสินแค่ว่าควรกลับไป 2% ไหม) · Pullback ฝั่ง Short อ่อน (ยังไม่ได้ดู)
+· รัน `tools/backtest_mfe.py` อัปเดตตาราง 3e (ล้าสมัยตั้งแต่ 10-13)
 
 ---
 
@@ -32,12 +57,12 @@
 | กลยุทธ์ | เข้าเมื่อ | SL / TP | ช่อง · เสี่ยง | เปลี่ยนล่าสุด |
 |---|---|---|---|---|
 | **Scoring** | regime TREND + Bias 1D = ทิศไม้ | swing − 2×ATR (exec) / Fib ×1.618 · R:R ≥ 1.5 · TP ≤ 18 ATR | ช่อง Scoring · 2% | — |
-| **Breakout** | REVERSAL-READY ที่ถูกพลิก (Reversal Short ตอนเทรนด์ 1D = Long) = **Long อย่างเดียวโดยโครงสร้าง** · ข้ามด่าน peak ADX | เหมือน Scoring | ช่อง Reversal · 2% | 09-30 |
+| **Breakout** | REVERSAL-READY ที่ถูกพลิก (Reversal Short ตอนเทรนด์ 1D = Long) = **Long อย่างเดียวโดยโครงสร้าง** · ข้ามด่าน peak ADX | เหมือน Scoring | **ช่อง Scoring** (ห้ามซ้อน Scoring/Sideway symbol เดียวกัน) · 2% | **10-22 ย้ายช่อง Reversal -> Scoring (ผู้ใช้ · ยังไม่วัด replay)** · 09-30 |
 | **Pullback** (`pullback.py`) | Bias 1D **สวน** Structure 4H มาแล้ว **≥ 6 แท่ง 4H** + ADX 4H ไม่ลง + divergence ทิศไม้ · ทุก regime | `reversal.compute_reversal_entry` · TP Fib ×3 · สำรอง 1.5R · R:R ≥ 1.5 | ช่อง Reversal · 2% | **10-20** ด่าน 6 แท่ง · 10-19 ปิดด่านตำแหน่ง + ไม้เงา (0.3 -> 0) |
 | **Retracement** (เดิม Reversal A · `rev_a.py`) — **เด้งสวนเทรนด์หลังแรงหมด เก็บครึ่งขา** | ADX 4H peak ≥ 28.5 โค้งลง + Bias 1D **=** Structure 4H + divergence สวนเทรนด์ -> แท่ง 1H ปิดทะลุ 12 แท่ง (≤ 48 ชม.) -> **market ทันที** (`REV_A_ENTRY` · R:R คิดจากราคาตลาด) | SL ก้น 24 ชม. −10% ของระยะ / TP 0.5 ของขาเดิม (≤ 4 swing) · R:R ≥ 1.5 | ช่อง Reversal · **1%** · journal/Telegram/log = "Retracement" (ไม้ก่อน 10-21 ใน journal = "Reversal") | **10-21 limit -> market** (เท่าเดิมทั้งสองช่วง) + **เสี่ยง 2% -> 1%** (edge ยังไม่พิสูจน์) · TP 1.0 แพ้ทั้งสองช่วง |
 | **Sideway** (`sideway.py`) | regime NO_TRADE + ADX 4H < 20 ติด ≥ 22 แท่ง · ขอบกรอบ P90/P10 · โซน 15% | TP กลางกรอบ · ออกเมื่อ ADX ≥ 22 / **72 ชม.** | ช่อง Scoring · **1%** | 10-20 เสี่ยง 1% + 72 ชม. · 10-19 ถอด ADX ≥ 12.5 |
 
-ลำดับใน scan: ช่อง Reversal (Pullback/Retracement/Breakout · `config.slot_of`) มาก่อน Sideway · ไม้ Reversal ใหม่ไม่ย้าย TP ไม้อื่น
+ลำดับใน scan: ช่อง Reversal (Pullback/Retracement · `config.slot_of`) มาก่อน Sideway · Breakout อยู่ช่อง Scoring ตั้งแต่ 10-22 (`config.BREAKOUT_SLOT`) · ไม้ Reversal ใหม่ไม่ย้าย TP ไม้อื่น
 · Reversal เดิม (`REVERSAL_ENABLED = False` ตั้งแต่ 10-13) เก็บไว้ครบ · `PULLBACK_ENABLED False + REVERSAL_ENABLED True` = ระบบก่อน 10-13
 
 **กฎ exit ที่ทำงานจริง** (เช็คด้วย `./run_wine.sh exit_monitor.py --rules` เสมอ — **อย่าอ่านจาก comment** ซึ่งอธิบายกฎที่ปิดแล้วยาวหลายสิบบรรทัด
@@ -401,7 +426,7 @@ checklist ข้อ 0 ปิดไม้ก่อน `backtest_replay.py:592` �
 | `news_sensitivity.py` ⭐ | "กฎข่าว 2 ตัวที่ backtest ไม่เคยจำลอง ขยับ R ได้แค่ไหน" — โปรยหน้าต่างข่าวสุ่มที่อัตราจริง 400 รอบ **โดยไม่ต้องมีปฏิทินย้อนหลัง** (~1 นาที) | ชุดไม้คงที่ = **ขอบบนของความเสียหาย** (ดูข้อ 3c) · สมมติว่า partial ที่เกิดจริงยังเกิดเหมือนเดิม (125/166 ไม้มี cuts — วัดตอน base ยังมี 166 ไม้) · ไม่จำลองด่านห้าม**เข้า**ไม้ตอนใกล้ข่าว |
 | `backtest_tp_sweep.py` | หา `TP_FIB_RATIO` แยกราย symbol | ยึดหน้าต่างเวลาจาก `datetime.now()` — เลื่อนทุกรอบที่รัน |
 | `backtest_trend_flip_ksweep.py` | หา `TREND_FLIP_K` แยกราย symbol | ดึงแท่งล่าสุดเสมอ ไม่มี `as_of` · 🔴 **default เป็น 4H แต่ระบบใช้ 1D** (`get_trend_flip_bias` ใช้ `df_1d`) — ต้องส่ง `1D` ต่อท้ายทุกครั้ง ไม่งั้นได้ k ของ timeframe ที่ไม่มีใครใช้ |
-| `backtest_exit_compare.py` | Fixed SL/TP vs Chandelier (ของเก่า BTC 1 เดือน) | เก่ามาก · ยึดหน้าต่างจาก `now()` |
+| `compare_runs.py` ⭐ | เทียบ replay สองชุด: ΔR · direct/churn พร้อม SE/|t| · ตัด 5 ใหญ่ · symbol ที่ดีขึ้น (`python3 tools/compare_runs.py <tag_a> <tag_b>`) | เทียบได้แค่ชุดที่รันหน้าต่างเดียวกัน · จับคู่ไม้ด้วย symbol/เวลา/ทิศ |
 | `inspect_swings.py` | ตาราง swing high/low พร้อม vol/wick ratio | ทุกแถวในตาราง**ผ่าน vol-OR-wick มาแล้ว** (ตัวกรองอยู่ใน `find_swing_highs/lows`) ส่วน `clean ✓` = จุดที่รอด `collapse_swing_runs` อีกชั้น = **สิ่งที่ระบบเห็นจริง** 🔴 2026-09-19 แก้: บรรทัดนี้เคยเขียนว่า "`check_divergence` ใช้ volume ล้วน ต้องดูคอลัมน์ `vol`" — **ไม่จริงตั้งแต่ 2026-09-15** ที่ `DIV_WICK_ALL_SYMBOLS` ถูกตั้งเป็น True (`check_divergence` เรียก `swing_wick_ratio_min()` ตรงๆ เหมือนทุกจุด) คำเตือนที่ค้างทำให้อ่านตารางผิดไปแล้วจริง 1 ครั้ง |
 
 ---
