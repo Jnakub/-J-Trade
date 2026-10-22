@@ -613,8 +613,8 @@ for _lbl, _lv, _want in [("Retracement: div ที่แนว -> เข้า S
     _got = _rev_a_t.signal_direction(_ri_ra, "Long", level_ok=_lv)[0]
     print(f"  [{'ok  ' if _got == _want else 'FAIL'}] {_lbl:52} -> {_got}")
     results.append(_got == _want)
-_ok = _config.REV_A_REQUIRE_LEVEL is False
-print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: Retracement ไม่ดูแนว (สวิตช์ปิด)':52}")
+_ok = _config.REV_A_REQUIRE_LEVEL is True
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: Retracement ต้องอยู่ที่แนว (2026-10-23)':52}")
 results.append(_ok)
 _ok = _config.PULLBACK_LEVEL_INSTEAD_OF_ADX is False
 print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: ยังใช้ ADX (สวิตช์ปิด)':52}")
@@ -874,7 +874,7 @@ _ra_state = {"positions": [], "orders": [555]}
 
 
 def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0, breakout_close=101.0,
-            entry_mode="limit", tick_px=101.0):
+            entry_mode="limit", tick_px=101.0, at_level=True):
     """รัน scheduler.rev_a_step("XAUUSDm") หนึ่งรอบด้วยแท่งปลอม n_closed แท่งที่ปิดแล้ว · คืน (สถานะหลังรอบ, ข้อความ)
     entry_mode: วงจร limit (เดิม · ยังดูแล limit ที่ค้างตอน deploy) ทดสอบด้วย "limit" · ระบบจริงตั้งแต่ 2026-10-21 = market"""
     _ra_calls.clear()
@@ -886,6 +886,8 @@ def ra_scan(n_closed, occupied=frozenset(), state=None, enabled=True, leg=150.0,
         (scheduler, "get_regime"): lambda s: {**_ri(), "df_4h": None},
         (scheduler, "get_trend_bias"): lambda s, df: ("Short", "ทดสอบ"),
         (scheduler.rev_a, "swing_leg"): lambda r, s, lg: leg,
+        # config.REV_A_REQUIRE_LEVEL (2026-10-23): ชุดนี้ทดสอบวงจรเฝ้า/ยืนยัน -> ถือว่าอยู่ที่แนว · กรณีไม่อยู่ที่แนวทดสอบแยก
+        (scheduler.levels, "divergence_at_level"): lambda r, d: at_level,
         (scheduler, "REV_A_ENABLED"): enabled,
         (scheduler.mt5, "positions_get"): lambda **k: [p for p in _ra_state["positions"] if p == k.get("ticket")],
         (scheduler.mt5, "orders_get"): lambda **k: [_FakeOrder(t) for t in _ra_state["orders"]
@@ -930,6 +932,9 @@ def ra_check(label, ok, got):
 
 print("\nReversal A — วงจร watch -> limit -> เติม/ยกเลิก (scheduler.rev_a_step):")
 _t = lambda i: (pd.Timestamp("2026-10-01 00:00") + pd.Timedelta(hours=i)).isoformat()
+_st_nl, _out_nl = ra_scan(30, state={}, at_level=False)
+ra_check("divergence ไม่อยู่ที่แนว -> ไม่เริ่มเฝ้า (REV_A_REQUIRE_LEVEL)", _st_nl is None or not _st_nl.get("watch"),
+         _st_nl)
 _st, _ = ra_scan(30, state={})
 ra_check("สัญญาณ -> เริ่มเฝ้า (sig_bar = แท่งปิดล่าสุด)", _st and _st.get("watch", {}).get("sig_bar") == _t(29)
          and _st["watch"]["direction"] == "Long", _st)
