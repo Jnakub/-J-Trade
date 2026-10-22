@@ -799,6 +799,10 @@ rev_a_level = (config.REV_A_REQUIRE_LEVEL or "--rev-a-level" in sys.argv) and "-
 #   ไม่มี TP / BE / เพดาน 30 วัน (ไม่ผ่าน exit_monitor) · ช่อง = config.BREAKOUT_SLOT · ตัวคัดกรอง: ในระบบ +0.42 นอก −0.01/ไม้
 new_breakout = "--new-breakout" in sys.argv
 nbo_stats = {"สัญญาณ": 0, "เข้า": 0, "ช่องไม่ว่าง": 0}
+# --nbo-own-slot : NewBreakout มีช่องของตัวเอง (ไม่แย่ง Scoring/Sideway · ซ้อนไม้ Scoring ทิศเดียวกันได้) · tag _nboown
+if new_breakout and "--nbo-own-slot" in sys.argv:
+    _slot_of_cfg = cfg.slot_of
+    cfg.slot_of = lambda _s: "NewBreakout" if _s == "NewBreakout" else _slot_of_cfg(_s)
 # --no-key-level / --key-level : ทับ regime_check.KEY_LEVEL_REQUIRED (ระบบจริง False ตั้งแต่ 2026-10-13) — มีผลทั้ง
 #   REVERSAL-READY/Breakout และ Pullback · tag _nokl / _kl เฉพาะตอนต่างจากค่าระบบจริง
 _KL_LIVE = regime_check.KEY_LEVEL_REQUIRED
@@ -2721,7 +2725,7 @@ if bias_k is not None:
 if _boslot_arg and config.BREAKOUT_SLOT != _BOSLOT_LIVE:       # --breakout-slot สวนค่าระบบจริง (config)
     _tag += f"_boslot{config.BREAKOUT_SLOT}"
 if new_breakout:                                              # --new-breakout
-    _tag += "_nbo"
+    _tag += "_nboown" if "--nbo-own-slot" in sys.argv else "_nbo"
 if rev_a_level != config.REV_A_REQUIRE_LEVEL:                  # --rev-a-level / --no-rev-a-level
     _tag += "_ralevel" if rev_a_level else "_noralevel"
 if pb_level != config.PULLBACK_LEVEL_INSTEAD_OF_ADX:            # --pb-level
