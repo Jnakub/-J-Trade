@@ -790,6 +790,8 @@ if div_textbook:
 pullback_no_div = "--pullback-no-div" in sys.argv
 # --pb-level : Pullback ไม่ดู ADX แต่ divergence ต้องอยู่ที่แนว (config.PULLBACK_LEVEL_INSTEAD_OF_ADX · levels.py · 2026-10-22) · tag _pblevel
 pb_level = config.PULLBACK_LEVEL_INSTEAD_OF_ADX or "--pb-level" in sys.argv
+# --rev-a-level : Retracement — divergence ต้องอยู่ที่แนว (config.REV_A_REQUIRE_LEVEL · levels.py · ADX คงเดิม · 2026-10-22) · tag _ralevel
+rev_a_level = config.REV_A_REQUIRE_LEVEL or "--rev-a-level" in sys.argv
 # --no-key-level / --key-level : ทับ regime_check.KEY_LEVEL_REQUIRED (ระบบจริง False ตั้งแต่ 2026-10-13) — มีผลทั้ง
 #   REVERSAL-READY/Breakout และ Pullback · tag _nokl / _kl เฉพาะตอนต่างจากค่าระบบจริง
 _KL_LIVE = regime_check.KEY_LEVEL_REQUIRED
@@ -1938,7 +1940,9 @@ for n, row in enumerate(clock.to_dict("records")):
                 _r = regime_eff(now); _b = bias_at(now)
                 _adx_ok = (ra_adx_alt_ok(now, "Long" if _b == "Short" else "Short") if (rev_a_adx_trend or rev_a_di)
                            else True if rev_a_no_adx else None)               # None = กฎระบบจริงใน rev_a
-                _sdir, _ = rev_a_mod.signal_direction(_r, _b, adx_ok=_adx_ok)
+                _sdir, _ = rev_a_mod.signal_direction(
+                    _r, _b, adx_ok=_adx_ok,
+                    level_ok=levels.divergence_at_level(_r, df1d_at(now)) if rev_a_level else None)
                 if _sdir:
                     _ra["watch"] = {"dir": _sdir, "i_sig": n + 1, "exp": n + _cw}
                     if rev_a_swing:
@@ -2662,6 +2666,8 @@ if bias_k is not None:
     _tag += f"_biask{bias_k:g}"
 if _boslot_arg and config.BREAKOUT_SLOT != _BOSLOT_LIVE:       # --breakout-slot สวนค่าระบบจริง (config)
     _tag += f"_boslot{config.BREAKOUT_SLOT}"
+if rev_a_level != config.REV_A_REQUIRE_LEVEL:                  # --rev-a-level
+    _tag += "_ralevel"
 if pb_level != config.PULLBACK_LEVEL_INSTEAD_OF_ADX:            # --pb-level
     _tag += "_pblevel"
 if breakout_no_min_peak != config.BREAKOUT_IGNORES_MIN_PEAK:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง

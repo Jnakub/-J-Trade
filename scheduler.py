@@ -331,8 +331,11 @@ def rev_a_step(symbol: str, occupied: set) -> None:
     # 3) หาสัญญาณใหม่ — ช่อง Reversal ต้องว่าง (replay: เฉพาะตอนไม่มีทั้ง watch/pend)
     if w is None and slot_of("Reversal") not in occupied:
         regime_info = get_regime(symbol)
-        bias, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
-        direction, why = rev_a.signal_direction(regime_info, bias)
+        _df1d_ra = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
+        bias, _ = get_trend_bias(symbol, _df1d_ra)
+        direction, why = rev_a.signal_direction(       # config.REV_A_REQUIRE_LEVEL: divergence ต้องอยู่ที่แนว (levels.py)
+            regime_info, bias,
+            level_ok=levels.divergence_at_level(regime_info, _df1d_ra) if config.REV_A_REQUIRE_LEVEL else None)
         if not direction:
             return
         leg = rev_a.swing_leg(regime_info, symbol, direction == "Long")

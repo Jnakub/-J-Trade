@@ -14,7 +14,8 @@ from config import (REV_A_ADX_MIN_PEAK, REV_A_BREAK_BARS, REV_A_EXT_BACK_HOURS, 
 LEG_WINDOW_BARS = 120   # ต้นขาแบบหน้าต่าง (ก่อน 2026-10-15) — เหลือไว้ให้ backtest_replay --rev-a-window เท่านั้น
 
 
-def signal_direction(regime_info: dict, bias: str | None, adx_ok: bool | None = None) -> tuple[str | None, str]:
+def signal_direction(regime_info: dict, bias: str | None, adx_ok: bool | None = None,
+                     level_ok: bool | None = None) -> tuple[str | None, str]:
     """ทิศไม้แบบ A (ตรงข้ามเทรนด์) หรือ (None, เหตุผล)
     regime_info = get_regime() · bias = get_trend_bias() (Bias 1D)
     adx_ok: None = กฎระบบจริง (ADX 4H peak ≥ REV_A_ADX_MIN_PEAK แล้วโค้งลง) · bool = ผลจากกฎทางเลือกของ replay"""
@@ -27,6 +28,9 @@ def signal_direction(regime_info: dict, bias: str | None, adx_ok: bool | None = 
     if bias not in ("Long", "Short") or bias != sd:
         return None, f"Bias 1D {bias} ไม่ตรง Structure 4H {sd or '-'}"
     dv = (regime_info.get("divergence") or {}).get("divergence")
+    # level_ok: None = ไม่ดูแนว (ระบบจริง) · bool = levels.divergence_at_level (config.REV_A_REQUIRE_LEVEL)
+    if level_ok is False and dv in ("bullish", "bearish"):
+        return None, f"divergence {dv} ไม่อยู่ที่แนว (A 60 วัน / H-L สัปดาห์-เดือนก่อน)"
     if bias == "Short" and dv == "bullish":
         return "Long", "เทรนด์ Short (1D+4H) + bullish divergence"
     if bias == "Long" and dv == "bearish":

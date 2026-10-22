@@ -604,6 +604,18 @@ results.append(_ok)
 _ok = not _lvm.divergence_at_level({"divergence": {}}, _df)
 print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ไม่มี divergence -> ไม่อยู่ที่แนว':52}")
 results.append(_ok)
+# Retracement: divergence ต้องอยู่ที่แนว (config.REV_A_REQUIRE_LEVEL)
+import rev_a as _rev_a_t  # noqa: E402
+_ri_ra = {"peak": {"declining": True, "peak": 30.0}, "structure": {"trend": "Long (reg)"}, "divergence": {"divergence": "bearish"}}
+for _lbl, _lv, _want in [("Retracement: div ที่แนว -> เข้า Short", True, "Short"),
+                         ("Retracement: div ไม่อยู่ที่แนว -> ไม่เข้า", False, None),
+                         ("Retracement: ไม่ดูแนว (ระบบจริง) -> เข้า Short", None, "Short")]:
+    _got = _rev_a_t.signal_direction(_ri_ra, "Long", level_ok=_lv)[0]
+    print(f"  [{'ok  ' if _got == _want else 'FAIL'}] {_lbl:52} -> {_got}")
+    results.append(_got == _want)
+_ok = _config.REV_A_REQUIRE_LEVEL is False
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: Retracement ไม่ดูแนว (สวิตช์ปิด)':52}")
+results.append(_ok)
 _ok = _config.PULLBACK_LEVEL_INSTEAD_OF_ADX is False
 print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: ยังใช้ ADX (สวิตช์ปิด)':52}")
 results.append(_ok)
