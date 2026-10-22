@@ -256,18 +256,19 @@ def scan_output(on_book: list[str], regime: str, regime_extra: dict = None, bias
 
 def slot_check(label, on_book, regime, want_skip):
     out = scan_output(on_book, regime)
-    skipped = SLOT_SKIP in out or "ช่องเต็มทั้งสองกลยุทธ์" in out
+    skipped = "มีไม้เปิดอยู่แล้ว" in out or "ช่องเต็มทั้งสองกลยุทธ์" in out   # ช่องไหนก็ได้ (Reversal/Scoring)
     ok = skipped == want_skip
     print(f"  [{'ok  ' if ok else 'FAIL'}] {label:52} -> {'ข้าม (ช่องไม่ว่าง)' if skipped else 'ไปต่อ'}")
     return ok
 
 
-print("\nช่องถือไม้ — ไม้ Breakout ครองช่อง Reversal (config.slot_of):")
+# 2026-10-22: Breakout ย้ายไปช่อง Scoring (config.BREAKOUT_SLOT) — REVERSAL-READY (Reversal เดิมปิด) เช็คช่อง Scoring
+print("\nช่องถือไม้ — ไม้ Breakout ครองช่อง Scoring (config.slot_of · BREAKOUT_SLOT):")
 results += [
     slot_check("ถือ Breakout + REVERSAL-READY -> ห้ามเปิดซ้อน", ["Breakout"], "REVERSAL-READY", True),
-    slot_check("ถือ Reversal + REVERSAL-READY -> ห้ามเปิดซ้อน", ["Reversal"], "REVERSAL-READY", True),
-    slot_check("ถือ Scoring + REVERSAL-READY -> ช่อง Reversal ว่าง", ["Scoring"], "REVERSAL-READY", False),
-    slot_check("ถือ Breakout + TREND -> ช่อง Scoring ว่าง", ["Breakout"], "TREND", False),
+    slot_check("ถือ Scoring + REVERSAL-READY -> ห้ามซ้อน Scoring", ["Scoring"], "REVERSAL-READY", True),
+    slot_check("ถือ Reversal/Pullback + REVERSAL-READY -> ช่องว่าง", ["Reversal"], "REVERSAL-READY", False),
+    slot_check("ถือ Breakout + TREND -> ช่อง Scoring เต็ม", ["Breakout"], "TREND", True),
     slot_check("ถือ Scoring + Breakout -> ช่องเต็มทั้งสอง", ["Scoring", "Breakout"], "TREND", True),
 ]
 
@@ -286,7 +287,9 @@ def bnp_check(label, extra, bias, want_promoted):
     return ok
 
 
-print("\nBreakout ข้ามด่าน peak ADX:")
+print("\nBreakout ข้ามด่าน peak ADX (ทดสอบการยก regime ที่ BREAKOUT_SLOT=Reversal — ช่อง Scoring แยกยก/ไม่ยกไม่ได้):")
+import config as _config  # noqa: E402
+_saved_bs2, _config.BREAKOUT_SLOT = _config.BREAKOUT_SLOT, "Reversal"
 results += [
     bnp_check("nopeak READY + bearish + 1D Long -> ยก", {**_NOPEAK, "divergence": {"divergence": "bearish"}},
               "Long", True),
@@ -297,6 +300,7 @@ results += [
     bnp_check("ไม่มี nopeak READY -> ไม่ยก", {"reversal_nopeak": None, "divergence": {"divergence": "bearish"}},
               "Long", False),
 ]
+_config.BREAKOUT_SLOT = _saved_bs2
 
 
 # ── Sideway (2026-10-02 · config.SIDEWAY_*) ─────────────────────────────────────────────────────────
@@ -544,6 +548,19 @@ for _nm in ("Retracement", "Reversal"):
 _ok = _config.slot_of("Pullback") == "Reversal"
 print(f"\n  [{'ok  ' if _ok else 'FAIL'}] {'config.slot_of(Pullback) == Reversal (ช่องร่วม Breakout)':52} -> {_config.slot_of('Pullback')}")
 results.append(_ok)
+# config.BREAKOUT_SLOT (2026-10-22) — สลับช่องแล้ว Breakout ย้ายไปช่อง Scoring · Pullback/Retracement ยังอยู่ช่อง Reversal
+_saved_bs = _config.BREAKOUT_SLOT
+try:
+    _config.BREAKOUT_SLOT = "Scoring"
+    _ok = (_config.slot_of("Breakout") == "Scoring" == _config.slot_of("Sideway")
+           and _config.slot_of("Pullback") == "Reversal" == _config.slot_of(_config.REV_A_STRATEGY))
+finally:
+    _config.BREAKOUT_SLOT = _saved_bs
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'BREAKOUT_SLOT=Scoring -> Breakout ช่อง Scoring':52}")
+results.append(_ok)
+_ok = _config.BREAKOUT_SLOT == "Scoring" and _config.slot_of("Breakout") == "Scoring"
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: Breakout ช่อง Scoring (2026-10-22)':52} -> {_config.slot_of('Breakout')}")
+results.append(_ok)
 print("\nPullback — กฎเข้า (pullback.pullback_direction):")
 results += [
     rn_check("Bias Long + Structure Short + ADX ทรง + KL + bullish", {}, "Long", "Long"),
@@ -680,7 +697,7 @@ print("\nPullback — ทางของ scan_symbol:")
 results += [
     route_check("ช่องว่าง + สัญญาณครบ -> Pullback (ก่อน Sideway)", [], "Long", False, "Pullback"),
     route_check("ถือ Scoring อยู่ -> ช่อง Reversal ว่าง -> Pullback", ["Scoring"], "Long", False, "Pullback"),
-    route_check("ถือ Breakout (ช่อง Reversal) -> ไม่ดู -> Sideway", ["Breakout"], "Long", False, "Sideway/อื่น"),
+    route_check("ถือ Breakout (ช่อง Scoring) -> ช่อง Reversal ว่าง -> Pullback", ["Breakout"], "Long", False, "Pullback"),
     route_check("ไม้เงายังไม่จบ -> ไม่เข้า Pullback", [], "Long", True, "ไม้เงาบล็อก"),
     route_check("Bias ตรง Structure -> ไม่ใช่ Pullback", [], "Short", False, "Sideway/อื่น"),
 ]

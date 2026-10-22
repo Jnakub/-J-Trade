@@ -744,8 +744,11 @@ def scan_symbol(symbol: str) -> None:
         #     (Mutual Exclusivity ตามข้อ 4) จึงรู้ได้ตั้งแต่ตรงนี้โดยไม่ต้องคำนวณสกอร์การ์ดก่อน
         #     occupied อ่านไว้ตั้งแต่ข้อ 1 ก่อนรัน Exit Monitor — ตรงลำดับกับ backtest_replay
         #     (ถ้า SLOT_PER_STRATEGY=False ข้อ 1 return ไปตั้งแต่มีไม้ใดๆ แล้ว มาไม่ถึงตรงนี้)
+        # REVERSAL-READY: Reversal เดิมปิด = ทางนี้เปิดได้แค่ Breakout -> เช็คช่องของ Breakout (config.BREAKOUT_SLOT)
+        # Reversal เดิมเปิด = เช็คช่อง Reversal ก่อน แล้วเช็คช่อง Breakout ซ้ำหลังรู้ว่า flip (ดูข้อ flip ด้านล่าง)
         want = ("Reversal" if pb_dir else slot_of("Sideway") if sideway_mode
-                else "Scoring" if regime in REGIME_TREND else "Reversal")
+                else "Scoring" if regime in REGIME_TREND
+                else slot_of("Reversal") if REVERSAL_ENABLED else slot_of("Breakout"))
         if want in occupied:
             print(f"  [{symbol}] SKIP — ช่อง {want} มีไม้เปิดอยู่แล้ว")
             return
@@ -812,6 +815,9 @@ def scan_symbol(symbol: str) -> None:
                         if SCORING_NEEDS_STRUCTURE_MATCH and not _struct.startswith(direction):
                             print(f"  [{symbol}] SKIP — Breakout flip -> Long แต่สวนโครงสร้าง "
                                   f"4H ({_struct})")
+                            return
+                        if slot_of("Breakout") in occupied:   # ช่อง Breakout ≠ ช่องที่เช็คไว้ตอน Reversal เดิมเปิด
+                            print(f"  [{symbol}] SKIP — Breakout flip แต่ช่อง {slot_of('Breakout')} มีไม้เปิดอยู่แล้ว")
                             return
                         print(f"  [{symbol}] Breakout — Reversal Short ถูกกัก (เทรนด์ 1D = Long) "
                               f"-> กลับข้างเข้า Long แทน  Entry={entry:.5f}")

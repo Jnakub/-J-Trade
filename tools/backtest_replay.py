@@ -586,6 +586,14 @@ breakout_no_min_peak = (config.BREAKOUT_IGNORES_MIN_PEAK or "--breakout-no-min-p
 #    (สมมติฐาน "กำไรมาจากเทรนด์ 1D ล้วน" ผิด — ข้อมูลชุดนี้ชี้ว่า bearish divergence ในขาขึ้นเป็นจังหวะเข้าที่ดีจริง)
 breakout_no_div = "--breakout-no-div" in sys.argv
 
+# --breakout-slot=Reversal|Scoring : ทับช่องของไม้ Breakout (ระบบจริง = config.BREAKOUT_SLOT · Scoring ตั้งแต่ 2026-10-22)
+# = ห้ามซ้อนไม้ Scoring/Sideway ใน symbol เดียวกัน · ช่อง Reversal ว่างให้ Pullback/Retracement · tag _boslot<ช่อง>
+_BOSLOT_LIVE = config.BREAKOUT_SLOT        # ค่าระบบจริง — ใช้ตัดสินว่าต้องติด tag ไหม
+_boslot_arg = next((a for a in sys.argv if a.startswith("--breakout-slot=")), None)
+if _boslot_arg:
+    config.BREAKOUT_SLOT = _boslot_arg.split("=", 1)[1]
+    assert config.BREAKOUT_SLOT in ("Reversal", "Scoring"), config.BREAKOUT_SLOT
+
 # --bias-lr=N : Bias 1D = ทิศความชัน linear regression ของ log close N แท่ง 1D ที่ปิดแล้ว แทน trend flip
 # (คำขอผู้ใช้ 2026-10-18 หลังวัดว่า trend flip ทำนายทิศไม่ได้ · regression 10 วันออกหลังยอดเร็วกว่า ~4 เท่า)
 # แทนทุกจุดที่เรียก get_trend_bias (scoring.compute_entry ข้างใน + ทุกกลยุทธ์ในไฟล์นี้) · ตัดแท่งที่ยังไม่ปิดแบบเดียวกับของเดิม
@@ -1983,7 +1991,9 @@ for n, row in enumerate(clock.to_dict("records")):
     if _revnew_dir:
         _sw = False
     _want = ("Scoring" if _reentry else "Reversal" if _revnew_dir else "Sideway" if _sw else
-             "Scoring" if _rg in REGIME_TREND else ("Reversal" if _rg in REGIME_REVERSAL else None))
+             "Scoring" if _rg in REGIME_TREND else
+             # REVERSAL-READY: Reversal เดิมปิด = เปิดได้แค่ Breakout -> ช่องของ Breakout (config.BREAKOUT_SLOT)
+             ((("Reversal" if rev_old_too else "Breakout")) if _rg in REGIME_REVERSAL else None))
     _shadow = False
     if _want is not None and slot_of(_want) in _occupied:
         note("ถือไม้อยู่แล้ว (ช่องไม่ว่าง)"); fate("ถือไม้อื่นอยู่")
@@ -2139,6 +2149,9 @@ for n, row in enumerate(clock.to_dict("records")):
                         exec_sl, atr_entry_ = sl_info["exec_sl"], sl_info["atr_entry"]
                         note("Reversal Short -> กลับเป็น Long (เทรนด์ 1D = Long)")
                         flipped = True
+                        if not _shadow and slot_of("Breakout") in _occupied:   # Reversal เดิมเปิด + ช่อง Breakout ≠ Reversal
+                            note("Breakout flip แต่ช่อง Breakout ไม่ว่าง"); fate("ถือไม้อื่นอยู่")
+                            continue
                     elif rev_short_struct and not rinfo.get("breakout_nopeak"):
                         note(f"Reversal Short แต่ Structure 4H = {rinfo['structure']['trend']} (Bias {bias_1d})")
                         fate("Reversal Short ไม่มี Structure 4H หนุน")
@@ -2642,6 +2655,8 @@ if bias_fvg:
     _tag += "_biasfvg1w" if bias_fvg_1w else "_biasfvgsun" if bias_fvg_sun else "_biasfvg"
 if bias_k is not None:
     _tag += f"_biask{bias_k:g}"
+if _boslot_arg and config.BREAKOUT_SLOT != _BOSLOT_LIVE:       # --breakout-slot สวนค่าระบบจริง (config)
+    _tag += f"_boslot{config.BREAKOUT_SLOT}"
 if breakout_no_min_peak != config.BREAKOUT_IGNORES_MIN_PEAK:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_bonopeak" if breakout_no_min_peak else "_nobonopeak"
 if regime_check.REVERSAL_USES_ADX_FLOOR != _rev_floor_default:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
