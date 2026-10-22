@@ -47,6 +47,7 @@ import regime_check
 import sideway
 import reversal
 import pullback
+import levels
 import rev_a
 import notify
 from logger_setup import get_logger, tee_print
@@ -721,11 +722,15 @@ def scan_symbol(symbol: str) -> None:
                 print(f"  [{symbol}] Pullback: ไม้เงา {_ghost['direction']} ยังไม่จบ "
                       f"(SL {_ghost['sl']:.5f} / TP {_ghost['tp']:.5f}) — ยังไม่เข้า Pullback")
             else:
-                _bias_rn, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
+                _df1d_rn = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
+                _bias_rn, _ = get_trend_bias(symbol, _df1d_rn)
+                # config.PULLBACK_LEVEL_INSTEAD_OF_ADX: ไม่ดู ADX แต่ divergence ต้องอยู่ที่แนว (levels.py)
+                _lv_mode = config.PULLBACK_LEVEL_INSTEAD_OF_ADX
                 pb_dir, _pb_why = pullback.pullback_direction(
-                    regime_info, _bias_rn, adx_rule=PULLBACK_ADX_RULE,
+                    regime_info, _bias_rn, adx_rule="any" if _lv_mode else PULLBACK_ADX_RULE,
                     require_key_level=regime_check.KEY_LEVEL_REQUIRED,
-                    min_disagree_bars=PULLBACK_MIN_DISAGREE_BARS)
+                    min_disagree_bars=PULLBACK_MIN_DISAGREE_BARS,
+                    level_ok=levels.divergence_at_level(regime_info, _df1d_rn) if _lv_mode else None)
                 if pb_dir:
                     print(f"  [{symbol}] Pullback {pb_dir} — {_pb_why}")
                 elif "เพิ่งสวน" in _pb_why:     # ด่านอายุการสวน (2026-10-20) — พิมพ์ไว้ให้ตามดูใน scheduler.log

@@ -579,6 +579,35 @@ _got = pullback.pullback_direction({"regime": "TREND"}, "Long")[0]
 print(f"  [{'ok  ' if _got is None else 'FAIL'}] {'regime_info ไม่ครบคีย์ -> ไม่เข้า (ไม่ crash)':52} -> {_got}")
 results.append(_got is None)
 
+# Pullback ใช้แนวแทน ADX (config.PULLBACK_LEVEL_INSTEAD_OF_ADX · levels.py · 2026-10-22)
+print("\nPullback — แนวแทน ADX (levels.py):")
+for _lbl, _ri, _lv, _want in [
+    ("ADX ลง + div ที่แนว -> เข้า", {"adx_direction": "ลง"}, True, "Long"),
+    ("div ไม่อยู่ที่แนว -> ไม่เข้า", {}, False, None),
+]:
+    _got = pullback.pullback_direction({**_RI, **_ri}, "Long", adx_rule="any", level_ok=_lv)[0]
+    print(f"  [{'ok  ' if _got == _want else 'FAIL'}] {_lbl:52} -> {_got}")
+    results.append(_got == _want)
+import levels as _lvm  # noqa: E402
+# แท่ง 1D สังเคราะห์: ก้นชัดที่ 90 (วันที่ 50) แล้วขึ้น 3 ATR ใน 10 วัน · วันนี้ = วันที่ 75 (อายุแนว ~14 วัน < 60)
+_t = pd.date_range("2026-01-01", periods=76, freq="D")
+_c = [100.0] * 45 + [97, 95, 93, 91, 90.5] + [90.0] + [92, 95, 98, 101, 104, 106, 107, 107, 107, 107] + [105.0] * 15
+_df = pd.DataFrame({"time": _t, "open": _c, "high": [x + 1 for x in _c], "low": [x - 1 for x in _c], "close": _c})
+_lv, _atr = _lvm.key_levels(_df)
+_ok = any(abs(x - 89.0) < 1e-9 for x in _lv) and _atr is not None
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'key_levels เจอก้น 89 ที่กลับตัว ≥ 2 ATR':52} -> {sorted(set(round(x, 2) for x in _lv))[:6]}")
+results.append(_ok)
+_ri_lv = {"divergence": {"points": [(None, 95.0, 30), (None, 89.2, 35)]}}
+_ok = _lvm.divergence_at_level(_ri_lv, _df) and not _lvm.divergence_at_level({"divergence": {"points": [(None, 99.0, 30), (None, 96.5, 35)]}}, _df)
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'div ก้น 89.2 ที่แนว · 96.5 ไม่อยู่':52}")
+results.append(_ok)
+_ok = not _lvm.divergence_at_level({"divergence": {}}, _df)
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ไม่มี divergence -> ไม่อยู่ที่แนว':52}")
+results.append(_ok)
+_ok = _config.PULLBACK_LEVEL_INSTEAD_OF_ADX is False
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: ยังใช้ ADX (สวิตช์ปิด)':52}")
+results.append(_ok)
+
 # ด่านอายุการสวน (config.PULLBACK_MIN_DISAGREE_BARS · ระบบจริง 6 ตั้งแต่ 2026-10-20) — Structure ย้อนหลังทีละแท่งปลอมด้วย
 # check_structure_reg ที่คืนตามความยาว df (แท่ง 4H ปิดแล้ว 20 แท่ง + แท่ง live 1 = แท่งล่าสุดคือความยาว 20)
 import regime_check as _rc  # noqa: E402

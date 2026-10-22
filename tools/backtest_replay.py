@@ -170,6 +170,7 @@ from regime_check import get_regime
 import exit_monitor as em
 import reversal
 import pullback
+import levels
 import rev_a as rev_a_mod   # ชื่อ rev_a ถูกใช้เป็นธง --rev-a แล้ว (ชื่อซ้ำ = โมดูลถูกทับเป็น bool เงียบๆ)
 from indicators import calc_atr as _calc_atr_ra
 from indicators import calc_adx as _calc_adx_ra, calc_di as _calc_di_ra
@@ -787,6 +788,8 @@ if div_textbook:
 # 🔻 โซน divergence (RSI 20 · ΔR vs 53/46): 55/45 −7.01 (0/10 symbol ดีขึ้น) · 70/30 −46.12 · RSI14 70/30 −40.31
 #    · ตามตำราครบ (RSI14 · 70/30 · ไม่มี stall/tolerance · คู่คนละขา) −46.96 (|t| 2.76) = เข้มขึ้นแย่ลงทุกขั้น · คง 53/46
 pullback_no_div = "--pullback-no-div" in sys.argv
+# --pb-level : Pullback ไม่ดู ADX แต่ divergence ต้องอยู่ที่แนว (config.PULLBACK_LEVEL_INSTEAD_OF_ADX · levels.py · 2026-10-22) · tag _pblevel
+pb_level = config.PULLBACK_LEVEL_INSTEAD_OF_ADX or "--pb-level" in sys.argv
 # --no-key-level / --key-level : ทับ regime_check.KEY_LEVEL_REQUIRED (ระบบจริง False ตั้งแต่ 2026-10-13) — มีผลทั้ง
 #   REVERSAL-READY/Breakout และ Pullback · tag _nokl / _kl เฉพาะตอนต่างจากค่าระบบจริง
 _KL_LIVE = regime_check.KEY_LEVEL_REQUIRED
@@ -1610,10 +1613,12 @@ def revnew_candidate(t, check_signal=False, i=None):
         if _b is None or not (_s.startswith("Long") or _s.startswith("Short")) or _s.startswith(_b):
             return None
         return _b
-    _d, _ = pullback.pullback_direction(_r, _b, adx_rule=rev_new_adx_rule, adx_min=rev_new_adx_min,
+    _d, _ = pullback.pullback_direction(_r, _b, adx_rule="any" if pb_level else rev_new_adx_rule,
+                                        adx_min=rev_new_adx_min,
                                         require_key_level=regime_check.KEY_LEVEL_REQUIRED,
                                         require_divergence=not pullback_no_div,
-                                        min_disagree_bars=config.PULLBACK_MIN_DISAGREE_BARS)
+                                        min_disagree_bars=config.PULLBACK_MIN_DISAGREE_BARS,
+                                        level_ok=levels.divergence_at_level(_r, df1d_at(t)) if pb_level else None)
     if _d is None:
         return None
     if rev_new_shadow:                     # ด่านตำแหน่งอยู่หลังสุด (ก่อนเปิดไม้) — ตรงนี้ดูแค่ไม้เงา
@@ -2657,6 +2662,8 @@ if bias_k is not None:
     _tag += f"_biask{bias_k:g}"
 if _boslot_arg and config.BREAKOUT_SLOT != _BOSLOT_LIVE:       # --breakout-slot สวนค่าระบบจริง (config)
     _tag += f"_boslot{config.BREAKOUT_SLOT}"
+if pb_level != config.PULLBACK_LEVEL_INSTEAD_OF_ADX:            # --pb-level
+    _tag += "_pblevel"
 if breakout_no_min_peak != config.BREAKOUT_IGNORES_MIN_PEAK:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
     _tag += "_bonopeak" if breakout_no_min_peak else "_nobonopeak"
 if regime_check.REVERSAL_USES_ADX_FLOOR != _rev_floor_default:   # ติด tag เฉพาะรอบที่สวนค่าระบบจริง
