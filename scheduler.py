@@ -47,6 +47,7 @@ import regime_check
 import sideway
 import reversal
 import pullback
+import levels
 import rev_a
 import notify
 from logger_setup import get_logger, tee_print
@@ -330,8 +331,11 @@ def rev_a_step(symbol: str, occupied: set) -> None:
     # 3) หาสัญญาณใหม่ — ช่อง Reversal ต้องว่าง (replay: เฉพาะตอนไม่มีทั้ง watch/pend)
     if w is None and slot_of("Reversal") not in occupied:
         regime_info = get_regime(symbol)
-        bias, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
-        direction, why = rev_a.signal_direction(regime_info, bias)
+        _df1d_ra = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
+        bias, _ = get_trend_bias(symbol, _df1d_ra)
+        direction, why = rev_a.signal_direction(       # config.REV_A_REQUIRE_LEVEL: divergence ต้องอยู่ที่แนว (levels.py)
+            regime_info, bias,
+            level_ok=levels.divergence_at_level(regime_info, _df1d_ra) if config.REV_A_REQUIRE_LEVEL else None)
         if not direction:
             return
         leg = rev_a.swing_leg(regime_info, symbol, direction == "Long")
@@ -721,11 +725,15 @@ def scan_symbol(symbol: str) -> None:
                 print(f"  [{symbol}] Pullback: ไม้เงา {_ghost['direction']} ยังไม่จบ "
                       f"(SL {_ghost['sl']:.5f} / TP {_ghost['tp']:.5f}) — ยังไม่เข้า Pullback")
             else:
-                _bias_rn, _ = get_trend_bias(symbol, get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800))
+                _df1d_rn = get_ohlcv(symbol, MT5_TIMEFRAMES["1D"], bars=800)
+                _bias_rn, _ = get_trend_bias(symbol, _df1d_rn)
+                # config.PULLBACK_LEVEL_INSTEAD_OF_ADX: ไม่ดู ADX แต่ divergence ต้องอยู่ที่แนว (levels.py)
+                _lv_mode = config.PULLBACK_LEVEL_INSTEAD_OF_ADX
                 pb_dir, _pb_why = pullback.pullback_direction(
-                    regime_info, _bias_rn, adx_rule=PULLBACK_ADX_RULE,
+                    regime_info, _bias_rn, adx_rule="any" if _lv_mode else PULLBACK_ADX_RULE,
                     require_key_level=regime_check.KEY_LEVEL_REQUIRED,
-                    min_disagree_bars=PULLBACK_MIN_DISAGREE_BARS)
+                    min_disagree_bars=PULLBACK_MIN_DISAGREE_BARS,
+                    level_ok=levels.divergence_at_level(regime_info, _df1d_rn) if _lv_mode else None)
                 if pb_dir:
                     print(f"  [{symbol}] Pullback {pb_dir} — {_pb_why}")
                 elif "เพิ่งสวน" in _pb_why:     # ด่านอายุการสวน (2026-10-20) — พิมพ์ไว้ให้ตามดูใน scheduler.log
