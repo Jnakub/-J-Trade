@@ -750,7 +750,10 @@ BREAKOUT_IGNORES_MIN_PEAK = True
 # 🔴 2026-10-22 เปลี่ยนเป็น "Scoring" ในระบบจริงตามคำสั่งผู้ใช้ **ก่อนวัด replay** (ยังไม่มีตัวเลขผลรวม)
 #   วัดย้อนหลังได้ด้วย backtest_replay --breakout-slot=Reversal (= ระบบก่อนเปลี่ยน · tag _boslotReversal) เทียบกับ base ใหม่
 #   ถอยกลับ: ตั้ง "Reversal" ที่เดียว
-BREAKOUT_SLOT = "Scoring"
+# 🔴 2026-10-23 ถอยกลับ "Reversal" (ผู้ใช้) — replay ช่อง Scoring แพ้ทั้งสองช่วง (2023-24 −9.42 · 2024-26 −36.13R |t| 2.14)
+#    ที่มาของส่วนต่าง 2024-26: Breakout เอง +19.85 (ไม้ที่ซ้อน Scoring = เทรนด์แรง) · Retracement +14.01 (ช่อง Reversal ว่าง ->
+#    Retracement Short เข้าเพิ่ม 16 ไม้ −7.51 + กฎ TP->entry ทับไม้ชนะ 2 ไม้ −6.50) · ความเสี่ยงซ้อนกลับมาเป็น Breakout+Scoring
+BREAKOUT_SLOT = "Reversal"
 
 # 2026-09-07: Reversal ฝั่ง Short เข้าได้เฉพาะตอนเทรนด์ 1D (get_trend_bias) เป็น Short ด้วย
 # 📜 ประวัติเก่าของ REVERSAL_SHORT_NEEDS_1D_TREND (ที่มา 2026-09-07): HISTORY.md § "config.py — REVERSAL_SHORT_NEEDS_1D_TREND (ที่มา 2026-09-07)"
