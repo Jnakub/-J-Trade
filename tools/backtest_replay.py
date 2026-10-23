@@ -792,6 +792,17 @@ pullback_no_div = "--pullback-no-div" in sys.argv
 pb_level = config.PULLBACK_LEVEL_INSTEAD_OF_ADX or "--pb-level" in sys.argv
 # --rev-a-level : Retracement — divergence ต้องอยู่ที่แนว (config.REV_A_REQUIRE_LEVEL · levels.py · ADX คงเดิม · 2026-10-22) · tag _ralevel
 rev_a_level = (config.REV_A_REQUIRE_LEVEL or "--rev-a-level" in sys.argv) and "--no-rev-a-level" not in sys.argv
+# --new-breakout : กลยุทธ์ทดลอง "NewBreakout" (ผู้ใช้ 2026-10-23 · replay เท่านั้น · ใช้คู่ --no-breakout = แทนตัวเดิม) · tag _nbo
+#   เข้า (เช็คครั้งเดียวต่อวัน ตอนแท่ง 1D ปิด): เมื่อวาน (b) ปิดทะลุแนว levels.key_levels (แนว ณ ต้นวัน b) จากใต้ขึ้นเหนือ
+#   + วันนี้ (d) ยังปิดเหนือแนว (ยืนยัน 1 วัน) + ช่วงแท่ง b ≤ 2×ATR20 + Bias 1D Long + Structure 4H Long -> Long market
+#   SL = เข้า − 2×ATR20 (วัน d) · ออก: แท่ง 1D ปิด < low ต่ำสุด 10 แท่งก่อนหน้า -> ปิดราคาตลาดชั่วโมงแรกของวันถัดไป
+#   ไม่มี TP / BE / เพดาน 30 วัน (ไม่ผ่าน exit_monitor) · ช่อง = config.BREAKOUT_SLOT · ตัวคัดกรอง: ในระบบ +0.42 นอก −0.01/ไม้
+new_breakout = "--new-breakout" in sys.argv
+nbo_stats = {"สัญญาณ": 0, "เข้า": 0, "ช่องไม่ว่าง": 0}
+# --nbo-own-slot : NewBreakout มีช่องของตัวเอง (ไม่แย่ง Scoring/Sideway · ซ้อนไม้ Scoring ทิศเดียวกันได้) · tag _nboown
+if new_breakout and "--nbo-own-slot" in sys.argv:
+    _slot_of_cfg = cfg.slot_of
+    cfg.slot_of = lambda _s: "NewBreakout" if _s == "NewBreakout" else _slot_of_cfg(_s)
 # --no-key-level / --key-level : ทับ regime_check.KEY_LEVEL_REQUIRED (ระบบจริง False ตั้งแต่ 2026-10-13) — มีผลทั้ง
 #   REVERSAL-READY/Breakout และ Pullback · tag _nokl / _kl เฉพาะตอนต่างจากค่าระบบจริง
 _KL_LIVE = regime_check.KEY_LEVEL_REQUIRED
@@ -1684,6 +1695,17 @@ def step_position(pos, key, t, bar, now):
         r = ((pos["tp"] - pos["entry"]) if long_ else (pos["entry"] - pos["tp"])) / risk
         return close_pos(pos, key, now, pos["booked"] + pos["rem"] * r, "TP")
 
+    if pos.get("strategy") == "NewBreakout":   # --new-breakout: ออกด้วยกฎ low 10 วันเท่านั้น (ไม่ผ่าน exit_monitor)
+        _cl = df1d_at(now).iloc[:-1]
+        _day = _cl["time"].iloc[-1] if len(_cl) else None
+        if _day is not None and pos.get("_nbo_day") != _day:
+            pos["_nbo_day"] = _day
+            if _day >= pd.Timestamp(pos["time"]).normalize() and len(_cl) > 11 \
+                    and float(_cl["close"].iloc[-1]) < float(_cl["low"].iloc[-11:-1].min()):
+                r = (float(bar["close"]) - pos["entry"]) / risk
+                return close_pos(pos, key, now, r, "ปิด < low 10 วัน")
+        return None
+
     # 2) exit_monitor ตัวจริง — เรียกด้วย as_of + ctx (ไม้จำลองไม่มีใน journal)
     sim = SimPos(symbol, pos["direction"], pos["entry"], pos["sl"], pos["tp"], pos["rem"], pos["time"])
     try:
@@ -1960,6 +1982,40 @@ for n, row in enumerate(clock.to_dict("records")):
                 ra_stats["error ตอนหาสัญญาณ"] = ra_stats.get("error ตอนหาสัญญาณ", 0) + 1
                 if ra_stats["error ตอนหาสัญญาณ"] == 1:
                     print(f"  ⚠️ Reversal A หาสัญญาณ error ({now}): {type(_exc).__name__}: {_exc}")
+
+    # --new-breakout: เช็คครั้งเดียวต่อวัน (แท่ง 1D ปิดใหม่) · ดูกฎที่จุด parse ธง
+    if new_breakout:
+        try:
+            _d1 = df1d_at(now); _cl = _d1.iloc[:-1].reset_index(drop=True)
+            _dday = _cl["time"].iloc[-1] if len(_cl) else None
+        except Exception:
+            _dday = None
+        if _dday is not None and _dday != globals().get("_nbo_last_day") and len(_cl) > 60:
+            globals()["_nbo_last_day"] = _dday
+            _bi = len(_cl) - 2                                        # b = วันทะลุ · d = วันยืนยัน (แท่งปิดล่าสุด)
+            _lv, _ = levels.key_levels(_cl.iloc[:_bi + 1])           # แนว ณ ต้นวัน b (แถว b = แท่งยังไม่ปิด)
+            _cb0, _cb, _cd = (float(_cl["close"].iloc[k]) for k in (_bi - 1, _bi, _bi + 1))
+            _crossed = [L for L in _lv if _cb0 <= L < _cb]
+            _atr20 = _calc_atr_ra(_cl, 20)
+            if _crossed and _cd > max(_crossed) \
+                    and float(_cl["high"].iloc[_bi] - _cl["low"].iloc[_bi]) <= 2 * float(_atr20.iloc[_bi]):
+                try:
+                    _okb = bias_at(now) == "Long" and regime_eff(now)["structure"]["trend"].startswith("Long")
+                except Exception:
+                    _okb = False
+                if _okb:
+                    nbo_stats["สัญญาณ"] += 1
+                    if slot_of("NewBreakout") in _occupied:
+                        nbo_stats["ช่องไม่ว่าง"] += 1
+                    else:
+                        _e = float(bar["close"]); _sl = _e - 2 * float(_atr20.iloc[-1])
+                        positions[slot_of("NewBreakout")] = {
+                            "time": now, "direction": "Long", "entry": _e, "sl": _sl, "sl0": _sl,
+                            "tp": _e * 100, "tp0": _e * 100, "tp_fib": None, "strategy": "NewBreakout",
+                            "regime": "NEW-BREAKOUT", "booked": 0.0, "rem": 1.0, "cuts": 0,
+                            "pinned_swing": _sl, "pinned_atr_entry": None}
+                        nbo_stats["เข้า"] += 1
+                        continue
 
     # --cap-reentry: สิทธิ์กลับเข้าของไม้ที่ถูกเพดานปิด — ราคาปิดแท่งเลยจุดสุดขั้วเดิม + ช่อง Scoring ว่าง
     if reentry_watch is not None:
@@ -2442,6 +2498,8 @@ for n, row in enumerate(clock.to_dict("records")):
     if n % 2000 == 0:
         print(f"  ... {t}  ({n}/{len(clock)})  ปิดไปแล้ว {len(trades)} ไม้", flush=True)
 
+if new_breakout:
+    print(f"\n  NewBreakout: {nbo_stats}")
 mt5.shutdown()
 
 # ---------------------------------------------------------------------------
@@ -2666,6 +2724,8 @@ if bias_k is not None:
     _tag += f"_biask{bias_k:g}"
 if _boslot_arg and config.BREAKOUT_SLOT != _BOSLOT_LIVE:       # --breakout-slot สวนค่าระบบจริง (config)
     _tag += f"_boslot{config.BREAKOUT_SLOT}"
+if new_breakout:                                              # --new-breakout
+    _tag += "_nboown" if "--nbo-own-slot" in sys.argv else "_nbo"
 if rev_a_level != config.REV_A_REQUIRE_LEVEL:                  # --rev-a-level / --no-rev-a-level
     _tag += "_ralevel" if rev_a_level else "_noralevel"
 if pb_level != config.PULLBACK_LEVEL_INSTEAD_OF_ADX:            # --pb-level

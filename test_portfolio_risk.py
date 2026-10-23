@@ -262,15 +262,25 @@ def slot_check(label, on_book, regime, want_skip):
     return ok
 
 
-# 2026-10-22: Breakout ย้ายไปช่อง Scoring (config.BREAKOUT_SLOT) — REVERSAL-READY (Reversal เดิมปิด) เช็คช่อง Scoring
-print("\nช่องถือไม้ — ไม้ Breakout ครองช่อง Scoring (config.slot_of · BREAKOUT_SLOT):")
+# config.BREAKOUT_SLOT — ระบบจริง "Reversal" (2026-10-23 ถอยกลับ) · ทดสอบทั้งสองค่า
+print("\nช่องถือไม้ — ไม้ Breakout ครองช่อง Reversal (config.slot_of · ค่าระบบจริง):")
+results += [
+    slot_check("ถือ Breakout + REVERSAL-READY -> ห้ามเปิดซ้อน", ["Breakout"], "REVERSAL-READY", True),
+    slot_check("ถือ Reversal/Pullback + REVERSAL-READY -> ห้ามเปิดซ้อน", ["Reversal"], "REVERSAL-READY", True),
+    slot_check("ถือ Scoring + REVERSAL-READY -> ช่อง Reversal ว่าง", ["Scoring"], "REVERSAL-READY", False),
+    slot_check("ถือ Breakout + TREND -> ช่อง Scoring ว่าง", ["Breakout"], "TREND", False),
+    slot_check("ถือ Scoring + Breakout -> ช่องเต็มทั้งสอง", ["Scoring", "Breakout"], "TREND", True),
+]
+import config as _config  # noqa: E402
+_saved_bs0, _config.BREAKOUT_SLOT = _config.BREAKOUT_SLOT, "Scoring"
+print("ช่องถือไม้ — BREAKOUT_SLOT = Scoring (สวิตช์ทดลอง):")
 results += [
     slot_check("ถือ Breakout + REVERSAL-READY -> ห้ามเปิดซ้อน", ["Breakout"], "REVERSAL-READY", True),
     slot_check("ถือ Scoring + REVERSAL-READY -> ห้ามซ้อน Scoring", ["Scoring"], "REVERSAL-READY", True),
     slot_check("ถือ Reversal/Pullback + REVERSAL-READY -> ช่องว่าง", ["Reversal"], "REVERSAL-READY", False),
     slot_check("ถือ Breakout + TREND -> ช่อง Scoring เต็ม", ["Breakout"], "TREND", True),
-    slot_check("ถือ Scoring + Breakout -> ช่องเต็มทั้งสอง", ["Scoring", "Breakout"], "TREND", True),
 ]
+_config.BREAKOUT_SLOT = _saved_bs0
 
 
 # ── Breakout ข้ามด่าน peak ADX (2026-09-30 · config.BREAKOUT_IGNORES_MIN_PEAK) ─────────────────────
@@ -558,8 +568,8 @@ finally:
     _config.BREAKOUT_SLOT = _saved_bs
 print(f"  [{'ok  ' if _ok else 'FAIL'}] {'BREAKOUT_SLOT=Scoring -> Breakout ช่อง Scoring':52}")
 results.append(_ok)
-_ok = _config.BREAKOUT_SLOT == "Scoring" and _config.slot_of("Breakout") == "Scoring"
-print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: Breakout ช่อง Scoring (2026-10-22)':52} -> {_config.slot_of('Breakout')}")
+_ok = _config.BREAKOUT_SLOT == "Reversal" and _config.slot_of("Breakout") == "Reversal"
+print(f"  [{'ok  ' if _ok else 'FAIL'}] {'ค่าระบบจริง: Breakout ช่อง Reversal (2026-10-23)':52} -> {_config.slot_of('Breakout')}")
 results.append(_ok)
 print("\nPullback — กฎเข้า (pullback.pullback_direction):")
 results += [
@@ -738,7 +748,7 @@ print("\nPullback — ทางของ scan_symbol:")
 results += [
     route_check("ช่องว่าง + สัญญาณครบ -> Pullback (ก่อน Sideway)", [], "Long", False, "Pullback"),
     route_check("ถือ Scoring อยู่ -> ช่อง Reversal ว่าง -> Pullback", ["Scoring"], "Long", False, "Pullback"),
-    route_check("ถือ Breakout (ช่อง Scoring) -> ช่อง Reversal ว่าง -> Pullback", ["Breakout"], "Long", False, "Pullback"),
+    route_check("ถือ Breakout (ช่อง Reversal) -> ไม่ดู -> Sideway", ["Breakout"], "Long", False, "Sideway/อื่น"),
     route_check("ไม้เงายังไม่จบ -> ไม่เข้า Pullback", [], "Long", True, "ไม้เงาบล็อก"),
     route_check("Bias ตรง Structure -> ไม่ใช่ Pullback", [], "Short", False, "Sideway/อื่น"),
 ]

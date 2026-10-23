@@ -57,12 +57,12 @@
 | กลยุทธ์ | เข้าเมื่อ | SL / TP | ช่อง · เสี่ยง | เปลี่ยนล่าสุด |
 |---|---|---|---|---|
 | **Scoring** | regime TREND + Bias 1D = ทิศไม้ | swing − 2×ATR (exec) / Fib ×1.618 · R:R ≥ 1.5 · TP ≤ 18 ATR | ช่อง Scoring · 2% | — |
-| **Breakout** | REVERSAL-READY ที่ถูกพลิก (Reversal Short ตอนเทรนด์ 1D = Long) = **Long อย่างเดียวโดยโครงสร้าง** · ข้ามด่าน peak ADX | เหมือน Scoring | **ช่อง Scoring** (ห้ามซ้อน Scoring/Sideway symbol เดียวกัน) · 2% | **10-22 ย้ายช่อง Reversal -> Scoring (ผู้ใช้ · ยังไม่วัด replay)** · 09-30 |
+| **Breakout** | REVERSAL-READY ที่ถูกพลิก (Reversal Short ตอนเทรนด์ 1D = Long) = **Long อย่างเดียวโดยโครงสร้าง** · ข้ามด่าน peak ADX | เหมือน Scoring | ช่อง Reversal · 2% | **10-23 ถอยกลับช่อง Reversal** (ช่อง Scoring 10-22 แพ้ −9.42 / −36.13R) · 09-30 |
 | **Pullback** (`pullback.py`) | Bias 1D **สวน** Structure 4H มาแล้ว **≥ 6 แท่ง 4H** + ADX 4H ไม่ลง + divergence ทิศไม้ · ทุก regime | `reversal.compute_reversal_entry` · TP Fib ×3 · สำรอง 1.5R · R:R ≥ 1.5 | ช่อง Reversal · 2% | **10-20** ด่าน 6 แท่ง · 10-19 ปิดด่านตำแหน่ง + ไม้เงา (0.3 -> 0) |
 | **Retracement** (เดิม Reversal A · `rev_a.py`) — **เด้งสวนเทรนด์หลังแรงหมด เก็บครึ่งขา** | ADX 4H peak ≥ 28.5 โค้งลง + Bias 1D **=** Structure 4H + divergence สวนเทรนด์ **ที่แนว** (`levels.py` · ยอด/ก้น 1D อายุ ≤ 60 วัน หรือ H/L สัปดาห์-เดือนก่อน · ตั้งแต่ 10-23) -> แท่ง 1H ปิดทะลุ 12 แท่ง (≤ 48 ชม.) -> **market ทันที** (`REV_A_ENTRY` · R:R คิดจากราคาตลาด) | SL ก้น 24 ชม. −10% ของระยะ / TP 0.5 ของขาเดิม (≤ 4 swing) · R:R ≥ 1.5 | ช่อง Reversal · **1%** · journal/Telegram/log = "Retracement" (ไม้ก่อน 10-21 ใน journal = "Reversal") | **10-23 ต้องอยู่ที่แนว (`REV_A_REQUIRE_LEVEL` · ผู้ใช้ · ยังไม่วัด replay · นอกระบบไม่ดีขึ้น)** · 10-21 limit -> market (เท่าเดิมทั้งสองช่วง) + **เสี่ยง 2% -> 1%** (edge ยังไม่พิสูจน์) · TP 1.0 แพ้ทั้งสองช่วง |
 | **Sideway** (`sideway.py`) | regime NO_TRADE + ADX 4H < 20 ติด ≥ 22 แท่ง · ขอบกรอบ P90/P10 · โซน 15% | TP กลางกรอบ · ออกเมื่อ ADX ≥ 22 / **72 ชม.** | ช่อง Scoring · **1%** | 10-20 เสี่ยง 1% + 72 ชม. · 10-19 ถอด ADX ≥ 12.5 |
 
-ลำดับใน scan: ช่อง Reversal (Pullback/Retracement · `config.slot_of`) มาก่อน Sideway · Breakout อยู่ช่อง Scoring ตั้งแต่ 10-22 (`config.BREAKOUT_SLOT`) · ไม้ Reversal ใหม่ไม่ย้าย TP ไม้อื่น
+ลำดับใน scan: ช่อง Reversal (Pullback/Retracement/Breakout · `config.slot_of` · `config.BREAKOUT_SLOT`) มาก่อน Sideway · ไม้ Reversal ใหม่ไม่ย้าย TP ไม้อื่น
 · Reversal เดิม (`REVERSAL_ENABLED = False` ตั้งแต่ 10-13) เก็บไว้ครบ · `PULLBACK_ENABLED False + REVERSAL_ENABLED True` = ระบบก่อน 10-13
 
 **กฎ exit ที่ทำงานจริง** (เช็คด้วย `./run_wine.sh exit_monitor.py --rules` เสมอ — **อย่าอ่านจาก comment** ซึ่งอธิบายกฎที่ปิดแล้วยาวหลายสิบบรรทัด
